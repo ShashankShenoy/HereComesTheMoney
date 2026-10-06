@@ -1,16 +1,22 @@
 package com.moneybags.privacy.audit;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import com.moneybags.common.api.BusinessException;
 import com.moneybags.integration.BankingAccess;
-import com.moneybags.integration.CustomerHashService;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,12 +26,13 @@ import java.util.List;
 public class FinancialAuditController {
     private final JdbcTemplate jdbc;
     private final BankingAccess access;
-    private final CustomerHashService hashes;
+    private final ZoneId businessZone;
 
-    public FinancialAuditController(JdbcTemplate jdbc, BankingAccess access, CustomerHashService hashes) {
+    public FinancialAuditController(JdbcTemplate jdbc, BankingAccess access,
+                                    @Value("${moneybags.business-zone:Asia/Kolkata}") String businessZone) {
         this.jdbc = jdbc;
         this.access = access;
-        this.hashes = hashes;
+        this.businessZone = ZoneId.of(businessZone);
     }
 
     @GetMapping
@@ -33,8 +40,16 @@ public class FinancialAuditController {
     public ResponseEntity<List<FinancialEvent>> search(
             @RequestParam(required = false) Long transactionId,
             @RequestParam(required = false) Long accountId,
-            @RequestHeader(value = "X-Customer-Hash", required = false) String hash) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
         access.global("IAM_AUDIT_READ");
+        if ((fromDate != null && (fromDate.getYear() < 1 || fromDate.getYear() > 9999))
+                || (toDate != null && (toDate.getYear() < 1 || !toDate.isBefore(LocalDate.of(9999, 12, 31))))) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "DATE_RANGE", "Date is outside the supported audit range");
+        }
+        if (fromDate != null && toDate != null && fromDate.isAfter(toDate)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "DATE_RANGE", "From date must be on or before To date");
+        }
         // Posting already appends this evidence atomically. A replay adds no new history row.
         var sql = new StringBuilder("""
                 SELECT H.TXN_STATUS_HISTORY_ID,T.TXN_ID,T.TXN_TYPE,H.TO_STATUS,T.STATUS,
@@ -59,32 +74,31 @@ public class FinancialAuditController {
             parameters.add(accountId);
             parameters.add(accountId);
         }
+        // Inclusive calendar dates in the bank's business zone; next-day midnight is excluded.
+        if (fromDate != null) {
+            sql.append(" AND H.CHANGED_AT>=?");
+            parameters.add(fromDate.atStartOfDay(businessZone).toOffsetDateTime());
+        }
+        if (toDate != null) {
+            sql.append(" AND H.CHANGED_AT<?");
+            parameters.add(toDate.plusDays(1).atStartOfDay(businessZone).toOffsetDateTime());
+        }
         sql.append(" ORDER BY H.CHANGED_AT DESC,H.TXN_STATUS_HISTORY_ID DESC FETCH FIRST 100 ROWS ONLY");
         var events = jdbc.query(sql.toString(), (rs, row) -> {
             Long source = rs.getObject(6, Long.class), target = rs.getObject(8, Long.class);
-            boolean financialDetails = visible(source, hash) || visible(target, hash);
             return new FinancialEvent(rs.getLong(1), rs.getLong(2), rs.getString(3),
                     rs.getString(4), rs.getString(5), source, rs.getString(7), target,
-                    rs.getString(9), financialDetails ? rs.getBigDecimal(10) : null,
+                    rs.getString(9), rs.getBigDecimal(10),
                     rs.getString(11), rs.getString(12), rs.getString(13),
                     rs.getObject(14, OffsetDateTime.class), rs.getObject(15, Long.class));
         }, parameters.toArray());
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(events);
     }
 
-    private boolean visible(Long accountId, String hash) {
-        if (accountId == null || !hashes.permits(accountId, hash)) return false;
-        try {
-            access.account("TXN_READ", accountId);
-            return true;
-        } catch (BusinessException denied) {
-            return false;
-        }
-    }
-
     public record FinancialEvent(long eventId, long transactionId, String type, String event,
                                  String currentStatus, Long sourceAccountId, String sourceAccountEnding,
-                                 Long targetAccountId, String targetAccountEnding, BigDecimal amount,
+                                 Long targetAccountId, String targetAccountEnding,
+                                 @JsonSerialize(using = ToStringSerializer.class) BigDecimal amount,
                                  String currency, String actorUserId, String actor,
                                  OffsetDateTime occurredAt, Long originalTransactionId) {}
 }

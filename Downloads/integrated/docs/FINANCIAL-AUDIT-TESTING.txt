@@ -24,9 +24,9 @@ The script reads the three Oracle settings from the root .env without executing
 that file or displaying its credentials. It uses the existing offline dependency
 JARs, compiles all production sources and tests existing synthetic accounts 3/4
 (MCPALPHA0001/0002). It checks recording, account direction, balanced debit/credit,
-replay without duplicate logs, filters, amount protection, authorization,
+replay without duplicate logs, filters, audit amount visibility, authorization,
 failed-transfer rollback, Oracle immutability and approved reversal evidence.
-It rolls back all test transfers, sessions, role grants and temporary key changes,
+It rolls back all test transfers, sessions and temporary role grants,
 and checks restored balances and record counts across modules 1-10 and MBX.
 Oracle identity sequences may advance during rollback tests.
 
@@ -46,8 +46,8 @@ dependencies with Maven, then rerun the script:
   npm --prefix .\frontend run check
   npm --prefix .\frontend test
 
-Expected: all tests pass, including the four financial-audit tests. Financial tests verify account direction, exact
-and protected amounts, escaped text, reversals, empty/one-sided postings, loading
+Expected: all tests pass, including the eight financial-audit tests. Financial tests verify account direction, exact
+amounts for audit readers, escaped text, reversals, empty/one-sided postings, loading
 the endpoint, and preserving existing IAM panels if that endpoint fails.
 
 3. Build and run the application against Oracle
@@ -102,10 +102,16 @@ c. As a user with GLOBAL IAM_AUDIT_READ, open Audit trail -> Financial transacti
    and target IDs, masked account endings, actor and recorded timestamp.
 d. Search by the target account ID; the same transfer must appear. Searching by
    an unrelated account ID together with that transaction ID must return none.
-e. Amount reads additionally require TXN_READ covering either account and a valid
-   account-holder access key. Without these, Protected is expected. Use the
-   existing Account-holder access key screen, then Search / refresh to read the
-   authorized amount. Do not broaden grants merely to hide Protected.
+e. The exact transaction amount must be visible to every user authorized to open
+   the financial audit trail. No account-holder access key or TXN_READ grant is
+   required for the amount in this audit view.
+   Amount is returned as a decimal string so large values retain their cents in
+   the browser. A missing amount is displayed as a dash, never as zero.
+   Use From date and To date to filter the recorded audit-event date. Both dates
+   include their whole day in the configured moneybags.business-zone (default
+   Asia/Kolkata). Either date may be blank; a reversed range returns an error.
+   Dates combine with transaction/account IDs. Clearing both dates restores the
+   existing latest-100 view. No transaction data is modified by these filters.
 f. Replay the exact same transfer command with the same request key. Expect the
    original transaction ID, unchanged balances and still one POSTED audit row.
    Changing the amount under that key must return a conflict.
