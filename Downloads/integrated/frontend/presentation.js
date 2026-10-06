@@ -1,7 +1,8 @@
 // Display-only formatting. Financial values are kept as decimal strings to avoid
 // changing the precision returned by the banking services.
+import {locale} from './i18n.js';
 const currencyDigits=code=>{
-  try{return new Intl.NumberFormat('en-IN',{style:'currency',currency:code}).resolvedOptions().maximumFractionDigits;}
+  try{return new Intl.NumberFormat(locale,{style:'currency',currency:code}).resolvedOptions().maximumFractionDigits;}
   catch{return 2;}
 };
 export function formatDecimal(value,{minimumFractionDigits=0,grouping='indian'}={}){
@@ -29,7 +30,7 @@ export function formatDate(value){
   const dateOnly=/^\d{4}-\d{2}-\d{2}$/.test(raw);
   const parsed=new Date(dateOnly?raw+'T00:00:00':raw);
   if(Number.isNaN(parsed.getTime()))return raw;
-  const parts=new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',...(dateOnly?{}:{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})}).formatToParts(parsed);
+  const parts=new Intl.DateTimeFormat(locale,{day:'2-digit',month:'short',year:'numeric',...(dateOnly?{}:{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})}).formatToParts(parsed);
   const get=type=>parts.find(part=>part.type===type)?.value||'';
   return `${get('day')}-${get('month').slice(0,3)}-${get('year')}`+(dateOnly?'':` ${get('hour')}:${get('minute')}`);
 }

@@ -33,8 +33,14 @@ public class AssistantChatService {
             CustomerHashService audit,ObjectMapper json) {
         this.tools=tools;this.skills=skills;this.model=model;this.audit=audit;this.json=json;
     }
-    public Reply reply(String message,String conversationId,String customerHash) {
+    public Reply reply(String message,String conversationId,String customerHash,String requestedLocale) {
         var actor=CurrentActor.get();
+        // Only these three fixed locales may influence response language; never trust a free-form prompt here.
+        String locale=switch(requestedLocale==null?"en-IN":requestedLocale) {
+            case "hi-IN" -> "hi-IN";
+            case "kn-IN" -> "kn-IN";
+            default -> "en-IN";
+        };
         if(!"CUSTOMER".equals(actor.userType()) && !"EMPLOYEE".equals(actor.userType()))
             throw new BusinessException(HttpStatus.FORBIDDEN,"ASSISTANT_UNAVAILABLE","The assistant is for customers and officers");
         if(message==null || message.isBlank() || message.length()>2000)
@@ -55,7 +61,7 @@ public class AssistantChatService {
             String answer=null;
             for(int round=0;round<6;round++) {
                 Map<String,Object> request=new LinkedHashMap<>();
-                model.selectModel(request);request.put("instructions",skills.instructions());
+                model.selectModel(request);request.put("instructions",skills.instructions()+"\n\n"+languageInstruction(locale));
                 request.put("input",input);request.put("tools",tools.available().stream().map(AssistantTools.Definition::model).toList());
                 request.put("parallel_tool_calls",false);request.put("store",false);
                 if(model.requiresEncryptedReasoning())request.put("include",List.of("reasoning.encrypted_content"));
@@ -90,7 +96,11 @@ public class AssistantChatService {
                     input.add(Map.of("type","function_call_output","call_id",call.path("call_id").asText(),"output",result));
                 }
             }
-            if(answer==null || answer.isBlank())answer="I couldn't complete that request. Please try a more specific request.";
+            if(answer==null || answer.isBlank())answer=switch(locale) {
+                case "hi-IN" -> "मैं अनुरोध पूरा नहीं कर सका। कृपया अधिक स्पष्ट अनुरोध लिखें।";
+                case "kn-IN" -> "ವಿನಂತಿಯನ್ನು ಪೂರ್ಣಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಇನ್ನಷ್ಟು ಸ್ಪಷ್ಟವಾಗಿ ಕೇಳಿ.";
+                default -> "I couldn't complete that request. Please try a more specific request.";
+            };
             conversation.turns.add(Map.of("role","user","content",message.trim()));
             conversation.turns.add(Map.of("role","assistant","content",answer));
             while(conversation.turns.size()>8)conversation.turns.subList(0,2).clear();
@@ -101,6 +111,17 @@ public class AssistantChatService {
     private String quoted(String value) {
         try { return json.writeValueAsString(value); }
         catch(Exception e) { return "\"Request denied\""; }
+    }
+    /** Tells the model which user-facing language to use without altering tool schemas or safety rules. */
+    private static String languageInstruction(String locale) {
+        String language=switch(locale) {
+            case "hi-IN" -> "Hindi (हिन्दी)";
+            case "kn-IN" -> "Kannada (ಕನ್ನಡ)";
+            default -> "English";
+        };
+        return "Reply to the user in "+language+". Keep account numbers, identifiers, currency codes, "
+            +"amounts, dates, status codes, API names, and tool arguments exact. "
+            +"Do not translate or change tool calls, authorization requirements, or confirmation steps.";
     }
     private static String extractText(JsonNode response) {
         StringBuilder text=new StringBuilder();

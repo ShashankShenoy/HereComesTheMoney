@@ -1,5 +1,6 @@
 import {enhanceForms,validateJet,disposeJet} from './jet.js';
 import {formatDate} from './presentation.js';
+import {localize,t,tField} from './i18n.js';
 export const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const date=formatDate;
 export const badge=value=>`<span class="badge ${esc(['ACTIVE','APPROVED','SUCCESS'].includes(value)?'green':['SUBMITTED','PENDING_ACTIVATION','PENDING'].includes(value)?'amber':['DENIED','DISABLED','REVOKED','REJECTED','CLOSED','FAILED'].includes(value)?'red':'gray')}">${esc(String(value||'—').replaceAll('_',' '))}</span>`;
@@ -12,7 +13,7 @@ export function table(headers,rows,empty='No records yet.'){
   return `<div class="table-wrap"><table><thead><tr>${headers.map((h,i)=>`<th${numeric[i]?' class="numeric"':''}>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td${numeric[i]?' class="numeric"':''}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 export const action=(label,action,id='',cls='btn small')=>`<button class="${esc(cls)}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
-export function errorText(error){return [error.message,...Object.entries(error.fieldErrors||{}).map(([key,value])=>`${key}: ${value}`),error.correlationId?`Reference: ${error.correlationId}`:''].filter(Boolean).join('\n');}
+export function errorText(error){return [t(error.message),...Object.entries(error.fieldErrors||{}).map(([key,value])=>`${tField(key)}: ${t(value)}`),error.correlationId?`${t('Reference')}: ${error.correlationId}`:''].filter(Boolean).join('\n');}
 export function toast(message,error=false){const el=document.querySelector('#toast');el.textContent=message;el.className=`show ${error?'error':''}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.className='',error?10000:4500);}
 export function closeDialog(){const el=document.querySelector('#dialog');el.close();disposeJet(el).catch(()=>{});}
 export function dialog(title,content,onSubmit){
@@ -22,5 +23,6 @@ export function dialog(title,content,onSubmit){
   el.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeDialog);
   el.querySelector('form').onsubmit=async event=>{event.preventDefault();if(!onSubmit||!await validateJet(event.target))return;const btn=el.querySelector('[type=submit]');btn.disabled=true;el.querySelector('.form-error').textContent='';try{if(await onSubmit(new FormData(event.target))!==false)closeDialog();}catch(error){el.querySelector('.form-error').textContent=errorText(error);}finally{btn.disabled=false;}};
   if(!el.open)el.showModal();
+  localize(el);
   enhanceForms(el).catch(e=>{el.querySelector('.form-error').textContent=errorText(e);});
 }
