@@ -1,0 +1,11 @@
+backend/target/
+frontend/node_modules/
+frontend/dist/
+.runtime/
+.env.ps1
+*.log
+
+uploads/
+.env
+*.pem
+*.p12

@@ -1,0 +1,21 @@
+{
+  "name": "moneybags-integrated-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unified Oracle JET and Knockout banking workspace",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node tools/build.mjs",
+    "test": "node --test",
+    "check": "node --check app.js && node --check assistant.js && node --check assistant-markdown.js && node --check presentation.js && node --check api.js && node --check banking.js && node --check domains.js && node --check server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@oracle/oraclejet": "21.0.1",
+    "knockout": "3.5.3",
+    "requirejs": "2.3.8"
+  }
+}

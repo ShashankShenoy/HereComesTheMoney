@@ -1,0 +1,1158 @@
+[
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\config\\BootstrapConfiguration.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\config\\BootstrapConfiguration.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\config\\SecurityConfiguration.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\config\\SecurityConfiguration.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\config\\TimeConfiguration.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\config\\TimeConfiguration.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05AccountPositionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05AccountPositionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05ConsumerInboxRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05ConsumerInboxRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05FeeAssessmentRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05FeeAssessmentRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05FundsHoldRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05FundsHoldRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlAccountRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlAccountRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlJournalRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlJournalRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlPeriodCloseRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlPeriodCloseRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlPostingRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlPostingRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlProductMappingRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05GlProductMappingRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05IdempotencyRecordRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05IdempotencyRecordRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05OutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05OutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05PostingFenceHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05PostingFenceHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05PostingFenceRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05PostingFenceRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05SecurityAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05SecurityAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnApprovalRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnApprovalRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnStateTransitionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnStateTransitionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnStatusHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnStatusHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnTransactionLogRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05TxnTransactionLogRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05VelocityUsageRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\model\\M05VelocityUsageRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\transaction\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\transaction\\service\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\controller\\ProductController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\controller\\ProductController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\dto\\ProductDtos.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\dto\\ProductDtos.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAccountRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAccountRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmApprovalRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmApprovalRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAvailabilityRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmAvailabilityRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmBalanceRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmBalanceRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmEligibilityRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmEligibilityRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmFeeRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmFeeRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInterestRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInterestRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInterestTierRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmInterestTierRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLimitRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLimitRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLoanAllocationRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLoanAllocationRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLoanRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmLoanRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmOutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmOutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmOverridePolicyRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmOverridePolicyRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmPenaltyRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmPenaltyRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmProductRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmProductRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmProductVersionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmProductVersionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmTransactionRuleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmTransactionRuleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmVersionTreatmentRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\model\\M03PmVersionTreatmentRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\service\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductDefinitionsPort.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductDefinitionsPort.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductRuleCatalog.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductRuleCatalog.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductRules.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductRules.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\product\\service\\ProductService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ClearingBatchItemRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ClearingBatchItemRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ClearingBatchRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ClearingBatchRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ConsumerInboxRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ConsumerInboxRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06IdempotencyRecordRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06IdempotencyRecordRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06OutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06OutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentApprovalRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentApprovalRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentDirectionTransitionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentDirectionTransitionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentInstructionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentInstructionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentReconciliationRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentReconciliationRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentReconciliationRunRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentReconciliationRunRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentStateTransitionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentStateTransitionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentStatusHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06PaymentStatusHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailDispatchAttemptRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailDispatchAttemptRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailDispatchRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailDispatchRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailStatusEvidenceRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06RailStatusEvidenceRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ReconciliationExceptionHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ReconciliationExceptionHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ReconciliationExceptionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06ReconciliationExceptionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06SecurityAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\model\\M06SecurityAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\payment\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payment\\service\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\AuthController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\AuthController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\IamController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\IamController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\IamDtos.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\IamDtos.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\LoginRequest.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\LoginRequest.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\LoginResponse.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\LoginResponse.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\RefreshRequest.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\RefreshRequest.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\SessionResponse.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\dto\\SessionResponse.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAccessRequestRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAccessRequestRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAccessRequestScopeRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAccessRequestScopeRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAuthFactorRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamAuthFactorRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamCredentialRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamCredentialRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamCustomerLinkRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamCustomerLinkRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamInboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamInboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamMenuItemRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamMenuItemRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamOutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamOutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamPermissionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamPermissionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRefreshTokenRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRefreshTokenRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRoleAuthorityRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRoleAuthorityRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRolePermissionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRolePermissionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRoleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamRoleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamSessionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamSessionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRoleRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRoleRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRoleScopeRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRoleScopeRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\model\\M01IamUserRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\IamAdminRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\IamAdminRepository.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\IamRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\IamRepository.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\AuthorizationService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\AuthorizationService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\BearerSessionFilter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\BearerSessionFilter.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\IamDeniedAuditFilter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\IamDeniedAuditFilter.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\IamGuard.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\IamGuard.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\JsonSecurityErrors.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\JsonSecurityErrors.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\security\\UserPrincipal.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\security\\UserPrincipal.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\AccessDecisionService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\AccessDecisionService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\BootstrapService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\BootstrapService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\CustomerAccessLifecycle.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\CustomerAccessLifecycle.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\DeniedAuditService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\DeniedAuditService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\IamAdminService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\IamAdminService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\LoginService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\LoginService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\MfaService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\MfaService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\iam\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\iam\\service\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiDocumentationController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiDocumentationController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiError.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiError.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiResponse.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\ApiResponse.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\BusinessException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\BusinessException.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\Correlation.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\Correlation.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\CorrelationFilter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\CorrelationFilter.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\GlobalExceptionHandler.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\GlobalExceptionHandler.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\PageQuery.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\PageQuery.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\PageResult.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\PageResult.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\api\\SystemController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\api\\SystemController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\BusinessRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\BusinessRepository.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\DbColumn.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\DbColumn.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\Money.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\Money.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaInspector.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaInspector.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaRepository.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaRowMapper.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaRowMapper.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaTable.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\database\\SchemaTable.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainAccess.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainAccess.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainDeniedAudit.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainDeniedAudit.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainDeniedAuditFilter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\security\\DomainDeniedAuditFilter.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\common\\security\\PrivateData.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\common\\security\\PrivateData.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\controller\\CifController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\controller\\CifController.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\dto\\CifDtos.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\dto\\CifDtos.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifAddressRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifAddressRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifConsentRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifConsentRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifContactRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifContactRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifCustomerRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifCustomerRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifIdentifierRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifIdentifierRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifInboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifInboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifNameRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifNameRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifOutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifOutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifPartyRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifPartyRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifRelationshipRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02CifRelationshipRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycCaseRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycCaseRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycDocumentRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycDocumentRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycReviewRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\model\\M02KycReviewRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\service\\CifService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\service\\CifService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\service\\CustomerFactsPort.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\service\\CustomerFactsPort.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\service\\KycDocumentService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\service\\KycDocumentService.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\cif\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\cif\\service\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\controller\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\controller\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\dto\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\dto\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountAuditEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountAuditEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountClosureRequestRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountClosureRequestRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountControlSyncRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountControlSyncRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountFinancialProjectionEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountFinancialProjectionEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountInterestOverrideRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountInterestOverrideRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountLimitRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountLimitRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountMajorityReviewRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountMajorityReviewRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountNomineeRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountNomineeRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountOpeningEvidenceRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountOpeningEvidenceRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountPartyRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountPartyRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountProductVersionHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountProductVersionHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountRestrictionRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountRestrictionRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountStatusHistoryRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AccountStatusHistoryRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AcctInboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AcctInboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AcctOutboxEventRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04AcctOutboxEventRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04BankAccountRow.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\model\\M04BankAccountRow.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\repository\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\repository\\package-info.java"
+  },
+  {
+    "source": "Module_1_2_3\\moneybags-backend\\src\\main\\java\\com\\moneybags\\account\\service\\package-info.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\service\\package-info.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\IntegrationProperties.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\IntegrationProperties.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\AccountController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\AccountController.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\ApiException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\ApiException.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\Errors.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\Errors.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\InboundController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\InboundController.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\Models.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\Models.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\api\\PeerAccountController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\api\\PeerAccountController.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\db\\AccountStore.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\db\\AccountStore.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\db\\EventStore.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\db\\EventStore.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\db\\WorkflowStore.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\db\\WorkflowStore.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\domain\\AccountNumbers.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\domain\\AccountNumbers.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\domain\\AccountService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\domain\\AccountService.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\domain\\InboundService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\domain\\InboundService.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\domain\\ProjectionPolicy.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\domain\\ProjectionPolicy.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\integration\\ModuleClients.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\integration\\ModuleClients.java"
+  },
+  {
+    "source": "Module_4\\backend\\src\\main\\java\\com\\moneybags\\account\\security\\Actor.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\account\\security\\Actor.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\ApiErrors.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\ApiErrors.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\ApiException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\ApiException.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\Contracts.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\Contracts.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\LedgerController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\LedgerController.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\OperationsContracts.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\OperationsContracts.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\OperationsController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\OperationsController.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\api\\TransactionController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\api\\TransactionController.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\core\\AccountCatalog.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\core\\AccountCatalog.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\core\\LedgerService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\core\\LedgerService.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\core\\OperationsService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\core\\OperationsService.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-5\\backend\\src\\main\\java\\com\\moneybags\\txn\\core\\PaymentCatalog.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\txn\\core\\PaymentCatalog.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\api\\ApiErrors.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\api\\ApiErrors.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\api\\ApiException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\api\\ApiException.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\api\\Contracts.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\api\\Contracts.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\api\\OperationsController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\api\\OperationsController.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\api\\PaymentController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\api\\PaymentController.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\Actor.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\Actor.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\DispatchService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\DispatchService.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\EventEmitter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\EventEmitter.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\IntegrationChecks.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\IntegrationChecks.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\OperationsService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\OperationsService.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\PaymentRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\PaymentRepository.java"
+  },
+  {
+    "source": "Module_5_6\\outputs\\moneybags-module-6\\backend\\src\\main\\java\\com\\moneybags\\payments\\core\\PaymentService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\payments\\core\\PaymentService.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\api\\TreasuryController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\api\\TreasuryController.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\api\\TreasuryRequests.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\api\\TreasuryRequests.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\config\\SchemaHealthIndicator.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\config\\SchemaHealthIndicator.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\config\\TreasuryAccess.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\config\\TreasuryAccess.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\config\\TreasuryProperties.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\config\\TreasuryProperties.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\domain\\DomainException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\domain\\DomainException.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\domain\\TreasuryModels.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\domain\\TreasuryModels.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\repository\\TreasuryRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\repository\\TreasuryRepository.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\service\\TreasuryService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\service\\TreasuryService.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\web\\ApiExceptionHandler.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\web\\ApiExceptionHandler.java"
+  },
+  {
+    "source": "Module_7\\src\\main\\java\\com\\moneybags\\treasury\\web\\CorrelationIdFilter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\treasury\\web\\CorrelationIdFilter.java"
+  },
+  {
+    "source": "Module_8\\backend\\src\\main\\java\\com\\moneybags\\loan\\LoanController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\loan\\LoanController.java"
+  },
+  {
+    "source": "Module_8\\backend\\src\\main\\java\\com\\moneybags\\loan\\LoanDtos.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\loan\\LoanDtos.java"
+  },
+  {
+    "source": "Module_8\\backend\\src\\main\\java\\com\\moneybags\\loan\\LoanService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\loan\\LoanService.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\audit\\AuditController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\audit\\AuditController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\audit\\AuditRetentionPolicy.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\audit\\AuditRetentionPolicy.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\audit\\ConsentAuditWriter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\audit\\ConsentAuditWriter.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseRepository.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseRoutingPolicy.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseRoutingPolicy.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\casework\\CaseService.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\casework\\ComplianceCase.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\casework\\ComplianceCase.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\common\\ApiException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\common\\ApiException.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\common\\ApiExceptionHandler.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\common\\ApiExceptionHandler.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\common\\PageResponse.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\common\\PageResponse.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\common\\RequestContext.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\common\\RequestContext.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\common\\RequestContextResolver.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\common\\RequestContextResolver.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\config\\IntegrationProperties.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\config\\IntegrationProperties.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentDecision.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentDecision.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentRepository.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\consent\\ConsentService.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\consent\\SubjectVerificationPort.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\consent\\SubjectVerificationPort.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\export\\EvidenceExportController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\export\\EvidenceExportController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHold.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHold.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldRepository.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\hold\\LegalHoldService.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\integration\\DomainAuditInboxController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\integration\\DomainAuditInboxController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\integration\\HttpSubjectVerificationAdapter.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\integration\\HttpSubjectVerificationAdapter.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\outbox\\OutboxEventRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\outbox\\OutboxEventRepository.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\outbox\\OutboxService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\outbox\\OutboxService.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\policy\\PolicyController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\policy\\PolicyController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\ProcessingPurpose.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\ProcessingPurpose.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeController.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeRepository.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeRepository.java"
+  },
+  {
+    "source": "Module_9\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\privacy\\purpose\\PurposeService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\Actor.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\Actor.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\ApiException.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\ApiException.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\ApiModels.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\ApiModels.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\AuditService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\AuditService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\AuthorizationService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\AuthorizationService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\CatalogController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\CatalogController.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\CatalogService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\CatalogService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\DecisionClient.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\DecisionClient.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\DeliveryService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\DeliveryService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\Errors.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\Errors.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\EventService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\EventService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\Hashing.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\Hashing.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\LedgerReader.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\LedgerReader.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\OutboxService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\OutboxService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\RequestService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\RequestService.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\StatementController.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\StatementController.java"
+  },
+  {
+    "source": "Module_10\\outputs\\module-10\\backend\\src\\main\\java\\com\\moneybags\\statements\\StatementService.java",
+    "destination": "backend\\src\\main\\java\\com\\moneybags\\statements\\StatementService.java"
+  }
+]

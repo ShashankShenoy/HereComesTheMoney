@@ -1,0 +1,21 @@
+package com.moneybags.product.model;
+
+import com.moneybags.common.database.DbColumn;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+
+/** Generated from the supplied Oracle schema, including ALTER TABLE additions.
+ * Persistence model only; expose a separate DTO to avoid returning sensitive fields. */
+public record M03PmAvailabilityRow(
+    @DbColumn(name="AVAILABILITY_ID", generated=true, identity=true, nullable=false) BigDecimal availabilityId,
+    @DbColumn(name="PRODUCT_VERSION_ID", generated=false, identity=false, nullable=false) BigDecimal productVersionId,
+    @DbColumn(name="SEGMENT_CODE", generated=false, identity=false, nullable=true) String segmentCode,
+    @DbColumn(name="BRANCH_CODE", generated=false, identity=false, nullable=true) String branchCode,
+    @DbColumn(name="CHANNEL_CODE", generated=false, identity=false, nullable=true) String channelCode,
+    @DbColumn(name="CURRENCY_CODE", generated=false, identity=false, nullable=false) String currencyCode,
+    @DbColumn(name="OFFER_FROM_AT", generated=false, identity=false, nullable=false) OffsetDateTime offerFromAt,
+    @DbColumn(name="OFFER_TO_AT", generated=false, identity=false, nullable=true) OffsetDateTime offerToAt,
+    @DbColumn(name="PRIORITY_NO", generated=false, identity=false, nullable=false) Long priorityNo
+) {}
