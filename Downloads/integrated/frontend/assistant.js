@@ -1,6 +1,7 @@
 import {api,getSession} from './api.js';
 import {esc,errorText} from './ui.js';
 import {renderAssistantMarkdown} from './assistant-markdown.js';
+import {locale,t} from './i18n.js';
 
 let identity='';
 let conversationId=null;
@@ -19,8 +20,8 @@ export function resetAssistant(){identity='';conversationId=null;messages=[];act
 
 const welcome=()=>{
   const customer=getSession()?.user?.userType==='CUSTOMER';
-  const suggestions=customer?['What is my balance?','Show my recent transactions','List my beneficiaries']
-    :['Show accounts in my scope','Find a customer','List pending beneficiaries'];
+  const suggestions=(customer?['What is my balance?','Show my recent transactions','List my beneficiaries']
+    :['Show accounts in my scope','Find a customer','List pending beneficiaries']).map(t);
   return `<div class="assistant-welcome"><span class="assistant-spark" aria-hidden="true">✦</span><h3>Banking assistant</h3><p>Ask about information and operations available to your account and permissions.</p><div class="assistant-suggestions">${suggestions.map(s=>`<button type="button" data-assistant-suggestion="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
 };
 const bubbles=()=>messages.length?messages.map(m=>`<div class="assistant-message ${m.role==='user'?'mine':'theirs'}"><span>${m.role==='user'?'You':'Moneybags'}</span><div class="assistant-markdown">${m.role==='user'?`<p>${esc(m.text).replace(/\n/g,'<br>')}</p>`:renderAssistantMarkdown(m.text)}</div></div>`).join(''):welcome();
@@ -75,10 +76,10 @@ async function sendMessage(form){
   const owner=identity;
   input.value='';busy=true;messages.push({role:'user',text:message});paint();
   try{
-    const response=await api('/assistant/chat',{method:'POST',body:{message,conversationId}});
+    const response=await api('/assistant/chat',{method:'POST',body:{message,conversationId,locale}});
     if(identity!==owner)return;
     conversationId=response.conversationId;
-    messages.push({role:'assistant',text:response.answer||'I could not produce a response. Please try again.'});
+    messages.push({role:'assistant',text:response.answer||t('I could not produce a response. Please try again.')});
     for(const a of response.pendingActions||[]){
       if(a.uiAction==='ADD_BENEFICIARY' && actions.some(openForm=>openForm.status==='PENDING' && openForm.uiAction==='ADD_BENEFICIARY' && openForm.displayName?.toLocaleLowerCase()===a.displayName?.toLocaleLowerCase()))continue;
       actions.push({...a,status:'PENDING',form:a.uiAction==='ADD_BENEFICIARY'?{displayName:a.displayName||'',accountToken:'',confirmToken:'',bankCode:''}:undefined});
@@ -113,7 +114,12 @@ export function bindAssistant(){
       const result=await api('/beneficiaries',{method:'POST',body:{displayName:name,accountToken:token,bankCode}});
       if(identity!==owner)return;
       action.status='COMPLETED';action.form=null;
-      messages.push({role:'assistant',text:`${name} was registered as beneficiary ${result.beneficiaryId}. Status: ${result.status}. An independent bank officer must verify the beneficiary before you can make a payment.`});
+      const confirmation=locale==='hi-IN'
+        ?`${name} को लाभार्थी ${result.beneficiaryId} के रूप में पंजीकृत किया गया। स्थिति: ${result.status}। भुगतान से पहले स्वतंत्र बैंक अधिकारी सत्यापन आवश्यक है।`
+        :locale==='kn-IN'
+          ?`${name} ಅವರನ್ನು ಫಲಾನುಭವಿ ${result.beneficiaryId} ಆಗಿ ನೋಂದಾಯಿಸಲಾಗಿದೆ. ಸ್ಥಿತಿ: ${result.status}. ಪಾವತಿಗೂ ಮೊದಲು ಸ್ವತಂತ್ರ ಬ್ಯಾಂಕ್ ಅಧಿಕಾರಿ ಪರಿಶೀಲನೆ ಅಗತ್ಯವಿದೆ.`
+          :`${name} was registered as beneficiary ${result.beneficiaryId}. Status: ${result.status}. An independent bank officer must verify the beneficiary before you can make a payment.`;
+      messages.push({role:'assistant',text:confirmation});
       paint();
     }catch(failure){if(identity===owner){error.textContent=errorText(failure);button.disabled=false;}}
   };
@@ -130,7 +136,12 @@ export function bindAssistant(){
       const result=await api(`/assistant/intents/${encodeURIComponent(action.intentId)}/confirm`,{method:'POST'});
       if(identity!==owner)return;
       action.status='COMPLETED';
-      messages.push({role:'assistant',text:result.action==='INTERNAL_TRANSFER'?`Internal transfer ${result.resultRef} was posted. The recipient account has been credited.`:result.action==='PAYMENT_INITIATE'?`Payment request ${result.resultRef} was submitted and is awaiting bank processing.`:`Beneficiary ${result.resultRef} was verified.`});
+      const confirmation=locale==='hi-IN'
+        ?result.action==='INTERNAL_TRANSFER'?`आंतरिक स्थानांतरण ${result.resultRef} पोस्ट हो गया। प्राप्तकर्ता खाते में राशि जमा हो गई है।`:result.action==='PAYMENT_INITIATE'?`भुगतान अनुरोध ${result.resultRef} जमा हो गया है और बैंक प्रसंस्करण की प्रतीक्षा में है।`:`लाभार्थी ${result.resultRef} सत्यापित हो गया।`
+        :locale==='kn-IN'
+          ?result.action==='INTERNAL_TRANSFER'?`ಆಂತರಿಕ ವರ್ಗಾವಣೆ ${result.resultRef} ದಾಖಲಾಗಿದೆ. ಸ್ವೀಕರಿಸುವವರ ಖಾತೆಗೆ ಹಣ ಜಮಾ ಆಗಿದೆ.`:result.action==='PAYMENT_INITIATE'?`ಪಾವತಿ ವಿನಂತಿ ${result.resultRef} ಸಲ್ಲಿಸಲಾಗಿದೆ ಮತ್ತು ಬ್ಯಾಂಕ್ ಪ್ರಕ್ರಿಯೆಗೆ ಕಾಯುತ್ತಿದೆ.`:`ಫಲಾನುಭವಿ ${result.resultRef} ಪರಿಶೀಲಿಸಲಾಗಿದೆ.`
+          :result.action==='INTERNAL_TRANSFER'?`Internal transfer ${result.resultRef} was posted. The recipient account has been credited.`:result.action==='PAYMENT_INITIATE'?`Payment request ${result.resultRef} was submitted and is awaiting bank processing.`:`Beneficiary ${result.resultRef} was verified.`;
+      messages.push({role:'assistant',text:confirmation});
     }catch(error){if(identity===owner)messages.push({role:'assistant',text:errorText(error)});}
     finally{if(identity===owner)paint();}
   };

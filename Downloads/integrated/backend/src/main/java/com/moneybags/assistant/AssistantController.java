@@ -15,7 +15,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/assistant")
 public class AssistantController {
-    public record ChatRequest(@NotBlank @Size(max=2000)String message,String conversationId) {}
+    public record ChatRequest(@NotBlank @Size(max=2000)String message,String conversationId,String locale) {}
     private final AssistantChatService chat;
     private final AssistantTools tools;
     private final AssistantIntentService intents;
@@ -33,7 +33,7 @@ public class AssistantController {
     @PostMapping("/chat")
     public AssistantChatService.Reply chat(@Valid @RequestBody ChatRequest request,
             @RequestHeader(value="X-Customer-Hash",required=false)String customerHash) {
-        return chat.reply(request.message(),request.conversationId(),customerHash);
+        return chat.reply(request.message(),request.conversationId(),customerHash,request.locale());
     }
     @PostMapping("/intents/{id}/confirm")
     public Map<String,Object> confirm(@PathVariable String id) { return intents.confirm(id); }

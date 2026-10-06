@@ -11,6 +11,7 @@ import {
   toast,
 } from "./ui.js";
 import { formatAmount, formatDate, fieldKind, rowCurrency } from "./presentation.js";
+import {tField} from './i18n.js';
 
 // Domain screens own their selection state; shared authentication remains in api.js.
 const state = {
@@ -62,9 +63,9 @@ const heading = (name, module, sub, tools = "") =>
   `<div class="page-heading"><div><p class="eyebrow">${module === "02" ? "CUSTOMER INFORMATION" : "PRODUCT MANAGEMENT"}</p><h1>${esc(name)}</h1><p>${esc(sub)}</p></div>${tools}</div>`;
 const grid = (body) => `<div class="grid2">${body}</div>`;
 const fieldLabels = {HOME_BRANCH_REF:"Home branch",SEGMENT_CODE:"Segment",RISK_LEVEL:"Risk level",CIF_NUMBER:"CIF number",KYC_STATUS:"KYC status",CURRENCY_CODE:"Currency",VERSION_NO:"Version",VERSION_STATE:"Status",DEFAULT_TXN_ACTION:"Default transaction action",PRODUCT_CODE:"Product code",PRODUCT_TYPE:"Product type",BUSINESS_OWNER_REF:"Business owner",EFFECTIVE_FROM_AT:"Effective from",EFFECTIVE_TO_AT:"Effective to",SALES_START_AT:"Sales start",CREATED_AT:"Created"};
-const label = (value) => fieldLabels[value] || String(value)
+const label = (value) => tField(fieldLabels[value] || String(value)
   .toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())
-  .replace(/\b(Cif|Kyc|Gl|Fx|Id|Pdf|Url)\b/g, word => word.toUpperCase());
+  .replace(/\b(Cif|Kyc|Gl|Fx|Id|Pdf|Url)\b/g, word => word.toUpperCase()));
 const detailPriority = ["LEGAL_NAME","CIF_NUMBER","PRODUCT_NAME","PRODUCT_CODE","VERSION_NO","STATUS","VERSION_STATE","KYC_STATUS","HOME_BRANCH_REF","SEGMENT_CODE","RISK_LEVEL","PRODUCT_TYPE","CURRENCY_CODE","BUSINESS_OWNER_REF","DEFAULT_TXN_ACTION","EFFECTIVE_FROM_AT","EFFECTIVE_TO_AT","SALES_START_AT","CREATED_AT"];
 const details = (row) => {
   const entries = Object.entries(row).filter(([key]) => !/(HASH|SESSION|PASSWORD|SECRET|TOKEN)/i.test(key));

@@ -2,6 +2,7 @@ import {api,getSession,getCustomerHash,setCustomerHash} from './api.js';
 import {esc,table,field,select,badge,errorText,toast,dialog} from './ui.js';
 import {enhanceForms,validateJet,jetReady} from './jet.js';
 import {formatAmount,formatDecimal,formatDate,fieldKind,rowCurrency} from './presentation.js';
+import {tField} from './i18n.js';
 export const bankingPages={
  banking:{title:'Bank overview',permission:null,icon:'▦',intro:'Customer relationships, money movement, and daily operations in one workspace.',prefix:[]},
  accounts:{title:'Accounts',permission:'ACCOUNT_READ',icon:'▤',intro:'Open accounts, manage holders and nominees, apply controls, and review closure requests.',prefix:['/accounts','/banking/accounts']},
@@ -19,7 +20,7 @@ export const bankingPages={
 let renderApp, contract, operations=[], selected={}, results={}, active='banking';
 export function configureBanking(render){renderApp=render;}
 const displayLabels={ACCOUNT_NUMBER:'Account number',ACCOUNT_STATUS:'Status',CURRENCY_CODE:'Currency',BRANCH_CODE:'Branch',PRIMARY_CIF_ID:'Primary CIF',ACCOUNT_ID:'Account ID',TXN_ID:'Transaction ID',PRODUCT_VERSION_ID:'Product version',primaryCifId:'Primary CIF ID',productId:'Product ID',productVersionId:'Product version ID',branchCode:'Branch code',operationMode:'Operation mode',requestId:'Request reference',requestKey:'Request reference'};
-const label=v=>displayLabels[v]||v.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+const label=v=>tField(displayLabels[v]||v.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
 const allow=p=>!p||getSession()?.user?.permissions?.includes(p);
 const customerWorkflows=new Set([
  'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers',
