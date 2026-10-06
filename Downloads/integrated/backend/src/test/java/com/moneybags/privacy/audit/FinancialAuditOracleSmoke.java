@@ -30,6 +30,7 @@ public class FinancialAuditOracleSmoke {
     }
 
     public static void main(String[] args) {
+        verifyAmountJson();
         String url = System.getenv("DB_URL");
         check(url != null && url.startsWith("jdbc:oracle:"), "Oracle JDBC URL required");
         var source = new DriverManagerDataSource(url, System.getenv("DB_USERNAME"), System.getenv("DB_PASSWORD"));
@@ -42,11 +43,10 @@ public class FinancialAuditOracleSmoke {
         var iam = new IamRepository(db, schema);
         var decisions = new AccessDecisionService(new IamAdminRepository(db, schema), iam, Clock.systemUTC());
         var access = new BankingAccess(new BusinessRepository(db, schema), decisions);
-        var hashes = new CustomerHashService(db);
         var ledger = new LedgerService(db, new ObjectMapper().findAndRegisterModules(),
                 new AccountCatalog(db), new PaymentCatalog(db));
         var banking = new BankingService(new BusinessRepository(db, schema), access, ledger);
-        var audit = new FinancialAuditController(db, access, hashes);
+        var audit = new FinancialAuditController(db, access, "Asia/Kolkata");
         var manager = new DataSourceTransactionManager(source);
         var transaction = new TransactionTemplate(manager);
         var nested = new TransactionTemplate(manager);
@@ -65,11 +65,12 @@ public class FinancialAuditOracleSmoke {
                 db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG,ROW_VERSION) "
                         + "VALUES (?,?,?,'ACTIVE','N',1)", role, "AUDIT_TEST_" + role.substring(0, 8), "Rollback-only audit test");
                 check(db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID "
-                        + "FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE IN ('IAM_AUDIT_READ','TXN_READ')", role) == 2,
-                        "Required audit and financial permissions are missing from the catalog");
+                        + "FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE='IAM_AUDIT_READ'", role) == 1,
+                        "Required audit permission is missing from the catalog");
+                String assignment = UUID.randomUUID().toString();
                 db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,STATUS,VALID_FROM,CREATED_AT) "
                         + "VALUES (?,?,?,'GLOBAL','ACTIVE',SYSTIMESTAMP,SYSTIMESTAMP)",
-                        UUID.randomUUID().toString(), reviewerUser.userId(), role);
+                        assignment, reviewerUser.userId(), role);
                 var reviewer = identity(iam, reviewerUser.username());
                 authenticate(maker);
                 var request = new TransferRequest(3L, 4L, new BigDecimal("0.01"), "WEB", key,
@@ -82,7 +83,7 @@ public class FinancialAuditOracleSmoke {
                         "Target not credited exactly once");
                 check(banking.transfer(request).transactionId() == posted.transactionId(), "Replay created another transaction");
                 authenticate(reviewer);
-                var response = audit.search(posted.transactionId(), null, null);
+                var response = audit.search(posted.transactionId(), null, null, null);
                 check("no-store".equals(response.getHeaders().getCacheControl()), "Response must not be cached");
                 var events = response.getBody();
                 check(events != null && events.size() == 1, "Posting/replay must produce exactly one audit entry");
@@ -91,16 +92,59 @@ public class FinancialAuditOracleSmoke {
                 check("0001".equals(event.sourceAccountEnding()) && "0002".equals(event.targetAccountEnding()), "Wrong account endings");
                 check("POSTED".equals(event.event()) && maker.userId().equals(event.actorUserId())
                         && event.occurredAt() != null, "Missing posting, actor or time evidence");
-                check(event.amount() == null, "Amount leaked without a key");
-                check(audit.search(posted.transactionId(), 4L, null).getBody().size() == 1, "Target filter missed transfer");
-                check(audit.search(posted.transactionId(), -1L, null).getBody().isEmpty(), "Unrelated filter returned transfer");
-                String temporaryHash = hashes.issue(maker.userId());
-                check(audit.search(posted.transactionId(), null, temporaryHash).getBody().get(0).amount()
-                        .compareTo(request.amount()) == 0, "Authorized reviewer cannot read exact amount");
-                check(audit.search(posted.transactionId(), null, "x".repeat(43)).getBody().get(0).amount() == null,
-                        "Invalid key disclosed amount");
+                check(event.amount().compareTo(request.amount()) == 0,
+                        "Audit reader cannot see the exact transaction amount");
+                check(audit.search(posted.transactionId(), 4L, null, null).getBody().size() == 1, "Target filter missed transfer");
+                check(audit.search(posted.transactionId(), 3L, null, null).getBody().size() == 1, "Source filter missed transfer");
+                check(audit.search(posted.transactionId(), -1L, null, null).getBody().isEmpty(), "Unrelated filter returned transfer");
+                check(audit.search(-1L, null, null, null).getBody().isEmpty(), "Missing transaction returned audit events");
+                var postedDay = event.occurredAt().atZoneSameInstant(ZoneId.of("Asia/Kolkata")).toLocalDate();
+                check(audit.search(posted.transactionId(), 4L, postedDay, postedDay).getBody().size() == 1,
+                        "Same-day range missed posting");
+                check(audit.search(posted.transactionId(), null, postedDay.plusDays(1), null).getBody().isEmpty(),
+                        "From-only filter included an earlier posting");
+                check(audit.search(posted.transactionId(), null, null, postedDay.minusDays(1)).getBody().isEmpty(),
+                        "To-only filter included a later posting");
+                try { audit.search(null, null, postedDay, postedDay.minusDays(1)); throw new AssertionError("Invalid range accepted"); }
+                catch (BusinessException denied) { check(denied.status() == org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "Invalid date range should return 400"); }
+                nested.execute(s -> {
+                    s.setRollbackOnly();
+                    var day = LocalDate.of(2000, 2, 29);
+                    var zone = ZoneId.of("Asia/Kolkata");
+                    var start = day.atStartOfDay(zone).toOffsetDateTime();
+                    var next = day.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
+                    for (var at : List.of(start.minusNanos(1000), start, next.minusNanos(1000), next)) {
+                        db.update("INSERT INTO M05_TXN_STATUS_HISTORY(TXN_ID,TO_STATUS,ACTOR_ID,CHANGED_AT) VALUES (?,'POSTED','audit-date-test',?)",
+                                posted.transactionId(), at);
+                    }
+                    var sameDay = audit.search(posted.transactionId(), 4L, day, day).getBody();
+                    check(sameDay.size() == 2 && sameDay.stream().allMatch(e ->
+                            !e.occurredAt().isBefore(start) && e.occurredAt().isBefore(next)),
+                            "Leap-day or inclusive midnight boundaries incorrect");
+                    check(audit.search(posted.transactionId(), null, null, day).getBody().size() == 3,
+                            "To-only filter excluded the end of the selected day");
+                    check(audit.search(posted.transactionId(), null, day, null).getBody().size() == 4,
+                            "From-only filter included the preceding day");
+                    check(audit.search(posted.transactionId(), -1L, day, day).getBody().isEmpty(),
+                            "Date filters bypassed the account filter");
+                    return null;
+                });
+                // A cached sign-in must not keep audit access after the grant changes.
+                nested.execute(s -> {
+                    s.setRollbackOnly();
+                    db.update("UPDATE M01_IAM_USER_ROLE SET SCOPE_TYPE='BRANCH',SCOPE_REF='MUM001' WHERE ASSIGNMENT_ID=?", assignment);
+                    expectForbidden(audit, posted.transactionId(), "Branch-only grant accessed global audit");
+                    return null;
+                });
+                nested.execute(s -> {
+                    s.setRollbackOnly();
+                    db.update("UPDATE M01_IAM_USER_ROLE SET STATUS='REVOKED' WHERE ASSIGNMENT_ID=?", assignment);
+                    expectForbidden(audit, posted.transactionId(), "Revoked grant accessed financial amounts");
+                    return null;
+                });
                 authenticate(maker);
-                try { audit.search(null, null, null); throw new AssertionError("Customer accessed global audit"); }
+                try { audit.search(null, null, null, null); throw new AssertionError("Customer accessed global audit"); }
                 catch (BusinessException denied) { check(denied.status() == org.springframework.http.HttpStatus.FORBIDDEN,
                         "Unexpected authorization failure"); }
                 try {
@@ -129,21 +173,24 @@ public class FinancialAuditOracleSmoke {
                 var reversal = ledger.requestReversal(posted.transactionId(), new ReversalRequest(key + "-reversal",
                         "Rollback-only acceptance test", UUID.randomUUID().toString(), request.valueDate()), maker.userId());
                 authenticate(reviewer);
-                check(audit.search(reversal.transactionId(), null, null).getBody().isEmpty(),
+                check(audit.search(reversal.transactionId(), null, null, null).getBody().isEmpty(),
                         "Pending reversal appeared as a completed financial event");
                 ledger.decideReversal(reversal.transactionId(), new ApprovalDecision("APPROVED", "Test checker"), reviewer.userId());
-                var originalEvents = audit.search(posted.transactionId(), null, null).getBody();
+                var originalEvents = audit.search(posted.transactionId(), null, null, null).getBody();
                 check(originalEvents.size() == 2 && originalEvents.stream().anyMatch(e -> "POSTED".equals(e.event()))
                         && originalEvents.stream().anyMatch(e -> "REVERSED".equals(e.event())),
                         "Reversal did not preserve the original posting and append a reversal event");
-                var reversalEvent = audit.search(reversal.transactionId(), null, null).getBody().get(0);
+                var reversalEvent = audit.search(reversal.transactionId(), null, null, null).getBody().get(0);
                 check(reversalEvent.sourceAccountId() == 4 && reversalEvent.targetAccountId() == 3
                         && reversalEvent.originalTransactionId() == posted.transactionId(), "Reversal account direction or reference wrong");
+                check(reversalEvent.amount().compareTo(request.amount()) == 0
+                        && originalEvents.stream().allMatch(e -> e.amount().compareTo(request.amount()) == 0),
+                        "Reversal history lost the original exact amount");
                 SecurityContextHolder.clearContext();
-                try { audit.search(null, null, null); throw new AssertionError("Anonymous user accessed audit"); }
+                try { audit.search(null, null, null, null); throw new AssertionError("Anonymous user accessed audit"); }
                 catch (BusinessException denied) { check(denied.status() == org.springframework.http.HttpStatus.UNAUTHORIZED,
                         "Anonymous audit should require sign-in"); }
-                System.out.println("PASS: Oracle transfer, account pair, replay, filters, amount protection, authorization, failure rollback, immutable evidence, balanced ledger and reversal history");
+                System.out.println("PASS: Oracle transfer, account pair, replay, filters, inclusive date boundaries, audit amount visibility, authorization, failure rollback, immutable evidence, balanced ledger and reversal history");
                 return null;
             });
         } finally { SecurityContextHolder.clearContext(); }
@@ -153,6 +200,25 @@ public class FinancialAuditOracleSmoke {
         check(db.queryForObject("SELECT COUNT(*) FROM M05_TXN_TRANSACTION_LOG WHERE REQUEST_KEY=?", Integer.class, key) == 0,
                 "Test transaction persisted");
         System.out.println("PASS: rollback restored balances and observed module record counts; no test transaction persisted");
+    }
+
+    private static void expectForbidden(FinancialAuditController audit, long transactionId, String message) {
+        try { audit.search(transactionId, null, null, null); throw new AssertionError(message); }
+        catch (BusinessException denied) { check(denied.status() == org.springframework.http.HttpStatus.FORBIDDEN,
+                "Unexpected scoped/revoked authorization failure"); }
+    }
+
+    private static void verifyAmountJson() {
+        var mapper = new ObjectMapper();
+        for (String value : List.of("9007199254740991.99", "0.01", "0.00")) {
+            var event = new FinancialAuditController.FinancialEvent(1, 1, "INTERNAL_TRANSFER", "POSTED", "POSTED",
+                    3L, "0001", 4L, "0002", new BigDecimal(value), "INR", "test", "test", null, null);
+            try {
+                var amount = mapper.readTree(mapper.writeValueAsString(event)).get("amount");
+                check(amount.isTextual() && value.equals(amount.asText()), "JSON amount lost decimal precision");
+            } catch (java.io.IOException error) { throw new AssertionError("Amount serialization failed", error); }
+        }
+        System.out.println("PASS: JSON preserves exact audit decimal strings, including large amounts and zero");
     }
 
     private static UserPrincipal identity(IamRepository iam, String username) {
