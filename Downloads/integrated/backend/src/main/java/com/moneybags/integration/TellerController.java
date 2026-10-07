@@ -21,7 +21,14 @@ public class TellerController {
  public record OpenTill(@NotBlank String branchCode,@NotNull Long cashGlId){}
  public record CashCommand(@NotBlank @Size(max=100)String requestKey,@NotBlank String tillId,@NotNull Long accountId,@NotBlank @Pattern(regexp="DEPOSIT|WITHDRAWAL")String direction,@NotNull @DecimalMin("0.01") @Digits(integer=16,fraction=2)BigDecimal amount,@NotBlank @Size(max=160)String reason){}
  public record CloseTill(@NotNull @DecimalMin("0")BigDecimal countedCash,@NotBlank String reason){}
- @GetMapping("/tills") public List<Map<String,Object>> tills(){CurrentActor.require("TELLER_OPERATE");return db.rows("SELECT * FROM MBX_TELLER_TILL WHERE TELLER_USER_ID=? ORDER BY BUSINESS_DATE DESC FETCH FIRST 100 ROWS ONLY",CurrentActor.get().userId());}
+ @GetMapping("/tills") public List<Map<String,Object>> tills(){
+  if(CurrentActor.get().permissions().contains("TELLER_READ")){
+   access.global("TELLER_READ");
+   return db.rows("SELECT * FROM MBX_TELLER_TILL ORDER BY BUSINESS_DATE DESC FETCH FIRST 100 ROWS ONLY");
+  }
+  CurrentActor.require("TELLER_OPERATE");
+  return db.rows("SELECT * FROM MBX_TELLER_TILL WHERE TELLER_USER_ID=? ORDER BY BUSINESS_DATE DESC FETCH FIRST 100 ROWS ONLY",CurrentActor.get().userId());
+ }
  @PostMapping("/tills") @Transactional public Map<String,String> open(@Valid @RequestBody OpenTill r){
   CurrentActor.require("TELLER_OPERATE");
   if(db.count("SELECT COUNT(*) FROM M05_GL_ACCOUNT WHERE GL_ACCOUNT_ID=? AND ACCOUNT_CLASS='ASSET' AND ACTIVE_FLAG='Y'",r.cashGlId())!=1)throw fail("Till must reference an active cash asset GL");

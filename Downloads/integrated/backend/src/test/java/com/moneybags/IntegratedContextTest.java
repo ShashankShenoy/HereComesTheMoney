@@ -154,9 +154,10 @@ class IntegratedContextTest {
   long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","500","requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("paymentId").asLong();
   send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
   assertEquals(0,before.subtract(new BigDecimal("500")).compareTo(balance(1)));
-  send("/payments/"+payment+"/simulate-outcome",checker,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
-  send("/payments/"+payment+"/simulate-outcome",checker,Map.of("outcome","SETTLED")).andExpect(status().isOk());
-  send("/payments/"+payment+"/simulate-outcome",checker,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+  String operator=login("admin");
+  send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
   assertEquals("SETTLED",db.queryForObject("SELECT STATUS FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",String.class,payment));
   assertEquals(0,new BigDecimal("999500").compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
@@ -282,7 +283,7 @@ class IntegratedContextTest {
  }
 
  @Test @Order(15) void assistantMcpEnforcesScopeAndExactConfirmation()throws Exception{
-  String customer=login("customer"),other=login("customer2"),checker=login("checker");
+  String customer=login("customer"),other=login("customer2"),checker=login("checker"),admin=login("admin");
   mvc.perform(post("/api/v1/assistant/mcp").contentType(MediaType.APPLICATION_JSON)
     .header("MCP-Protocol-Version","2026-07-28").header("Mcp-Method","tools/list")
     .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}"))
@@ -293,10 +294,10 @@ class IntegratedContextTest {
   assertTrue(customerList.toString().contains("list_my_recent_transactions"));
   assertTrue(customerList.toString().contains("open_add_beneficiary_form"));
   assertFalse(customerList.toString().contains("search_customers"));
-  JsonNode checkerList=mcp(checker,"tools/list",null,Map.of()).path("result").path("tools");
-  assertTrue(checkerList.toString().contains("search_customers"));
-  assertFalse(checkerList.toString().contains("open_add_beneficiary_form"));
-  assertFalse(checkerList.toString().contains("draft_payment"));
+  JsonNode adminList=mcp(admin,"tools/list",null,Map.of()).path("result").path("tools");
+  assertTrue(adminList.toString().contains("search_customers"));
+  assertFalse(adminList.toString().contains("open_add_beneficiary_form"));
+  assertFalse(adminList.toString().contains("draft_payment"));
   assertTrue(mcp(other,"tools/call","get_account_position",Map.of("accountId",1)).path("result").path("isError").asBoolean());
   assertFalse(mcp(customer,"tools/call","get_account_position",Map.of("accountId",1)).path("result").path("isError").asBoolean());
   assertEquals(1,toolValue(mcp(customer,"tools/call","get_my_account_overview",Map.of())).path("accounts").get(0).path("accountId").asInt());
@@ -309,11 +310,11 @@ class IntegratedContextTest {
 
   String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Assistant test","accountToken","testacct001","bankCode","ABCD0123456"))
     .andExpect(status().isOk())).path("beneficiaryId").asText();
-  String verifyId=toolValue(mcp(checker,"tools/call","draft_beneficiary_verification",Map.of("beneficiaryId",beneficiary))).path("intentId").asText();
+  String verifyId=toolValue(mcp(admin,"tools/call","draft_beneficiary_verification",Map.of("beneficiaryId",beneficiary))).path("intentId").asText();
   send("/assistant/intents/"+verifyId+"/confirm",customer,Map.of()).andExpect(status().isForbidden());
-  send("/assistant/intents/"+verifyId+"/confirm",checker,Map.of()).andExpect(status().isOk())
+  send("/assistant/intents/"+verifyId+"/confirm",admin,Map.of()).andExpect(status().isOk())
     .andExpect(jsonPath("$.action").value("BENEFICIARY_VERIFY"));
-  send("/assistant/intents/"+verifyId+"/confirm",checker,Map.of()).andExpect(status().isOk())
+  send("/assistant/intents/"+verifyId+"/confirm",admin,Map.of()).andExpect(status().isOk())
     .andExpect(jsonPath("$.action").value("BENEFICIARY_VERIFY"));
   assertEquals("ACTIVE",db.queryForObject("SELECT STATUS FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=?",String.class,beneficiary));
 
@@ -390,6 +391,19 @@ class IntegratedContextTest {
     .path("result").path("isError").asBoolean());
   assertEquals("PAYMENT_INITIATE",toolValue(mcp(customer,"tools/call","draft_payment",Map.of("accountId",1,"beneficiaryId",externalSameNumber,"rail","UPI","amount","1.00")))
     .path("action").asText());
+ }
+ @Test @Order(18) void administratorInheritsAllPermissionsAndCheckerCannotInitiateWrites()throws Exception{
+  String admin=login("admin"),checker=login("checker");
+  assertEquals(db.queryForObject("SELECT COUNT(*) FROM M01_IAM_PERMISSION",Integer.class),
+    db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_ROLE R ON R.ROLE_ID=RP.ROLE_ID WHERE R.ROLE_CODE='BANK_ADMIN'",Integer.class));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_ROLE R ON R.ROLE_ID=RP.ROLE_ID JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE R.ROLE_CODE='BANK_CHECKER' AND P.PERMISSION_CODE IN ('TXN_POST','PAYMENT_OPERATE','TREASURY_RECONCILE','IAM_ROLE_MANAGE','STATEMENT_ADMIN')",Integer.class));
+  mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+checker)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/banking/gl-accounts").header("Authorization","Bearer "+checker)).andExpect(status().isOk());
+  send("/transactions/transfers",checker,transfer(1,2,"1.00",UUID.randomUUID().toString())).andExpect(status().isForbidden());
+  send("/payments/1/simulate-outcome",checker,Map.of("outcome","SETTLED")).andExpect(status().isForbidden());
+  mvc.perform(post("/api/v1/assistant/mcp").header("Authorization","Bearer "+checker).contentType(MediaType.APPLICATION_JSON).content("{}"))
+    .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("CHECKER_APPROVAL_ONLY"));
+  mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+admin)).andExpect(status().isOk());
  }
  JsonNode mcp(String token,String method,String name,Object arguments)throws Exception{
   Map<String,Object> params="tools/call".equals(method)?Map.of("name",name,"arguments",arguments):Map.of();

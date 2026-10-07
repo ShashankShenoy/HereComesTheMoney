@@ -326,7 +326,8 @@ public class LoanService {
     public Map<String,Object> verifyDocument(UserPrincipal actor,long applicationId,long documentId) {
         Application a=load(applicationId,true);
         String maker=db.queryForObject("SELECT CREATED_BY_USER_ID FROM M08_LOAN_APPLICATION WHERE APPLICATION_ID=?",String.class,applicationId);
-        require(actor,"LOAN_ASSESS",a.branchCode(),a.cifId(),null,null,null,maker);
+        require(actor,actor.permissions().contains("LOAN_DOCUMENT_VERIFY")?"LOAN_DOCUMENT_VERIFY":"LOAN_ASSESS",
+            a.branchCode(),a.cifId(),null,null,null,maker);
         Map<String,Object> doc=one("SELECT STATUS,DOCUMENT_TYPE FROM M08_LOAN_DOCUMENT_REF WHERE DOCUMENT_REF_ID=? AND APPLICATION_ID=? FOR UPDATE",documentId,applicationId);
         if(!"RECEIVED".equals(doc.get("STATUS")))throw conflict("INVALID_STATE","Only received documents can be verified");
         db.update("UPDATE M08_LOAN_DOCUMENT_REF SET STATUS='VERIFIED',VERIFIED_BY_USER_ID=?,VERIFIED_AT=SYSTIMESTAMP WHERE DOCUMENT_REF_ID=?",actor.userId(),documentId);

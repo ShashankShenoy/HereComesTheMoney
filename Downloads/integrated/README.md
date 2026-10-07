@@ -35,7 +35,7 @@ All four **synthetic local** users use password `LocalBanking!2026`:
 | Login | Purpose |
 | --- | --- |
 | `admin` | Maker and banking administration |
-| `checker` | Independent approval; do not approve the maker's own request |
+| `checker` | Bank Checker: read access and independent approvals only; cannot initiate other changes or approve the maker's own request |
 | `customer` | Self access to account 1 / `demo-cif-1` |
 | `customer2` | Self access to account 2 / `demo-cif-2` |
 
@@ -53,7 +53,7 @@ Customers can view balances, transactions, and statements for their linked accou
 
 The **Transactions & ledger** page shows account transactions directly, displaying 25 rows at a time from its most recent 100 results. Duplicate read operations are omitted from its operation menu; the underlying APIs remain available to other clients. **Show ledger actions** loads the remaining transfer, reversal, fee, and reconciliation workflows only when needed. Account number suggestions load when the search field receives focus. The account transaction endpoint reads its list from one Oracle query and applies the account access check before returning financial fields.
 
-Staff can find **Treasury & RBI ledger** under Banking. The section explains when Treasury Reconcile access is missing; ledger and reconciliation data remain permission protected. For an existing Oracle installation whose `BANK_ADMIN` role predates the Treasury permissions, run [database/009-bank-admin-treasury-access.sql](database/009-bank-admin-treasury-access.sql) as the Moneybags schema owner with F5 in SQL Developer, then sign out and back in. The script adds only Treasury reconciliation, liquidity management, and GL reconciliation access to that role. It displays Moneybags' simulated local reserve mirror, not a live RBI connection.
+Staff can find **Treasury & RBI ledger** under Banking. For an existing Oracle installation, run [database/010-bank-admin-and-checker-roles.sql](database/010-bank-admin-and-checker-roles.sql) as the Moneybags schema owner with F5 in SQL Developer, then sign out and back in. It gives `BANK_ADMIN` every configured permission and creates `BANK_CHECKER` with read and independent approval permissions. It can be rerun safely; it does not assign or remove roles from users. Use the IAM access request workflow to assign `BANK_CHECKER` to an employee and revoke their broader role after an independent checker approves both requests. The section displays Moneybags' simulated local reserve mirror, not a live RBI connection.
 
 The demo is an in-memory H2 database in Oracle compatibility mode. **Restarting the backend resets all demo data.** It never uses the Oracle connection guide's credentials. Do not use the local profile for real customer data or public hosting.
 

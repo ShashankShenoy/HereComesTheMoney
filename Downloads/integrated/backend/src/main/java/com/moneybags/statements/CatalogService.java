@@ -85,7 +85,7 @@ public class CatalogService {
     }
     /** Lists approved policy metadata for integration and operations. */
     public List<Map<String,Object>> masks(Actor actor) {
-        authorize(actor,"MASKING_ADMIN");
+        authorize(actor,"MASKING_READ");
         return jdbc.queryForList("""
             SELECT MASKING_PROFILE_ID,PROFILE_CODE,VERSION_NO,CHANNEL_CODE,AUDIENCE_CODE,STATUS
             FROM M10_MASKING_PROFILE ORDER BY PROFILE_CODE,VERSION_NO DESC
@@ -93,7 +93,7 @@ public class CatalogService {
     }
     /** Lists narration metadata without exposing draft text to unapproved callers. */
     public List<Map<String,Object>> narrations(Actor actor) {
-        authorize(actor,"NARRATION_ADMIN");
+        authorize(actor,"NARRATION_READ");
         return jdbc.queryForList("""
             SELECT NARRATION_CATALOG_ID,NARRATION_CODE,LOCALE_CODE,AUDIENCE_CODE,VERSION_NO,APPROVAL_STATUS
             FROM M10_NARRATION_CATALOG ORDER BY NARRATION_CODE,VERSION_NO DESC
