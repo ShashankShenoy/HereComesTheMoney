@@ -103,6 +103,21 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Schedule and interest accrual | Fixed-rate, monthly equal-principal reducing-balance schedules; ACT/365 or 30/360 conventions. Due installment accrual and repayment are tested. Floating resets, daily accrual, tranches, moratoria and prepayment/rescheduling are not implemented. |
 | Delinquency/collections placeholders | Overdue installment queue; full collection strategy, notices, impairment/provisioning and recoveries need separate workflows. |
 
+## Credit cards
+
+| Feature | Implementation / boundary |
+| --- | --- |
+| Versioned products | Dedicated M11 catalog, immutable agreed terms, independent approval and withdrawal from sale. |
+| Applications and issuance | Adult/current-KYC eligibility, customer-owned repayment account, accepted terms, independent credit-limit authority, synthetic card references. |
+| Controls and spending | Activation, freeze/unfreeze, permanent staff block, expiry checks, overdue minimum-payment check, locked available-credit enforcement. |
+| Purchases and refunds | Immediate simulated merchant posting; full refund once, with excess credited to the linked deposit account. Balanced M05 journals. |
+| Repayments | Atomic deposit debit; existing funds/fence checks; interest-first allocation; replay protection and overpayment rejection. |
+| Interest and billing | Disclosed simple ACT/365 policy without purchase grace or compounding; monthly immutable statements and source cutoffs; explicit catch-up billing. |
+| Verification | 12 credit card backend tests, existing regression suite, frontend asset test and the H2 browser workflow passed. Oracle ALPHA staff configuration, independent approvals, purchase/freeze/repayment/refund/unfreeze, replay and reconciliation passed; schema/trigger validity and acceptance exception queries passed. See the verification record for scope. |
+| Boundaries | No live card network, physical issuance, PAN/CVV/PIN, cash advances, partial refunds, disputes, rewards or automated bureau underwriting. Live Oracle concurrency, trigger enforcement branches, future monthly billing and failure injection remain deployment checks. |
+
+See [credit card setup and policy](CREDIT-CARDS.md).
+
 ## Statements and reporting
 
 | Requested feature | Implementation / boundary |

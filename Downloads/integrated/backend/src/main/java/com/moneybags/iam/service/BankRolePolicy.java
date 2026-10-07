@@ -10,7 +10,7 @@ public final class BankRolePolicy {
     public static final String CHECKER = "BANK_CHECKER";
 
     public static final List<String> CHECKER_PERMISSIONS = List.of(
-        "SYSTEM_SCHEMA_READ", "IAM_USER_READ", "IAM_AUDIT_READ", "CIF_READ",
+        "CC_READ", "CC_APPROVE", "CC_PRODUCT_APPROVE", "SYSTEM_SCHEMA_READ", "IAM_USER_READ", "IAM_AUDIT_READ", "CIF_READ",
         "PRODUCT_READ", "ACCOUNT_READ", "TXN_READ", "GL_READ", "GL_RECONCILE",
         "PAYMENT_READ", "TREASURY_READ", "LOAN_READ", "STATEMENT_READ",
         "STATEMENT_CATALOG_READ",

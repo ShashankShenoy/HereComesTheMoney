@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 $record = Join-Path $PSScriptRoot '.runtime\oracle-alpha-processes.json'
 if (-not (Test-Path -LiteralPath $record)) { Write-Host 'No Oracle demo run record.'; return }
 $run = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
-foreach ($name in @('backend', 'frontend')) {
+foreach ($name in @('backend', 'frontend', 'backendLauncher')) {
+  if ($null -eq $run.$name) { continue }
   $id = [int]$run.$name
   $process = Get-Process -Id $id -ErrorAction SilentlyContinue
   $expected = [long]$run.($name + 'StartTicks')

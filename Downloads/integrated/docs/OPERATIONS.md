@@ -36,7 +36,7 @@ For an Oracle demo that obtains notes through a simulated RBI cash delivery, app
 
 If the Oracle schema has no RBI current reserve, apply [014-simulated-reserve-opening.sql](../database/014-simulated-reserve-opening.sql) once after `012`. Register distinct INR reserve asset and opening capital equity GL accounts; create an `RBI_CURRENT` reserve account with the reserve GL. A bank administrator requests a synthetic opening reserve with a unique evidence reference and approved demo amount. A different checker confirms it. This posts DR reserve asset / CR opening capital and appends one `RBI` `IN` entry to the local reserve mirror. It requires an unused zero-balance reserve and GL. No RBI network or physical cash transfer is implied. Do not insert an opening balance directly into the position table.
 
-After installing the cash migrations, run `& .\restart-oracle-alpha.ps1` from the integrated folder in the PowerShell session that has `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the separately built JAR before stopping the existing Oracle demo. It does not reset Oracle data.
+After installing the cash migrations and building the combined application, run `& .\restart-oracle-alpha.ps1` from the integrated folder in the same Windows PowerShell environment used for the build, with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the verified standard backend JAR/frontend build before stopping the existing Oracle demo, then starts with `-SkipBuild`. It does not reset Oracle data.
 
 Apply [013-teller-replenishment.sql](../database/013-teller-replenishment.sql) once after `011` for existing open tills. After the branch vault receives cash, an authorized second person uses `POST /api/v1/teller/tills/{id}/replenish` with a unique request key, counted amount, and evidence reference. The operation posts DR teller cash / CR branch vault cash and updates both cash balances in one transaction; the RBI reserve is unaffected by the later internal transfer. Existing tills do not need to be deleted or recreated. A closed till or one from an earlier business date cannot be replenished.
 
@@ -50,6 +50,16 @@ For an existing schema matching the supplied installer, have the DBA review and 
 4. `005-permission-catalog.sql`: insert missing permission catalog entries only; no role grants and no changes to existing MFA requirements.
 5. `006-audit-immutability.sql`: Oracle append-only trigger for MBX audit events.
 6. `007-assistant-intents.sql`: short-lived, session-bound assistant action proposals.
+7. `008-assistant-internal-transfer.sql`: assistant internal transfer support.
+8. `009-bank-admin-treasury-access.sql`: bank administrator treasury access.
+9. `010-bank-admin-and-checker-roles.sql`: administrator and independent checker permissions.
+10. `011-teller-vault-allocation.sql`: branch vault and till allocation records.
+11. `012-rbi-cash-delivery.sql`: independently confirmed simulated cash delivery.
+12. `013-teller-replenishment.sql`: branch vault to existing till replenishments.
+13. `014-simulated-reserve-opening.sql`: evidenced synthetic reserve opening scope.
+14. `015-credit-cards.sql`: credit card catalog, cards, entries, statements and request replay. Skip it if the former `011-credit-cards.sql` is already installed.
+
+`012-rbi-cash-delivery-readiness.sql` and files in `database/acceptance/` are read-only diagnostics. See [the combined main/credit-card release checklist](CREDIT-CARD-MAIN-MERGE.md) for installations that already contain one branch's additions.
 
 Scripts 002–004 are not repeatable DDL. Track applied versions in your release process. Review the original Oracle triggers and function-based indexes; H2 deliberately omits them. Install schema objects as the migration owner and use a separate least-privilege runtime identity under your DBA's grants/synonym strategy. The bundled repositories expect the Money Bags tables to resolve without a schema prefix.
 

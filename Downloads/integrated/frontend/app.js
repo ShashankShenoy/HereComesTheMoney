@@ -65,11 +65,11 @@ function shell(){
   if(can('PRODUCT_READ')&&!nav.some(n=>n.page==='products'))nav.push({page:'products',label:'Product master'});
   nav=nav.filter(n=>n.page!=='assistant'&&(user.userType!=='CUSTOMER'||n.page!=='treasury'));
   for(const [page,config] of Object.entries(bankingPages))if((page==='treasury'?user.userType!=='CUSTOMER':page==='customerAccess'||!config.permission||can(config.permission))&&!nav.some(n=>n.page===page))nav.push({page,label:config.title});
-  const navigationOrder=['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','loans','treasury','statements','currency','customers','products','privacy','dashboard','users','roles','access','audit','security'];
+  const navigationOrder=['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','creditCards','loans','treasury','statements','currency','customers','products','privacy','dashboard','users','roles','access','audit','security'];
   nav.sort((a,b)=>navigationOrder.indexOf(a.page)-navigationOrder.indexOf(b.page));
   if(!nav.some(n=>n.page===state.page))state.page=nav[0]?.page||'security';
   const navigationSections=[
-    ['Banking',['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','loans','treasury','statements','currency']],
+    ['Banking',['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','creditCards','loans','treasury','statements','currency']],
     ['Customers and products',['customers','products','privacy']],
     ['Administration',['dashboard','users','roles','access','audit','security']]
   ];

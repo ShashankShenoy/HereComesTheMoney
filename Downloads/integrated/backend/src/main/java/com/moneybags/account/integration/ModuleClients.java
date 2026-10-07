@@ -78,7 +78,7 @@ public class ModuleClients {
   return clear(zero&&"CLOSED".equals(p.get("DEBIT_STATUS"))&&"CLOSED".equals(p.get("CREDIT_STATUS"))&&((Number)p.get("CONTROL_VERSION")).longValue()>=version);
  }
  public Clearance paymentClearance(long id){return clear(db.count("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE (SOURCE_ACCOUNT_ID=? OR DESTINATION_ACCOUNT_ID=?) AND STATUS NOT IN ('SETTLED','REJECTED','CANCELLED','REFUNDED')",id,id)==0);}
- public Clearance loanClearance(long id){return clear(db.count("SELECT COUNT(*) FROM M08_LOAN_FACILITY WHERE (DISBURSEMENT_ACCOUNT_ID=? OR REPAYMENT_ACCOUNT_ID=?) AND STATUS NOT IN ('CLOSED','CANCELLED')",id,id)==0);}
+ public Clearance loanClearance(long id){return clear(db.count("SELECT COUNT(*) FROM M08_LOAN_FACILITY WHERE (DISBURSEMENT_ACCOUNT_ID=? OR REPAYMENT_ACCOUNT_ID=?) AND STATUS NOT IN ('CLOSED','CANCELLED')",id,id)==0 && db.count("SELECT COUNT(*) FROM M11_CC_CARD WHERE REPAYMENT_ACCOUNT_ID=? AND STATUS<>'CLOSED'",id)==0 && db.count("SELECT COUNT(*) FROM M11_CC_APPLICATION WHERE REPAYMENT_ACCOUNT_ID=? AND STATUS='PENDING'",id)==0);}
  private Clearance clear(boolean yes){return new Clearance(yes,ref(),yes?null:"Outstanding balance, control or obligation");}
 }
 
