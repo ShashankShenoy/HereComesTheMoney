@@ -35,13 +35,29 @@ public class TreasuryController {
 
     /** Lists reserve account configuration. */
     @GetMapping("/reserve-accounts")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<ReserveAccount> accounts() { return service.reserveAccounts(); }
 
     /** Returns the current reserve read model. */
     @GetMapping("/reserve-accounts/{id}/position")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public ReservePosition position(@PathVariable long id) { return service.position(id); }
+
+    /** Confirmed entries in the bank's local RBI/RTGS reserve mirror. */
+    @GetMapping("/reserve-accounts/{id}/ledger")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public List<ReserveLedgerLine> reserveLedger(@PathVariable long id,
+                                                  @RequestParam(defaultValue="50") int limit,
+                                                  @RequestParam(defaultValue="0") int offset) {
+        if(limit<1||limit>200||offset<0)throw com.moneybags.treasury.domain.DomainException.invalid("Use a limit from 1 to 200 and a non-negative offset");
+        return service.reserveLedger(id, limit, offset);
+    }
+
+    @GetMapping("/reserve-accounts/{id}/reconciliation")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public ReserveReconciliation reserveReconciliation(@PathVariable long id) {
+        return service.reserveReconciliation(id);
+    }
 
     /** Earmarks liquidity for exactly one payment or settlement cycle. */
     @PostMapping("/liquidity-holds")

@@ -27,6 +27,24 @@ public class BankingAccess {
  }
  public Map<String,Object> facility(String permission,long id){var f=db.one("SELECT FACILITY_ID,PRIMARY_CIF_ID,BRANCH_CODE FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",id);access.require(CurrentActor.get(),new AuthorizationInput(permission,(String)f.get("BRANCH_CODE"),null,(String)f.get("PRIMARY_CIF_ID"),"LOAN","INR",null,null,null,null));return f;}
  public void global(String permission){new com.moneybags.iam.security.IamGuard(db.jdbc(),java.time.Clock.systemUTC()).require(CurrentActor.get(),permission);}
+ /** Bank-wide transaction review belongs only to a current, unrestricted BANK_ADMIN assignment. */
+ public boolean bankAdminTransactionRead(){
+  var u=CurrentActor.get();
+  if(!"EMPLOYEE".equals(u.userType())||!u.permissions().contains("TXN_READ"))return false;
+  Long count=db.jdbc().queryForObject("""
+    SELECT COUNT(*) FROM M01_IAM_USER_ROLE A
+    JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID
+    JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID
+    JOIN M01_IAM_SESSION S ON S.USER_ID=U.USER_ID
+    WHERE U.USER_ID=? AND U.STATUS='ACTIVE' AND R.ROLE_CODE='BANK_ADMIN' AND R.STATUS='ACTIVE'
+      AND A.STATUS='ACTIVE' AND A.SCOPE_TYPE='GLOBAL' AND A.SCOPE_REF IS NULL
+      AND A.VALID_FROM<=SYSTIMESTAMP AND (A.VALID_TO IS NULL OR A.VALID_TO>SYSTIMESTAMP)
+      AND S.SESSION_ID=? AND S.STATUS='ACTIVE'
+      AND S.IDLE_EXPIRES_AT>SYSTIMESTAMP AND S.ABSOLUTE_EXPIRES_AT>SYSTIMESTAMP
+      AND NOT EXISTS (SELECT 1 FROM M01_IAM_USER_ROLE_SCOPE X WHERE X.ASSIGNMENT_ID=A.ASSIGNMENT_ID)
+    """,Long.class,u.userId(),u.sessionId());
+  return count!=null&&count>0;
+ }
  public void transaction(String permission,long id){var t=db.one("SELECT SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID FROM M05_TXN_TRANSACTION_LOG WHERE TXN_ID=?",id);if(t.get("SOURCE_ACCOUNT_ID") instanceof Number n)account(permission,n.longValue());else if(t.get("TARGET_ACCOUNT_ID") instanceof Number n)account(permission,n.longValue());else global(permission);}
  private void deny(){throw new BusinessException(HttpStatus.FORBIDDEN,"NOT_ACCOUNT_HOLDER","This account is outside your access");}
 }
