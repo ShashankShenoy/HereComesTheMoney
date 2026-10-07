@@ -51,6 +51,9 @@ export async function enhanceForms(root) {
   )) {
     // Revalidation must not wrap the native inputs generated inside JET components.
     if (input.closest('.jet-field')) continue;
+    // JET renders select options outside a native modal's top layer.
+    // Native selects remain usable inside dialogs and submit their value directly.
+    if (input.tagName === "SELECT" && input.closest("dialog")) continue;
     if (["hidden", "checkbox", "radio", "file"].includes(input.type)) continue;
     const label = input.closest("label.field");
     if (!label) continue;

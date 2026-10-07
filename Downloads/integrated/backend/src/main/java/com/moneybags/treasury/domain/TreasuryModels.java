@@ -44,6 +44,16 @@ public final class TreasuryModels {
                                 BigDecimal amount, long glJournalId, OffsetDateTime settledAt,
                                 OffsetDateTime recordedAt) {}
 
+    public record ReserveLedgerLine(long id, long reserveAccountId, Long paymentId, Long cycleId,
+                                    long evidenceId, String evidenceStatus, String railCode,
+                                    String movementSide, BigDecimal amount, String currency,
+                                    String externalSettlementRef, String externalStatementRef,
+                                    long glJournalId, OffsetDateTime settledAt, OffsetDateTime recordedAt) {}
+
+    public record ReserveReconciliation(long reserveAccountId, String currency,
+                                        BigDecimal confirmedBalance, BigDecimal ledgerBalance,
+                                        BigDecimal difference, String isMatched, OffsetDateTime asOf) {}
+
     public record ReconciliationException(long id, String mismatchKey, long reserveAccountId,
                                           Long paymentId, Long cycleId, Long treasuryEntryId,
                                           String type, ExceptionStatus status, String severity,

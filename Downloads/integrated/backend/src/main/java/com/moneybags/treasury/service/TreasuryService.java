@@ -48,6 +48,18 @@ public class TreasuryService {
         return repository.findPosition(accountId).orElseThrow(() -> DomainException.notFound("Reserve position", accountId));
     }
 
+    @Transactional(readOnly = true)
+    public List<ReserveLedgerLine> reserveLedger(long accountId, int limit, int offset) {
+        repository.findReserveAccount(accountId).orElseThrow(() -> DomainException.notFound("Reserve account", accountId));
+        return repository.findLedger(accountId, limit, offset);
+    }
+
+    @Transactional(readOnly = true)
+    public ReserveReconciliation reserveReconciliation(long accountId) {
+        return repository.findReserveReconciliation(accountId)
+            .orElseThrow(() -> DomainException.notFound("Reserve position", accountId));
+    }
+
     /** Atomically reserves available liquidity and makes retries idempotent by hold key plus request hash. */
     @Transactional
     public LiquidityHold reserve(CreateLiquidityHold command, String actor) {

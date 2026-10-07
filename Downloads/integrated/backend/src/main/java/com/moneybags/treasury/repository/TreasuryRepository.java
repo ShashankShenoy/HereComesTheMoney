@@ -68,6 +68,23 @@ public class TreasuryRepository {
             .param("id", accountId).query(this::position).optional();
     }
 
+    /** Reads a bounded page of confirmed local reserve movements, newest first. */
+    public List<ReserveLedgerLine> findLedger(long accountId, int limit, int offset) {
+        return jdbc.sql("""
+            SELECT L.*, E.EVIDENCE_STATUS FROM M07_CENTRAL_TREASURY_LEDGER L
+            JOIN M07_SETTLEMENT_EVIDENCE E ON E.EVIDENCE_ID=L.EVIDENCE_ID
+            WHERE L.RESERVE_ACCOUNT_ID=:accountId
+            ORDER BY L.TREASURY_ENTRY_ID DESC OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+            """).param("accountId", accountId).param("offset", offset).param("limit", limit)
+            .query(this::reserveLedgerLine).list();
+    }
+
+    /** Compares the event-fed reserve position with the append-only local mirror. */
+    public Optional<ReserveReconciliation> findReserveReconciliation(long accountId) {
+        return jdbc.sql("SELECT * FROM M07_V_RESERVE_POSITION_RECON WHERE RESERVE_ACCOUNT_ID=:id")
+            .param("id", accountId).query(this::reserveReconciliation).optional();
+    }
+
     /** Locks a reserve position until the surrounding transaction commits. */
     public ReservePosition lockPosition(long accountId) {
         return jdbc.sql("SELECT * FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=:id AND CURRENCY_CODE='INR' FOR UPDATE")
@@ -503,6 +520,21 @@ public class TreasuryRepository {
             nullableLong(rs, "PAYMENT_ID"), nullableLong(rs, "SETTLEMENT_CYCLE_ID"), rs.getLong("EVIDENCE_ID"),
             rs.getString("RAIL_CODE"), rs.getString("MOVEMENT_SIDE"), rs.getBigDecimal("AMOUNT"),
             rs.getLong("GL_JOURNAL_ID"), time(rs, "SETTLED_AT"), time(rs, "RECORDED_AT"));
+    }
+
+    private ReserveLedgerLine reserveLedgerLine(ResultSet rs, int n) throws SQLException {
+        return new ReserveLedgerLine(rs.getLong("TREASURY_ENTRY_ID"), rs.getLong("RESERVE_ACCOUNT_ID"),
+            nullableLong(rs, "PAYMENT_ID"), nullableLong(rs, "SETTLEMENT_CYCLE_ID"), rs.getLong("EVIDENCE_ID"),
+            rs.getString("EVIDENCE_STATUS"), rs.getString("RAIL_CODE"), rs.getString("MOVEMENT_SIDE"),
+            rs.getBigDecimal("AMOUNT"), rs.getString("CURRENCY_CODE"), rs.getString("EXTERNAL_SETTLEMENT_REF"),
+            rs.getString("EXTERNAL_STATEMENT_REF"), rs.getLong("GL_JOURNAL_ID"),
+            time(rs, "SETTLED_AT"), time(rs, "RECORDED_AT"));
+    }
+
+    private ReserveReconciliation reserveReconciliation(ResultSet rs, int n) throws SQLException {
+        return new ReserveReconciliation(rs.getLong("RESERVE_ACCOUNT_ID"), rs.getString("CURRENCY_CODE"),
+            rs.getBigDecimal("CONFIRMED_BALANCE"), rs.getBigDecimal("LEDGER_BALANCE"),
+            rs.getBigDecimal("DIFFERENCE"), rs.getString("IS_MATCHED"), time(rs, "AS_OF"));
     }
 
     private ReconciliationException reconException(ResultSet rs, int n) throws SQLException {

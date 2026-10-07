@@ -14,10 +14,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest @AutoConfigureMockMvc @ActiveProfiles("local")
+@SpringBootTest(properties = "moneybags.auth.allowed-origins=http://localhost:5173")
+@AutoConfigureMockMvc @ActiveProfiles("local")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IntegratedContextTest {
  @Autowired MockMvc mvc;@Autowired ObjectMapper json;@Autowired JdbcTemplate db;
+ @Autowired org.springframework.security.crypto.password.PasswordEncoder passwords;
  static final String HASH=("customer-demo-hash-"+"x".repeat(43)).substring(0,43);
  String login(String user)throws Exception{
   var r=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",user,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
@@ -27,6 +29,15 @@ class IntegratedContextTest {
  JsonNode value(ResultActions result)throws Exception{return json.readTree(result.andReturn().getResponse().getContentAsString());}
  BigDecimal balance(long id){return db.queryForObject("SELECT POSTED_BALANCE FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=?",BigDecimal.class,id);}
  Map<String,Object> transfer(long from,long to,String amount,String key){return Map.of("sourceAccountId",from,"targetAccountId",to,"amount",amount,"channelCode","BRANCH","requestKey",key,"correlationId","test-"+key,"valueDate",java.time.LocalDate.now().toString());}
+ String nonAdminViewer()throws Exception{
+  String role=UUID.randomUUID().toString(),user=UUID.randomUUID().toString(),name="txn_viewer_"+UUID.randomUUID().toString().substring(0,8);
+  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,?,'Transaction viewer','ACTIVE','N')",role,"TXN_VIEWER_"+name);
+  db.update("INSERT INTO M01_IAM_USER(USER_ID,USERNAME,USER_TYPE,STATUS,EMPLOYEE_REF) VALUES (?,?,'EMPLOYEE','ACTIVE','TEST')",user,name);
+  db.update("INSERT INTO M01_IAM_CREDENTIAL(CREDENTIAL_ID,USER_ID,PASSWORD_HASH,HASH_SCHEME,STATUS) VALUES (?,?,?,'BCRYPT','ACTIVE')",UUID.randomUUID().toString(),user,passwords.encode("LocalBanking!2026"));
+  for(String permission:List.of("ACCOUNT_READ","TXN_READ"))db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",role,permission);
+  db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,STATUS,VALID_FROM) VALUES (?,?,?,'GLOBAL','ACTIVE',SYSTIMESTAMP)",UUID.randomUUID().toString(),user,role);
+  return login(name);
+ }
  @Test @Order(1) void unifiedRoutesAndAuthentication()throws Exception{
   mvc.perform(get("/actuator/health")).andExpect(status().isOk());
   mvc.perform(get("/api/v1/banking/accounts")).andExpect(status().isUnauthorized());
@@ -56,6 +67,38 @@ class IntegratedContextTest {
   send("/transactions/transfers",customer,transfer(2,1,"1.00",UUID.randomUUID().toString())).andExpect(status().isForbidden());
   send("/transactions/transfers",customer,transfer(1,2,"90000.00",UUID.randomUUID().toString())).andExpect(status().isConflict());
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+ }
+ @Test @Order(2) void accountScopedDetailsAndInternalReserveReadsStaySeparated()throws Exception{
+  String customer=login("customer"),other=login("customer2"),admin=login("admin"),viewer=nonAdminViewer();
+  mvc.perform(get("/api/v1/banking/accounts/1/key-holders").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$[0].HOLDER_NAME").value("Aarav Mehta (demo)"))
+   .andExpect(jsonPath("$[0].CAN_SIGN_IN").value("Y"))
+   .andExpect(jsonPath("$[0].SECRET_DIGEST").doesNotExist());
+  mvc.perform(get("/api/v1/banking/accounts/1/key-holders").header("Authorization","Bearer "+customer))
+   .andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/1/details?accountId=1").header("Authorization","Bearer "+customer))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.AMOUNT").isNumber()).andExpect(jsonPath("$.journals[0].control.IS_BALANCED").value("Y"));
+  mvc.perform(get("/api/v1/banking/transactions/1/details?accountId=1").header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$[0].amount").isNumber());
+  mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+viewer))
+   .andExpect(status().isOk()).andExpect(jsonPath("$[0].amount").doesNotExist());
+  mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+viewer)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+viewer).header("X-Customer-Hash",HASH)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.accountRole").value("TARGET"));
+  mvc.perform(get("/api/v1/transactions/1").header("Authorization","Bearer "+admin)).andExpect(status().isOk()).andExpect(jsonPath("$.amount").isNumber());
+  mvc.perform(get("/api/v1/transactions/1").header("Authorization","Bearer "+viewer)).andExpect(status().isOk()).andExpect(jsonPath("$.amount").doesNotExist());
+  mvc.perform(get("/api/v1/banking/transactions/3/details").header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/3/details").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.accountRole").value("INTERNAL")).andExpect(jsonPath("$.journals[0].accountPostings[0].GL_ACCOUNT_ID").isNumber());
+  mvc.perform(get("/api/v1/transactions/3").header("Authorization","Bearer "+admin)).andExpect(status().isOk()).andExpect(jsonPath("$.amount").isNumber());
+  mvc.perform(get("/api/v1/transactions/3").header("Authorization","Bearer "+customer)).andExpect(status().isOk()).andExpect(jsonPath("$.amount").doesNotExist());
+  mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$[0].externalSettlementRef").value("SIMULATED-OPENING")).andExpect(jsonPath("$[0].evidenceStatus").value("VERIFIED"));
+  mvc.perform(get("/api/v1/treasury/reserve-accounts/1/reconciliation").header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.reserveAccountId").value(1)).andExpect(jsonPath("$.isMatched").value("Y"));
+  mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
  }
  @Test @Order(4) void newAccountsActivateThroughRealLedgerFence()throws Exception{
   String admin=login("admin");String request=UUID.randomUUID().toString();

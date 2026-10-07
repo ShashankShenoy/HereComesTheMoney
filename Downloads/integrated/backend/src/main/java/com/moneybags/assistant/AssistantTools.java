@@ -128,7 +128,7 @@ public class AssistantTools {
             access.account("TXN_READ",accountId);
             String number=String.valueOf(account.get("ACCOUNT_NUMBER"));
             String ending=number.substring(Math.max(0,number.length()-4));
-            for(var txn:banking.transactions(accountId,null).stream().limit(limit).toList()) {
+            for(var txn:banking.transactions(accountId,null,null).stream().limit(limit).toList()) {
                 var row=new LinkedHashMap<String,Object>(txn);
                 row.put("accountEnding",ending);
                 result.add(row);
@@ -140,7 +140,7 @@ public class AssistantTools {
     private Object transactions(long accountId,int limit,String hash) {
         access.account("TXN_READ",accountId);
         hashes.require(accountId,hash);
-        return banking.transactions(accountId,hash).stream().limit(limit).toList();
+        return banking.transactions(accountId,null,hash).stream().limit(limit).toList();
     }
     private Object customers(String query) {
         if(query.isBlank())invalid("Enter a customer name or CIF number");
