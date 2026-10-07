@@ -1,4 +1,4 @@
-param([switch]$CheckOnly)
+param([switch]$CheckOnly, [switch]$Offline)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $mavenRepository = Join-Path $env:USERPROFILE '.m2\repository'
@@ -9,9 +9,11 @@ $frontendDist = Join-Path $taskRoot 'frontend\dist'
 
 function Get-FileSetHash {
   param([System.IO.FileInfo[]]$Files)
-  $lines = foreach ($file in ($Files | Sort-Object FullName)) {
-    $relative = $file.FullName.Substring($taskRoot.Length + 1).Replace('\', '/')
-    "$relative $((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)"
+  [string[]]$paths = @($Files | ForEach-Object { $_.FullName })
+  [Array]::Sort($paths, [StringComparer]::Ordinal)
+  $lines = foreach ($path in $paths) {
+    $relative = $path.Substring($taskRoot.Length + 1).Replace('\', '/')
+    "$relative $((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)"
   }
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try {
@@ -57,9 +59,17 @@ function Invoke-BuildStep {
   if ($LASTEXITCODE -ne 0) { throw "$Label failed with exit code $LASTEXITCODE. Startup stopped." }
 }
 
-Invoke-BuildStep 'backend (Maven clean verify)' 'mvn' @('-f', (Join-Path $taskRoot 'backend\pom.xml'), "-Dmaven.repo.local=$mavenRepository", 'clean', 'verify')
-Invoke-BuildStep 'frontend dependencies (npm ci)' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'ci')
+$mavenArguments = @('-f', (Join-Path $taskRoot 'backend\pom.xml'), "-Dmaven.repo.local=$mavenRepository", 'clean', 'verify')
+$npmArguments = @('--prefix', (Join-Path $taskRoot 'frontend'), 'ci')
+if ($Offline) {
+  $mavenArguments = @('-o') + $mavenArguments
+  $npmArguments += @('--offline', '--no-audit')
+  Write-Host 'Offline build: using cached Maven/npm dependencies. Missing dependencies require an online build.'
+}
+Invoke-BuildStep 'backend (Maven clean verify)' 'mvn' $mavenArguments
+Invoke-BuildStep 'frontend dependencies (npm ci)' 'npm' $npmArguments
 Invoke-BuildStep 'frontend checks' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'run', 'check')
+Invoke-BuildStep 'frontend tests' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'test')
 Invoke-BuildStep 'frontend bundle' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'run', 'build')
 if (-not (Test-Path -LiteralPath $jar)) { throw 'Maven verify finished without creating the backend JAR.' }
 @{

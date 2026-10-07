@@ -1,5 +1,6 @@
 -- Read-only Oracle acceptance checks after installing 015-credit-cards.sql
 -- (or the former feature-branch filename 011-credit-cards.sql).
+-- The file number is 015; the installed credit card table prefix intentionally remains M11_CC_*.
 -- Run as the Moneybags schema owner. All exception queries should return zero rows.
 SET PAGESIZE 100
 SET LINESIZE 220

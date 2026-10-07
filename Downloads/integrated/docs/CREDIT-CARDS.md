@@ -27,6 +27,8 @@ For an existing Oracle installation with migrations 001–014, apply **`database
 
 The script was formerly named `011-credit-cards.sql` on the feature branch. Its number became 015 when the newer main branch added teller/RBI migrations 011–014. **If the former credit card script is already installed, do not run 015 again**; inspect the six tables and run the acceptance queries. See [the combined release upgrade order](CREDIT-CARD-MAIN-MERGE.md).
 
+The file number **015** orders repository installation scripts. The module identifier **M11** remains unchanged, so the correct Oracle table names are still `M11_CC_*`. This is intentional and consistent with the Java repositories. No table rename, second installation, data copy or extra database commit is required for the filename change. Application startup has no Flyway/Liquibase migration runner that replays numbered scripts.
+
 New tables:
 
 | Table | Purpose |
@@ -52,14 +54,14 @@ The migration grants card permissions to the existing bank admin/checker and ret
 
 ## Verification
 
-Verified locally on 7 October 2026:
+Initial feature verification on 7 October 2026, before merging updated main:
 
 - **32 backend tests passed** with Maven `verify`: 12 credit card tests and 20 existing integration tests. Coverage includes immutable product versions, independent decisions and authority ceilings, customer/branch isolation, current KYC and adult eligibility, decimal validation, concurrent overspending, replay/conflict handling, frozen/blocked/expired cards, deposit debit fences, insufficient-funds rollback, excess refund credits, interest math, minimum payments, statement cutoffs and reconciliation.
 - **14 frontend tests passed**, plus JavaScript checks and the standalone frontend build. The new asset-serving test verifies that the credit card ES module and stylesheet are available through the actual server allowlist.
 - **Browser workflow passed** against the real local H2 backend: customer application → checker approval → customer activation → simulated purchase → repayment → matched ledger reconciliation. Accepted terms remained available. The screen was visually checked at narrow and desktop widths, with no browser warnings/errors in the completed workflow.
 - The executable JAR and `frontend/dist` were rebuilt. Temporary browser-test servers were stopped after verification.
 
-### Oracle ALPHA verification — 7 October 2026
+### Initial Oracle ALPHA verification — 7 October 2026
 
 The credit card script under its former name `011-credit-cards.sql` was already installed in Oracle ALPHA when this verification began. A separate read-only JDBC session confirmed committed configuration and balances and ran [the Oracle acceptance checks](../database/acceptance/credit-cards.sql): six `M11_CC_*` tables, three enabled and valid credit card triggers, three active INR credit card ledger accounts, and zero rows from every invalid-object/accounting exception query.
 
@@ -83,7 +85,17 @@ The user-supplied `checker` account currently has `BANK_ADMIN`, so it was not us
 
 This live workflow used administrator actions on an existing **synthetic** customer. No live Oracle customer login was tested because that fixture's customer password was unavailable; customer ownership flows were tested in H2. Product configuration, the synthetic card and immutable audit/ledger entries persist in Oracle after stopping the app. The completed refund restores the starting deposit balance without deleting the audit trail.
 
-The first scheduled statement was not issued early. Interest/monthly statement cutoff behavior and concurrent overspending passed the local tests; live Oracle concurrency, trigger rejection behavior, later billing and failure injection still need isolated Oracle tests before deployment. Trigger existence, enabled state and compilation validity were checked, not every trigger's enforcement branch. No card-network connection was exercised.
+The first scheduled statement was not issued early. Interest/monthly statement cutoff behavior and concurrent overspending passed the local tests. This initial Oracle run checked trigger existence, enabled state and compilation validity; the later merged run below also checked rejection behavior and basic two-session locking. Later billing, full concurrent posting stress and failure injection still need isolated Oracle tests before deployment. No card-network connection was exercised.
+
+### Merged main on Oracle ALPHA — 7 October 2026
+
+After PR #8 merged updated main and credit cards, a fresh offline build passed **34 backend tests** and **14 frontend tests** on VPN. The standard combined JAR was then started against Oracle ALPHA, preserving existing data and product configuration. No installer was rerun.
+
+The admin/checker workflow passed again using a synthetic product named `CC_MERGE_VERIFY`: admin proposal, rejected maker self-approval, independent `checker1` approval, and admin retirement. The test product remains retired with no applications/cards. Moneybags Classic remains approved. Checker product creation, purchases, repayments and retirement returned HTTP 403.
+
+The existing synthetic card ending 5435 passed a new INR 35 purchase, freeze, rejected frozen purchase, INR 10 repayment, identical-key replay, changed-key rejection, full refund and unfreeze. Final deposit balance is INR 1,050; card principal, interest and receivable are zero, available credit is INR 25,000, and reconciliation is `MATCHED`. Six immutable entries now remain, including the initial three; replay and rejected commands added none.
+
+Separate rollback-only Oracle checks exercised the three card triggers' rejection paths and row locking from two independent sessions. Two existing treasury triggers invalidated by main's table alterations were recompiled without changing source/data and their append-only rejection paths passed. Final checks found no invalid schema objects or card/journal/vault/reserve mismatches. See [the complete combined Oracle verification record](CREDIT-CARD-MAIN-MERGE.md#combined-application-on-oracle-alpha--7-october-2026) for scope and remaining checks.
 
 ### Saving Oracle changes
 

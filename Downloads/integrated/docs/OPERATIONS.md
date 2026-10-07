@@ -36,7 +36,7 @@ For an Oracle demo that obtains notes through a simulated RBI cash delivery, app
 
 If the Oracle schema has no RBI current reserve, apply [014-simulated-reserve-opening.sql](../database/014-simulated-reserve-opening.sql) once after `012`. Register distinct INR reserve asset and opening capital equity GL accounts; create an `RBI_CURRENT` reserve account with the reserve GL. A bank administrator requests a synthetic opening reserve with a unique evidence reference and approved demo amount. A different checker confirms it. This posts DR reserve asset / CR opening capital and appends one `RBI` `IN` entry to the local reserve mirror. It requires an unused zero-balance reserve and GL. No RBI network or physical cash transfer is implied. Do not insert an opening balance directly into the position table.
 
-After installing the cash migrations and building the combined application, run `& .\restart-oracle-alpha.ps1` from the integrated folder in the same Windows PowerShell environment used for the build, with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the verified standard backend JAR/frontend build before stopping the existing Oracle demo, then starts with `-SkipBuild`. It does not reset Oracle data.
+After installing the cash migrations and building the combined application, run `& .\restart-oracle-alpha.ps1` from the integrated folder, with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the verified standard backend JAR/frontend build before stopping the existing Oracle demo, then starts with `-SkipBuild`. It does not reset Oracle data. Cached dependencies can be used on VPN with `build-before-start.ps1 -Offline`; missing cached dependencies require an online build. Updated fingerprints work across Windows PowerShell 5.1 and PowerShell 7.
 
 Apply [013-teller-replenishment.sql](../database/013-teller-replenishment.sql) once after `011` for existing open tills. After the branch vault receives cash, an authorized second person uses `POST /api/v1/teller/tills/{id}/replenish` with a unique request key, counted amount, and evidence reference. The operation posts DR teller cash / CR branch vault cash and updates both cash balances in one transaction; the RBI reserve is unaffected by the later internal transfer. Existing tills do not need to be deleted or recreated. A closed till or one from an earlier business date cannot be replenished.
 
@@ -58,6 +58,17 @@ For an existing schema matching the supplied installer, have the DBA review and 
 12. `013-teller-replenishment.sql`: branch vault to existing till replenishments.
 13. `014-simulated-reserve-opening.sql`: evidenced synthetic reserve opening scope.
 14. `015-credit-cards.sql`: credit card catalog, cards, entries, statements and request replay. Skip it if the former `011-credit-cards.sql` is already installed.
+
+Migration **015** is the file's installation order; the credit card module remains **M11** and its tables remain `M11_CC_*`. A completed former credit card installation is equivalent to 015. Do not reinstall or rename its tables. Record the filename equivalence in your deployment notes and run the read-only acceptance checks. See [the existing-installation checklist](CREDIT-CARD-MAIN-MERGE.md#sql-file-number-and-oracle-table-names).
+
+Run [acceptance/integrated-main.sql](../database/acceptance/integrated-main.sql) and [acceptance/credit-cards.sql](../database/acceptance/credit-cards.sql) after combining the schema changes. The first script also checks global object validity and main's journal/vault/reserve controls. `ALTER TABLE` can invalidate the existing treasury append-only triggers. If these exact triggers are invalid and their stored source has no compilation errors, recompile the existing definitions as schema owner, then rerun acceptance:
+
+```sql
+ALTER TRIGGER M07_TRG_SETTLEMENT_EVIDENCE_IMMUTABLE COMPILE;
+ALTER TRIGGER M07_TRG_TREASURY_LEDGER_IMMUTABLE COMPILE;
+```
+
+This revalidates the stored trigger code; it does not rename objects or change financial rows. If compilation errors remain, inspect `USER_ERRORS` and resolve the reported dependency/source problem before using affected financial workflows. Do not rerun the original clean installer to repair invalid objects. In the 7 October 2026 combined Oracle check, both triggers were repaired this way, remained enabled and rejected deletion; all invalid-object and accounting mismatch queries then returned zero rows.
 
 `012-rbi-cash-delivery-readiness.sql` and files in `database/acceptance/` are read-only diagnostics. See [the combined main/credit-card release checklist](CREDIT-CARD-MAIN-MERGE.md) for installations that already contain one branch's additions.
 

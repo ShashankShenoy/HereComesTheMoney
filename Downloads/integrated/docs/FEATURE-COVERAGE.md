@@ -1,6 +1,6 @@
 # Requested feature coverage
 
-Every requested domain has a menu entry and API-backed screens. “Integrated” means an implementation is connected in this codebase; only the scenarios in VERIFICATION.md have been executed end to end. “Boundary” means a restricted implementation, a retained interface/placeholder, or work requiring institution-specific validation. These distinctions matter before treating this as a core banking production release.
+Every requested domain has a menu entry and API-backed screens. “Integrated” means an implementation is connected in this codebase; executed scenarios are recorded in [VERIFICATION.md](VERIFICATION.md), [credit card verification](CREDIT-CARDS.md#verification) and [the main integration/Oracle record](CREDIT-CARD-MAIN-MERGE.md). “Boundary” means a restricted implementation, a retained interface/placeholder, or work requiring institution-specific validation. These distinctions matter before treating this as a core banking production release.
 
 ## IAM
 
@@ -114,7 +114,7 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Repayments | Atomic deposit debit; existing funds/fence checks; interest-first allocation; replay protection and overpayment rejection. |
 | Interest and billing | Disclosed simple ACT/365 policy without purchase grace or compounding; monthly immutable statements and source cutoffs; explicit catch-up billing. |
 | Verification | 12 credit card backend tests, existing regression suite, frontend asset test and the H2 browser workflow passed. Oracle ALPHA staff configuration, independent approvals, purchase/freeze/repayment/refund/unfreeze, replay and reconciliation passed; schema/trigger validity and acceptance exception queries passed. See the verification record for scope. |
-| Boundaries | No live card network, physical issuance, PAN/CVV/PIN, cash advances, partial refunds, disputes, rewards or automated bureau underwriting. Live Oracle concurrency, trigger enforcement branches, future monthly billing and failure injection remain deployment checks. |
+| Boundaries | No live card network, physical issuance, PAN/CVV/PIN, cash advances, partial refunds, disputes, rewards or automated bureau underwriting. Basic Oracle two-session locking and trigger rejection paths passed; full concurrent posting stress, future monthly billing and failure injection remain deployment checks. |
 
 See [credit card setup and policy](CREDIT-CARDS.md).
 
