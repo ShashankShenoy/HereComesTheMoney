@@ -1,4 +1,5 @@
 /** Oracle JET AMD runtime with Knockout owning form values. */
+import {locale} from './i18n.js';
 let koRuntime;
 export const jetReady = new Promise((resolve, reject) => {
   window.require.config({
@@ -20,7 +21,7 @@ export const jetReady = new Promise((resolve, reject) => {
       text: "/vendor/text/text",
       css: "/vendor/css/css",
     },
-    config: { ojL10n: { locale: "en" } },
+    config: { ojL10n: { locale } },
   });
   window.require(
     [

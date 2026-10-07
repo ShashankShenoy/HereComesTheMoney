@@ -21,3 +21,8 @@ dialog{border-radius:7px;color:#263b43}dialog::backdrop{background:#132b36a8}.di
 .module-search{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:18px 0}.module-search .field{min-width:min(260px,100%);margin:0}.module-search .btn{margin-bottom:1px}.ledger-internal{margin-top:24px;padding-top:18px;border-top:1px solid var(--border)}.ledger-internal h4,.ledger-journal h4{margin:0 0 8px}.ledger-journal{border:1px solid var(--border);border-radius:5px;padding:16px;margin:13px 0}.ledger-journal .hint{margin:8px 0 13px}.ledger-journal .table-wrap{margin-top:10px}.module-search+.form-error:empty{display:none}
 .ledger-internal summary{cursor:pointer;color:#165c59;font-weight:650}.ledger-internal[open] summary{margin-bottom:10px}
 .access-key-output{margin-top:16px}.access-key-output code{display:block;margin-top:9px;overflow-wrap:anywhere;user-select:all}
+.language-picker{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-size:12px;color:#536b70;font-weight:600}
+.language-picker select{min-width:90px;max-width:130px;padding:6px 8px;border:1px solid #cbd9da;border-radius:5px;background:#fff;color:#173b43}
+.login-language{position:absolute;top:24px;right:26px;z-index:2}
+.login-language .language-picker{color:#f5faf9}
+@media(max-width:760px){.language-picker{font-size:11px}.language-picker select{min-width:75px;max-width:92px}.topbar .identity{flex-wrap:wrap;justify-content:flex-end}.login-language{position:static;align-self:flex-end;margin:0 0 14px}}

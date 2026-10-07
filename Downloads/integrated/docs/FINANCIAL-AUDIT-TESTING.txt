@@ -1,0 +1,162 @@
+Financial transaction auditing: test and startup steps
+
+The implementation is in this actual repository. Its files are:
+  backend/src/main/java/com/moneybags/privacy/audit/FinancialAuditController.java
+  frontend/app.js (Audit trail -> Financial transactions)
+  backend/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java
+  frontend/financial-audit.test.js
+  test-financial-audit-oracle.ps1
+
+The new view reads immutable M05_TXN_STATUS_HISTORY evidence, which financial
+posting already writes inside its database transaction. It does not change
+transfer, payment, account, loan, treasury, Kafka or schema write logic. Existing
+uncommitted repo changes are preserved. An unavailable financial-audit request
+shows an error in that panel while existing IAM audit panels still load.
+
+1. Repeat the automated Oracle check
+
+Open PowerShell 7 and run:
+
+  Set-Location 'C:\path\to\HereComesTheMoney\Downloads\integrated'
+  .\test-financial-audit-oracle.ps1
+
+The script reads the three Oracle settings from the root .env without executing
+that file or displaying its credentials. It uses the existing offline dependency
+JARs, compiles all production sources and tests existing synthetic accounts 3/4
+(MCPALPHA0001/0002). It checks recording, account direction, balanced debit/credit,
+replay without duplicate logs, filters, audit amount visibility, authorization,
+failed-transfer rollback, Oracle immutability and approved reversal evidence.
+It rolls back all test transfers, sessions and temporary role grants,
+and checks restored balances and record counts across modules 1-10 and MBX.
+Oracle identity sequences may advance during rollback tests.
+
+Success ends with two PASS lines and:
+  Oracle financial audit acceptance test passed.
+
+The test refuses to use H2 or other account IDs if the synthetic fixture is
+missing. To use another dependency JAR directory:
+  .\test-financial-audit-oracle.ps1 -DependencyDirectory 'C:\path\to\dependency-jars'
+
+If this checkout's offline JAR directory is unavailable, obtain the runtime
+dependencies with Maven, then rerun the script:
+  mvn -f .\backend\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" dependency:copy-dependencies -DincludeScope=runtime "-DoutputDirectory=$PWD\backend\target\dependency"
+
+2. Check the frontend, including existing audit failure isolation
+
+  npm --prefix .\frontend run check
+  npm --prefix .\frontend test
+
+Expected: all tests pass, including the eight financial-audit tests. Financial tests verify account direction, exact
+amounts for audit readers, escaped text, reversals, empty/one-sided postings, loading
+the endpoint, and preserving existing IAM panels if that endpoint fails.
+
+3. Build and run the application against Oracle
+
+If the application is already running, stop it with your usual launcher before
+replacing its JAR. Choose unused ports if other services use 8091/5175.
+
+  mvn -f .\backend\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" -DskipTests package
+  npm --prefix .\frontend ci
+
+The existing IntegratedContextTest uses H2 explicitly, so -DskipTests above
+avoids running that suite; use the Oracle acceptance test from step 1.
+
+In the backend PowerShell terminal, from integrated/, import the Oracle values:
+
+  Get-Content -LiteralPath '..\..\.env' | ForEach-Object {
+    if ($_ -match '^\s*(?:\$env:)?(DB_URL|DB_USERNAME|DB_PASSWORD)\s*=\s*([''"])(.*?)\2\s*$') {
+      [Environment]::SetEnvironmentVariable($Matches[1],$Matches[3],'Process')
+    }
+  }
+  $env:FRONTEND_ORIGINS='http://localhost:5175,http://127.0.0.1:5175'
+  java -jar .\backend\target\moneybags-integrated-1.0.0.jar --server.port=8091 --server.address=127.0.0.1
+
+Use the default Oracle profile. No startup database DDL is required for this
+feature. Running from integrated/ preserves the launcher's existing relative
+runtime key paths. Keep the existing CIF and MFA keys.
+
+In a second PowerShell terminal:
+  Set-Location 'C:\path\to\HereComesTheMoney\Downloads\integrated'
+  $env:BACKEND_URL='http://127.0.0.1:8091'
+  $env:PORT='5175'
+  npm --prefix .\frontend start
+
+Open http://localhost:5175 and check backend health at
+http://127.0.0.1:8091/actuator/health. The supplied start-oracle-alpha.ps1 launcher
+is also usable if its ignored integrated/.env.ps1 has already been configured.
+This checkout currently has root/.env; the manual steps above use that file.
+
+4. Verify one transfer through the UI
+
+Use approved synthetic test accounts in Oracle. Unlike step 1, transactions made
+through the UI persist. The existing automated test is preferable when you want
+to leave balances unchanged.
+
+a. Note the source and target balances and their account IDs.
+b. As a permitted user, open Transactions & ledger -> Post an internal transfer.
+   Choose the two distinct test accounts, a small permitted amount, today's
+   business date, a permitted channel and a new request key. Submit once and
+   note its transaction ID. Expect POSTED, source debit and equal target credit.
+c. As a user with GLOBAL IAM_AUDIT_READ, open Audit trail -> Financial transactions.
+   Search by that transaction ID. Expect one POSTED row showing the same source
+   and target IDs, masked account endings, actor and recorded timestamp.
+d. Search by the target account ID; the same transfer must appear. Searching by
+   an unrelated account ID together with that transaction ID must return none.
+e. The exact transaction amount must be visible to every user authorized to open
+   the financial audit trail. No account-holder access key or TXN_READ grant is
+   required for the amount in this audit view.
+   Amount is returned as a decimal string so large values retain their cents in
+   the browser. A missing amount is displayed as a dash, never as zero.
+   Use From date and To date to filter the recorded audit-event date. Both dates
+   include their whole day in the configured moneybags.business-zone (default
+   Asia/Kolkata). Either date may be blank; a reversed range returns an error.
+   Dates combine with transaction/account IDs. Clearing both dates restores the
+   existing latest-100 view. No transaction data is modified by these filters.
+f. Replay the exact same transfer command with the same request key. Expect the
+   original transaction ID, unchanged balances and still one POSTED audit row.
+   Changing the amount under that key must return a conflict.
+g. A failed transfer must not appear as POSTED or change balances.
+h. If testing reversal, use the existing independent maker/checker workflow.
+   Pending approval is excluded. After approval the original has POSTED and
+   REVERSED history; the separate reversal transaction has POSTED evidence with
+   the opposite account direction and a link to the original transaction.
+i. A customer or user without global IAM_AUDIT_READ must not read the global log.
+
+Synthetic demo staff currently do not have global IAM_AUDIT_READ. The automated
+test creates an uncommitted temporary authorization fixture and removes it by
+rollback. For manual UI viewing, use your already authorized audit administrator
+or your normal reviewed access-request workflow.
+
+5. Confirm the recorded evidence with read-only SQL
+
+Using your existing Oracle connection, substitute the transaction ID below:
+
+  SELECT T.TXN_ID,T.TXN_TYPE,T.SOURCE_ACCOUNT_ID,T.TARGET_ACCOUNT_ID,
+         H.TO_STATUS,H.ACTOR_ID,H.CHANGED_AT
+    FROM M05_TXN_TRANSACTION_LOG T
+    JOIN M05_TXN_STATUS_HISTORY H ON H.TXN_ID=T.TXN_ID
+   WHERE T.TXN_ID=<transaction_id>
+     AND H.TO_STATUS IN ('POSTED','REVERSED')
+   ORDER BY H.CHANGED_AT,H.TXN_STATUS_HISTORY_ID;
+
+  SELECT COUNT(*) AS POSTED_AUDIT_ROWS
+    FROM M05_TXN_STATUS_HISTORY
+   WHERE TXN_ID=<transaction_id> AND TO_STATUS='POSTED';
+
+Expected: POSTED_AUDIT_ROWS=1, including after an identical replay.
+
+  SELECT IS_BALANCED,DEBIT_TOTAL,CREDIT_TOTAL
+    FROM M05_V_GL_JOURNAL_CONTROL
+   WHERE JOURNAL_ID IN
+         (SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE TXN_ID=<transaction_id>);
+
+Expected: IS_BALANCED='Y' and equal debit and credit totals.
+
+Scope of assurance
+
+All production backend sources compile; focused Oracle financial tests and the
+frontend tests passed. The Oracle test verifies restored balances and observed
+table counts across the modules. This is evidence for the changed audit path,
+not a guarantee of every other microservice workflow, concurrency scenario or
+broker integration. Perform your usual account/payment/loan smoke checks after
+deployment. The app has been started locally against Oracle and its sign-in page was checked in the browser. An authenticated audit-screen demonstration awaits sign-in with an existing authorized audit administrator. No public hosting deployment was performed.

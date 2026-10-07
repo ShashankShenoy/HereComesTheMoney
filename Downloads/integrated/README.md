@@ -1,5 +1,7 @@
 # Money Bags — integrated banking workspace
 
+English, Hindi and Kannada interface support is documented in [Multilingual UI](docs/MULTILINGUAL.md).
+
 One Spring Boot application, one Oracle JET / Knockout frontend, and the supplied Oracle schema. The original module folders are preserved. New work lives entirely in `integrated/`.
 
 **This is a runnable integration and local banking demonstrator, not a production-certified bank.** All requested domains have navigation and API-backed workflow screens. Supported money movements use balanced ledger postings. External rails are explicitly simulated. Oracle acceptance, broker integration, institution-specific policies and compliance validation remain deployment gates; see [feature coverage](docs/FEATURE-COVERAGE.md).
