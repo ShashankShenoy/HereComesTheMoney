@@ -110,15 +110,68 @@ java -jar Downloads/integrated/backend/target/moneybags-integrated-1.0.0.jar
 
 For the development proxy, set `BACKEND_URL=http://127.0.0.1:8080` and run `node Downloads/integrated/frontend/dist/server.mjs`. Use a TLS reverse proxy and institution-managed deployment configuration outside the local demo.
 
-On this workstation, `& ./Downloads/integrated/start-oracle-alpha.ps1` runs the same four build commands and starts that application against the already configured ALPHA schema with OpenRouter, at `http://localhost:5174`; `& ./Downloads/integrated/stop-oracle-alpha.ps1` stops it. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
+### Oracle connection settings after cloning
+
+The launcher requires `Downloads/integrated/.env.ps1`. This private file is ignored by Git and is therefore missing from a fresh clone. From the repository root, copy the supplied template **only if `.env.ps1` does not already exist**:
+
+```powershell
+if (-not (Test-Path -LiteralPath '.\Downloads\integrated\.env.ps1')) {
+    Copy-Item -LiteralPath '.\Downloads\integrated\.env.example.ps1' -Destination '.\Downloads\integrated\.env.ps1'
+}
+notepad .\Downloads\integrated\.env.ps1
+```
+
+Replace the placeholders using the same Oracle connection you use in SQL Developer:
+
+- `DB_URL`: `jdbc:oracle:thin:@HOST:PORT/SERVICE_NAME`. If that connection uses a **SID** instead of a service name, use `jdbc:oracle:thin:@HOST:PORT:SID`.
+- `DB_USERNAME`: the owner of the existing Moneybags tables, not the banking application's login name.
+- The template prompts for the Oracle password with hidden input on each start; do not put a real password in the tracked example file. It is passed to Java through the environment. AI provider keys are optional and separate from the database settings.
+
+Save the file, connect to the required network/VPN, and run `& ./Downloads/integrated/start-oracle-alpha.ps1`. The launcher checks configuration before building. Do not enable the `local` Spring profile for Oracle. Startup does not install database migrations or copy H2 demo data into Oracle.
+
+For basic Oracle host/port URLs, the launcher checks DNS and database-port reachability before building. `ORA-17868: Unknown host specified` means the configured hostname cannot be resolved; connect the database VPN and verify the hostname. After an already successful build, use `start-oracle-alpha.ps1 -SkipBuild` on the VPN. The launcher records its processes immediately, includes the actual JVM behind Windows `javapath`, and cleans up its own processes if startup fails. The stop script checks each recorded process's start time before stopping it. The frontend health check uses basic HTTP parsing so it works in Windows PowerShell without Internet Explorer setup.
+
+`& ./Downloads/integrated/start-oracle-alpha.ps1` runs the four build commands and starts the application against the Oracle schema configured in `.env.ps1`, at `http://localhost:5174`; `& ./Downloads/integrated/stop-oracle-alpha.ps1` stops it. The original ALPHA workstation also configured OpenRouter in its private settings; those settings are not included in a clone. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
 
 After pulling new code, run `stop-oracle-alpha.ps1` and then `start-oracle-alpha.ps1` from the same updated checkout. The restart rebuilds the JAR and UI and replaces the running processes.
 
 If the Oracle VPN blocks Maven Central, stop Oracle Alpha and run `& ./Downloads/integrated/build-before-start.ps1` while disconnected from the VPN. Reconnect, then run `& ./Downloads/integrated/start-oracle-alpha.ps1 -SkipBuild`. The `-SkipBuild` path verifies that the source files, JAR, and frontend output match the completed build; it refuses to launch after a pull or source edit until you rebuild.
 
+### Oracle startup and VPN recovery
+
+Use the same **Windows PowerShell** window for building and starting. On this workstation, a build recorded in Windows PowerShell 5.1 failed the existing fingerprint check in PowerShell 7 despite unchanged source; use Windows PowerShell for both commands. The commands below use Windows PowerShell (`powershell.exe`). From the repository root:
+
+```powershell
+cd "C:\Users\Nikunj_Mittal\Desktop\Training\MONEYBAGS_PROJECT\moneybags-integrated"
+# Only if this window refuses to run the scripts:
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+& .\Downloads\integrated\stop-oracle-alpha.ps1
+# If dependencies are blocked by the VPN, disconnect before this build:
+& .\Downloads\integrated\build-before-start.ps1
+# Connect the database VPN before the next command and keep it connected:
+& .\Downloads\integrated\start-oracle-alpha.ps1 -SkipBuild
+```
+
+After a successful build, routine starts need only the VPN and `start-oracle-alpha.ps1 -SkipBuild`; stop an existing run first. Open [Oracle Moneybags](http://localhost:5174) and sign in with an application account. The Oracle schema password is separate from the application password. A backend restart preserves Oracle data.
+
+If connection fails:
+
+1. Run `stop-oracle-alpha.ps1`, connect/reconnect the database VPN, and confirm the same connection works in SQL Developer.
+2. Check the database hostname and port from `.env.ps1` using `Resolve-DnsName <database-host>` and `Test-NetConnection <database-host> -Port 1521`. DNS success is required first; `TcpTestSucceeded` must be `True`. Successful TCP connectivity does not verify the password or service name.
+3. Restart with `-SkipBuild` from the same Windows PowerShell environment used for the build. If source actually changed, stop, rebuild on the network that permits Maven/npm, reconnect the VPN, and start again.
+4. For a remaining failure, read `Downloads/integrated/.runtime/oracle-alpha-backend.log` and `.err.log`. [ORA-17868](https://docs.oracle.com/en/error-help/db/ora-17868/) indicates an unknown hostname; a connection timeout points to network/listener reachability; [ORA-01017](https://docs.oracle.com/en/error-help/db/ora-01017/) indicates invalid credentials or denied database authorization. Do not reinstall the schema to fix a VPN failure.
+
+The launcher now rejects missing settings, unreachable database hosts/ports, and occupied app ports before launching, and cleans up its recorded processes after startup failure. If the VPN drops during a run, reconnect it and check [backend health](http://127.0.0.1:8091/actuator/health); restart with stop/start if health remains down.
+
+### Is a database COMMIT needed?
+
+- **Application actions:** no manual SQL Developer `COMMIT` is needed. Successful product configuration, approval, purchases, repayments and refunds commit through the application's transactions; a failed command rolls back its writes.
+- **Migration 011:** its final `COMMIT;` commits the permission/ledger seed changes. Oracle also commits DDL implicitly. If the full script already completed successfully, do not run it again or issue another commit for the application.
+- **Your manual SQL `INSERT`/`UPDATE`/`DELETE`:** commit the intended successful changes in that SQL session unless autocommit is enabled. Acceptance scripts contain only `SELECT` queries and need no commit. A SQL Developer commit cannot commit a separate application's connection. See [Oracle COMMIT documentation](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/COMMIT.html).
+
 ## Verification and handoff
 
-**Credit card addition — 7 October 2026:** Maven `verify` passed all 32 backend tests; all 14 frontend tests, JavaScript checks, and the frontend build passed. A browser walkthrough verified application, independent approval, activation, purchase, repayment and ledger reconciliation. Oracle migration 011 is supplied but has not been applied to a live Oracle database. See [credit card verification and acceptance](docs/CREDIT-CARDS.md#verification).
+**Credit card addition — 7 October 2026:** Maven `verify` passed all 32 backend tests; all 14 frontend tests, JavaScript checks, and the frontend build passed. Both the H2 workflow and an Oracle ALPHA staff workflow passed. On Oracle, `admin` proposed Moneybags Classic and `checker1` independently approved the terms and a INR 25,000 synthetic card. Activation, purchase, frozen-card repayment, full refund, unfreeze, replay and ledger reconciliation passed. Six tables, three enabled/valid triggers and three ledger accounts were verified; all acceptance exception queries returned zero rows. The test deposit balance was restored to INR 1,050 and the card balance to zero. See [credit card verification and acceptance](docs/CREDIT-CARDS.md#verification) for scope and remaining checks.
 
 
 The integrated test suite covers authentication/CORS, signed-in customer ownership and officer key checks, balanced/idempotent transfers, activation fences, teller controls, FX approval, one-time key issuance, reproducible statements and PDF downloads, payment settlement, loan disbursement/accrual/repayment, exact-command override approval, freeze/release, fee collection and branch isolation.

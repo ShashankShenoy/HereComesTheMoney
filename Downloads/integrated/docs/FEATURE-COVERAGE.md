@@ -113,8 +113,8 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Purchases and refunds | Immediate simulated merchant posting; full refund once, with excess credited to the linked deposit account. Balanced M05 journals. |
 | Repayments | Atomic deposit debit; existing funds/fence checks; interest-first allocation; replay protection and overpayment rejection. |
 | Interest and billing | Disclosed simple ACT/365 policy without purchase grace or compounding; monthly immutable statements and source cutoffs; explicit catch-up billing. |
-| Verification | 12 credit card backend tests, existing regression suite, frontend asset test and a complete local browser workflow passed. |
-| Boundaries | No live card network, physical issuance, PAN/CVV/PIN, cash advances, partial refunds, disputes, rewards or automated bureau underwriting. Oracle acceptance remains required. |
+| Verification | 12 credit card backend tests, existing regression suite, frontend asset test and the H2 browser workflow passed. Oracle ALPHA staff configuration, independent approvals, purchase/freeze/repayment/refund/unfreeze, replay and reconciliation passed; schema/trigger validity and acceptance exception queries passed. See the verification record for scope. |
+| Boundaries | No live card network, physical issuance, PAN/CVV/PIN, cash advances, partial refunds, disputes, rewards or automated bureau underwriting. Live Oracle concurrency, trigger enforcement branches, future monthly billing and failure injection remain deployment checks. |
 
 See [credit card setup and policy](CREDIT-CARDS.md).
 

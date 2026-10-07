@@ -57,4 +57,32 @@ Verified locally on 7 October 2026:
 - **Browser workflow passed** against the real local H2 backend: customer application → checker approval → customer activation → simulated purchase → repayment → matched ledger reconciliation. Accepted terms remained available. The screen was visually checked at narrow and desktop widths, with no browser warnings/errors in the completed workflow.
 - The executable JAR and `frontend/dist` were rebuilt. Temporary browser-test servers were stopped after verification.
 
-Oracle migration execution, Oracle triggers and locking behavior have **not** been verified against a live Oracle instance. Use [the read-only Oracle acceptance checks](../database/acceptance/credit-cards.sql) after installing migration 011, and exercise the concurrency/rollback flows in an isolated Oracle test schema before deployment. No real Oracle database was modified during this implementation.
+### Oracle ALPHA verification — 7 October 2026
+
+Migration 011 was already installed in Oracle ALPHA when this verification began. A separate read-only JDBC session confirmed committed configuration and balances and ran [the Oracle acceptance checks](../database/acceptance/credit-cards.sql): six `M11_CC_*` tables, three enabled and valid credit card triggers, three active INR credit card ledger accounts, and zero rows from every invalid-object/accounting exception query.
+
+Configuration completed through the live application's staff screens:
+
+- `admin` proposed **Moneybags Classic / MB_CLASSIC / version 1**, using the terms above. `checker1` independently approved it.
+- The existing `BANK_CHECKER` approval role has an INR `CC_LIMIT` ceiling of 200,000 and maximum APR of 24%. No application user was given a new role during this verification.
+- `admin` applied on behalf of the existing synthetic MCP customer linked to `MCPALPHA0001`. `checker1` approved INR 25,000, issuing synthetic card ending **5435**. The card was activated and remains active with zero principal/interest and INR 25,000 available credit. Its next statement is **1 November 2026**.
+
+| Live Oracle check | Result |
+| --- | --- |
+| Simulated purchase | INR 100 posted to the simulated merchant ledger; card balance became INR 100. |
+| Freeze and repay | Frozen card spending was rejected. An INR 40 repayment succeeded while frozen. |
+| Full refund | The INR 100 refund cleared INR 60 remaining principal and credited INR 40 back to the deposit account. |
+| Financial state after verification | Exactly three card entries remain: purchase, repayment and refund. Deposit balance returned to its starting INR 1,050; card principal, interest and receivable are zero. Reconciliation is `MATCHED`. |
+| Request replay | Retrying the committed repayment key returned the original entry from Oracle's CLOB response without another debit or entry. Reusing the key with changed amount returned `IDEMPOTENCY_CONFLICT`. |
+| Backend rejection checks | Restricted checker product creation, purchases and repayments returned HTTP 403. Maker self-approval, frozen purchases, duplicate refund, over-limit purchase and early statement generation returned HTTP 409. No rejected command added a card entry. |
+| Launchers | Oracle startup and loopback frontend/backend health passed on VPN. Startup failure cleanup, actual JVM process tracking and Windows PowerShell basic HTTP parsing were checked. |
+
+The user-supplied `checker` account currently has `BANK_ADMIN`, so it was not used as the restricted checker. `checker1` has `BANK_CHECKER`: it can read and independently approve within authority, but cannot initiate products, purchases or repayments. The officer's existing branch role was inspected, but a full officer workflow was not exercised.
+
+This live workflow used administrator actions on an existing **synthetic** customer. No live Oracle customer login was tested because that fixture's customer password was unavailable; customer ownership flows were tested in H2. Product configuration, the synthetic card and immutable audit/ledger entries persist in Oracle after stopping the app. The completed refund restores the starting deposit balance without deleting the audit trail.
+
+The first scheduled statement was not issued early. Interest/monthly statement cutoff behavior and concurrent overspending passed the local tests; live Oracle concurrency, trigger rejection behavior, later billing and failure injection still need isolated Oracle tests before deployment. Trigger existence, enabled state and compilation validity were checked, not every trigger's enforcement branch. No card-network connection was exercised.
+
+### Saving Oracle changes
+
+Application commands commit their successful transactions automatically. Migration 011 already ends with `COMMIT;`, and Oracle DDL has implicit commits. No extra manual commit is required after a successful migration or UI action. Manual SQL DML requires a commit in that same SQL session unless autocommit is enabled; the acceptance `SELECT` queries do not. See [startup/VPN and commit guidance](../README.md#oracle-startup-and-vpn-recovery).
