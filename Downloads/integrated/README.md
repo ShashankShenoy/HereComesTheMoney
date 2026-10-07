@@ -11,7 +11,7 @@ One Spring Boot application, one Oracle JET / Knockout frontend, and the supplie
 Prerequisites: Java 17+, Maven 3.9+, Node.js 20+ and npm. From the repository root, start the app with:
 
 ```powershell
-& ./integrated/start-local.ps1
+& ./Downloads/integrated/start-local.ps1
 ```
 
 On every start, the launcher calls `build-before-start.ps1`, which runs Maven clean verify, npm ci, the frontend check, and the frontend build. It serves the newly built `frontend/dist` files.
@@ -21,7 +21,7 @@ Open [the banking workspace](http://localhost:5173). The backend listens at `htt
 The starter runs Java and Node in hidden processes and checks backend health. A failed build stops startup before either process launches. Logs and verified process IDs are stored under `.runtime/`. Stop the running app before pulling changes and starting again:
 
 ```powershell
-& ./integrated/stop-local.ps1
+& ./Downloads/integrated/stop-local.ps1
 ```
 
 `start-local.ps1 -BackendPort 8091 -FrontendPort 5174` selects alternate ports. The local profile uses Tomcat NIO2 to accommodate Windows hosts where the default Java selector cannot create its loopback socket. It binds both services to loopback.
@@ -61,8 +61,17 @@ The sign-in page offers **Create a customer account** when `CUSTOMER_SIGNUP_ENAB
 
 Other deployments leave sign-up disabled by default. Use `CUSTOMER_SIGNUP_BRANCH` to select the home branch, and disable the feature before connecting the application to real customer data.
 
+## Credit cards
+
+Open **Banking → Credit cards** for versioned product terms, applications with independent approval, card activation/freeze/block/closure, simulated purchases and refunds, monthly statements, and repayments from the linked deposit account. The local demo includes **Moneybags Classic**; sign in as `customer` to apply and `checker` to approve, then return to the customer to activate the card.
+
+The service adds six `M11_CC_*` tables and balanced M05 postings, with request replay protection, database locks, credit-limit checks, current KYC checks and scoped access. Its configurable demo interest policy uses simple ACT/365 interest from purchase with no interest-free grace period. See [credit card terms, setup, APIs and verification](docs/CREDIT-CARDS.md).
+
+Existing Oracle deployments must install **`database/011-credit-cards.sql` once** after migrations 001–010, configure `CC_LIMIT` approval authority, and sign in again. The local H2 demo installs its generated schema automatically. No Oracle migration is executed by application startup. Card-network processing is simulated.
+
 ## What is connected
 
+- Credit card products, independent application approval, simulated purchases/refunds, card controls, monthly billing and linked-account repayments. See [credit card setup and workflow](docs/CREDIT-CARDS.md).
 - IAM, customer/CIF/KYC and versioned product administration.
 - Account opening, parties, nominees, restrictions, limits, approved overrides and closure controls.
 - Transfers, teller cash, fixed-fee collection, reversal workflows, holds, double-entry journals and reconciliation.
@@ -74,7 +83,7 @@ Other deployments leave sign-up disabled by default. Use `CUSTOMER_SIGNUP_BRANCH
 - Currency master, approved FX rates and an optional HTTPS provider adapter.
 - Optional Kafka publication from transactional outboxes for M05–M08.
 
-Banking screens use the backend OpenAPI contract to render Oracle JET fields and Knockout observables, including nested objects, repeating lines, dates, idempotency keys and optimistic-version headers. The menu uses Oracle JET CoreRouter. Original IAM/CIF/product screens remain integrated.
+Banking screens use the backend OpenAPI contract to render Oracle JET fields and Knockout observables, including nested objects, repeating lines, dates, idempotency keys and optimistic-version headers. The menu uses Oracle JET CoreRouter. Original IAM/CIF/product screens remain integrated. Credit cards have a dedicated customer/staff workspace using the same Oracle JET forms and authenticated APIs.
 
 ### Customer assistant and MCP
 
@@ -86,7 +95,7 @@ The same role-filtered tools are available at `POST /api/v1/assistant/mcp` with 
 
 Read [the Oracle and operations runbook](docs/OPERATIONS.md) first. The application does not migrate Oracle at startup.
 
-- For an existing installed schema, inspect compatibility and apply only missing additive scripts `002` through `008` with your DBA.
+- For an existing installed schema, inspect compatibility and apply only missing additive scripts `002` through `011` with your DBA.
 - `database/001-original-oracle.sql` is the supplied **destructive clean-install script**. It is retained for traceability and fresh disposable schemas. Never run it against an existing database containing needed data.
 - Supply `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and `FRONTEND_ORIGINS` through your environment or secret manager. No original connection-guide credentials were copied into application configuration.
 - Omit `--spring.profiles.active=local`. Enable first-admin bootstrap only for an empty IAM setup, with a new private password.
@@ -96,18 +105,21 @@ $env:DB_URL='jdbc:oracle:thin:@<host>:1521/<service>'
 $env:DB_USERNAME='<application-user>'
 $env:DB_PASSWORD='<obtain-from-your-secret-manager>'
 $env:FRONTEND_ORIGINS='https://<your-banking-host>'
-java -jar integrated/backend/target/moneybags-integrated-1.0.0.jar
+java -jar Downloads/integrated/backend/target/moneybags-integrated-1.0.0.jar
 ```
 
-For the development proxy, set `BACKEND_URL=http://127.0.0.1:8080` and run `node integrated/frontend/dist/server.mjs`. Use a TLS reverse proxy and institution-managed deployment configuration outside the local demo.
+For the development proxy, set `BACKEND_URL=http://127.0.0.1:8080` and run `node Downloads/integrated/frontend/dist/server.mjs`. Use a TLS reverse proxy and institution-managed deployment configuration outside the local demo.
 
-On this workstation, `& ./integrated/start-oracle-alpha.ps1` runs the same four build commands and starts that application against the already configured ALPHA schema with OpenRouter, at `http://localhost:5174`; `& ./integrated/stop-oracle-alpha.ps1` stops it. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
+On this workstation, `& ./Downloads/integrated/start-oracle-alpha.ps1` runs the same four build commands and starts that application against the already configured ALPHA schema with OpenRouter, at `http://localhost:5174`; `& ./Downloads/integrated/stop-oracle-alpha.ps1` stops it. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
 
 After pulling new code, run `stop-oracle-alpha.ps1` and then `start-oracle-alpha.ps1` from the same updated checkout. The restart rebuilds the JAR and UI and replaces the running processes.
 
-If the Oracle VPN blocks Maven Central, stop Oracle Alpha and run `& ./integrated/build-before-start.ps1` while disconnected from the VPN. Reconnect, then run `& ./integrated/start-oracle-alpha.ps1 -SkipBuild`. The `-SkipBuild` path verifies that the source files, JAR, and frontend output match the completed build; it refuses to launch after a pull or source edit until you rebuild.
+If the Oracle VPN blocks Maven Central, stop Oracle Alpha and run `& ./Downloads/integrated/build-before-start.ps1` while disconnected from the VPN. Reconnect, then run `& ./Downloads/integrated/start-oracle-alpha.ps1 -SkipBuild`. The `-SkipBuild` path verifies that the source files, JAR, and frontend output match the completed build; it refuses to launch after a pull or source edit until you rebuild.
 
 ## Verification and handoff
+
+**Credit card addition — 7 October 2026:** Maven `verify` passed all 32 backend tests; all 14 frontend tests, JavaScript checks, and the frontend build passed. A browser walkthrough verified application, independent approval, activation, purchase, repayment and ledger reconciliation. Oracle migration 011 is supplied but has not been applied to a live Oracle database. See [credit card verification and acceptance](docs/CREDIT-CARDS.md#verification).
+
 
 The integrated test suite covers authentication/CORS, signed-in customer ownership and officer key checks, balanced/idempotent transfers, activation fences, teller controls, FX approval, one-time key issuance, reproducible statements and PDF downloads, payment settlement, loan disbursement/accrual/repayment, exact-command override approval, freeze/release, fee collection and branch isolation.
 

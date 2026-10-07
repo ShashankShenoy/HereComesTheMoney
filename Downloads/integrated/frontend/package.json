@@ -8,7 +8,7 @@
     "start": "node server.mjs",
     "build": "node tools/build.mjs",
     "test": "node --test",
-    "check": "node --check app.js && node --check assistant.js && node --check assistant-markdown.js && node --check presentation.js && node --check api.js && node --check banking.js && node --check domains.js && node --check i18n.js && node --check server.mjs"
+    "check": "node --check app.js && node --check assistant.js && node --check assistant-markdown.js && node --check presentation.js && node --check api.js && node --check banking.js && node --check credit-cards.js && node --check domains.js && node --check i18n.js && node --check server.mjs"
   },
   "engines": {
     "node": ">=20"

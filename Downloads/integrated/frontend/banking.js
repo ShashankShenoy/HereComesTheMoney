@@ -1,3 +1,4 @@
+import {creditCardsScreen,bindCreditCards} from './credit-cards.js';
 import {api,getSession,getCustomerHash,setCustomerHash} from './api.js';
 import {esc,table,field,select,badge,errorText,toast,dialog} from './ui.js';
 import {enhanceForms,validateJet,jetReady} from './jet.js';
@@ -11,6 +12,7 @@ export const bankingPages={
  beneficiaries:{title:'Beneficiaries',permission:'BENEFICIARY_VERIFY',icon:'♧',intro:'Register payment recipients and complete independent verification.',prefix:['/beneficiaries']},
  payments:{title:'Payments & clearing',permission:'PAYMENT_READ',icon:'↗',intro:'Initiate payments and follow simulated UPI, IMPS, NEFT, and RTGS processing.',prefix:['/payments','/dispatches','/clearing-batches','/reconciliation-exceptions','/approvals','/rail-messages']},
  treasury:{title:'Treasury & RBI ledger',permission:'TREASURY_READ',icon:'◈',intro:'Review the simulated local RBI reserve ledger, liquidity holds, settlement cycles, and reconciliation.',prefix:['/treasury/']},
+ creditCards:{title:'Credit cards',permission:'CC_READ',icon:'▰',intro:'Apply for a card, review approved terms, manage spending, and repay your balance.',prefix:['/credit-cards']},
  loans:{title:'Loans',permission:'LOAN_READ',icon:'⌂',intro:'Origination, assessment, sanction, offers, documentation, and servicing.',prefix:['/loans','/banking/facilities']},
  statements:{title:'Statements & documents',permission:'STATEMENT_READ',icon:'▧',intro:'Create date-range statements from the posted ledger and download PDF or CSV records.',prefix:['/reporting','/statements','/statement-','/catalog']},
  privacy:{title:'Privacy & compliance',permission:'PRIVACY_CONSENT_VIEW',icon:'◇',intro:'Manage processing purposes, consent, legal holds, privacy cases, and audit evidence.',prefix:['/privacy']},
@@ -231,6 +233,7 @@ export async function bankingScreen(page){
  active=page;const config=bankingPages[page];
  const customer=getSession().user.userType==='CUSTOMER';
  const head='<div class="page-heading"><div><p class="eyebrow">'+(customer?'YOUR BANKING':'BANKING OPERATIONS')+'</p><h1>'+esc(config.title)+'</h1><p>'+esc(customer&&page==='accounts'?'View your accounts and open an eligible savings or current account.':config.intro)+'</p></div></div>';
+ if(page==='creditCards')return head+await creditCardsScreen(renderApp);
  if(page==='customerAccess')return customer
   ?head+'<section class="panel"><div class="panel-heading"><h3>Your account access key</h3></div><div class="panel-body"><div class="notice">Your sign-in already lets you view transactions for accounts linked to you. You do not need a key for your own details.</div><p>If an authorized bank officer needs to view your account details, you can generate a new key and give it to them privately. The previous key stops working immediately. An existing key cannot be displayed again.</p><button type="button" class="btn primary" data-bank-rotate>Generate a new account-holder key</button><div id="hash-result" role="status" aria-live="polite"></div></div></section>'
   :staffAccessPage(head);
@@ -311,6 +314,7 @@ function bindTransactionForms(){
  document.querySelectorAll('[data-txn-detail]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{const account=transactionLegacy?{accountId:transactionAccountId}:{accountNumber:transactionAccountNumber};transactionDetail=await api('/banking/transactions/'+encodeURIComponent(button.dataset.txnDetail)+'/details?'+new URLSearchParams(account));refreshTransactionPanel();document.querySelector('#transaction-activity .result-details')?.scrollIntoView({block:'nearest',behavior:'smooth'});}catch(error){toast(errorText(error),true);button.disabled=false;}}));
 }
 export function bindBankingForms(){
+ bindCreditCards(renderApp);
  bindTransactionForms();
  const showOperations=document.querySelector('[data-bank-show-operations]');
  if(showOperations)showOperations.onclick=async()=>{transactionOperationsOpen=true;await renderApp();};

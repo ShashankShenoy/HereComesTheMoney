@@ -28,7 +28,7 @@ public class LocalDemoSeed implements ApplicationRunner {
   String checker=user("checker","EMPLOYEE",checkerRole,"GLOBAL");
   String customerRole=UUID.randomUUID().toString();
   db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,'RETAIL_CUSTOMER','Retail customer','ACTIVE','N')",customerRole);
-  for(String code:List.of("ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE","STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW","FX_READ","LOAN_READ","LOAN_ACCEPT","CIF_READ","PRODUCT_READ"))
+  for(String code:List.of("ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE","STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW","FX_READ","LOAN_READ","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY"))
    db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",customerRole,code);
   String customer=user("customer","CUSTOMER",customerRole,"SELF");
   String other=user("customer2","CUSTOMER",customerRole,"SELF");
@@ -97,6 +97,11 @@ public class LocalDemoSeed implements ApplicationRunner {
    for(String type:List.of("NORMAL","REVERSAL","RETURN","ADJUSTMENT"))
     db.update("INSERT INTO M10_NARRATION_CATALOG(NARRATION_CATALOG_ID,NARRATION_CODE,LOCALE_CODE,AUDIENCE_CODE,VERSION_NO,RENDERED_TEXT,EFFECTIVE_FROM,APPROVAL_STATUS,CHECKSUM_SHA256,APPROVED_BY,APPROVED_AT,CREATED_BY) VALUES (?,?,'en-IN',?,1,?,?,'APPROVED',?,?,SYSTIMESTAMP,?)",UUID.randomUUID().toString(),type,audience,type.equals("NORMAL")?"Account transaction":type,OffsetDateTime.now().minusDays(30),"b".repeat(64),checker,admin);
   }
+  db.execute("ALTER TABLE M05_GL_ACCOUNT ALTER COLUMN GL_ACCOUNT_ID RESTART WITH 20");
+  for(Object[] ccGl:List.of(new Object[]{"CC_RECEIVABLE","Credit card receivables","ASSET","DR"},new Object[]{"CC_SETTLEMENT","Simulated card merchant settlement","LIABILITY","CR"},new Object[]{"CC_INTEREST","Credit card interest income","INCOME","CR"}))
+   db.update("INSERT INTO M05_GL_ACCOUNT(GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (?,?,?,?)",ccGl);
+  db.update("INSERT INTO M11_CC_PRODUCT(PRODUCT_ID,PRODUCT_CODE,PRODUCT_NAME,VERSION_NO,STATUS,MINIMUM_LIMIT,MAXIMUM_LIMIT,ANNUAL_RATE_PCT,MIN_PAYMENT_PCT,MIN_PAYMENT_FLOOR,BILLING_DAY,PAYMENT_DUE_DAYS,DESCRIPTION,MAKER_ID,CHECKER_ID,DECISION_REASON,DECIDED_AT) VALUES ('demo-credit-classic','MB_CLASSIC','Moneybags Classic',1,'APPROVED',10000,200000,24,5,200,1,20,'Demo INR card. Simple daily ACT/365 interest from purchase; no interest-free period, annual fee or late fee.',?,?,'Synthetic local fixture',SYSTIMESTAMP)",admin,checker);
+  for(String ccRole:List.of(role,checkerRole))db.update("INSERT INTO M01_IAM_ROLE_AUTHORITY(AUTHORITY_ID,ROLE_ID,AUTHORITY_CODE,CURRENCY_CODE,MAX_AMOUNT,MAX_RATE_PCT,VALID_FROM) VALUES (?,?,'CC_LIMIT','INR',200000,48,?)",UUID.randomUUID().toString(),ccRole,OffsetDateTime.now().minusDays(1));
   for(String pair:List.of("M03_PM_PRODUCT:PRODUCT_ID","M03_PM_PRODUCT_VERSION:PRODUCT_VERSION_ID","M04_BANK_ACCOUNT:ACCOUNT_ID","M05_GL_ACCOUNT:GL_ACCOUNT_ID","M05_TXN_TRANSACTION_LOG:TXN_ID","M07_RESERVE_ACCOUNT:RESERVE_ACCOUNT_ID")){var names=pair.split(":");db.execute("ALTER TABLE "+names[0]+" ALTER COLUMN "+names[1]+" RESTART WITH 100");}
  }
  private String user(String name,String type,String role,String scope){
