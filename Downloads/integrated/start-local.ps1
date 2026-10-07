@@ -4,13 +4,13 @@ $taskRoot=$PSScriptRoot
 $runtime=Join-Path $taskRoot '.runtime'
 New-Item -ItemType Directory -Force $runtime | Out-Null
 if(Test-Path (Join-Path $runtime 'processes.json')){throw 'A run record exists. Run stop-local.ps1 before starting another instance.'}
+& (Join-Path $taskRoot 'build-before-start.ps1')
 $jar=Join-Path $taskRoot 'backend/target/moneybags-integrated-1.0.0.jar'
-if(!(Test-Path $jar)){throw 'Build the backend first: mvn -f backend/pom.xml verify'}
-if(!(Test-Path (Join-Path $taskRoot 'frontend/node_modules'))){throw 'Install frontend dependencies first: npm --prefix frontend ci'}
+if(!(Test-Path $jar)){throw 'Maven verify finished without creating the backend JAR.'}
 $backend=Start-Process -FilePath 'java' -ArgumentList @('-Djava.net.preferIPv4Stack=true','-jar',('"'+$jar+'"'),'--spring.profiles.active=local',("--server.port="+$BackendPort)) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'backend.log') -RedirectStandardError (Join-Path $runtime 'backend.err.log') -PassThru
 $env:BACKEND_URL="http://127.0.0.1:$BackendPort"
 $env:PORT="$FrontendPort"
-$frontend=Start-Process -FilePath 'node' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend') -RedirectStandardOutput (Join-Path $runtime 'frontend.log') -RedirectStandardError (Join-Path $runtime 'frontend.err.log') -PassThru
+$frontend=Start-Process -FilePath 'node' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend/dist') -RedirectStandardOutput (Join-Path $runtime 'frontend.log') -RedirectStandardError (Join-Path $runtime 'frontend.err.log') -PassThru
 @{backend=$backend.Id;frontend=$frontend.Id;backendStartTicks=$backend.StartTime.ToUniversalTime().Ticks.ToString();frontendStartTicks=$frontend.StartTime.ToUniversalTime().Ticks.ToString()} | ConvertTo-Json | Set-Content (Join-Path $runtime 'processes.json')
 $taskDeadline=[datetime]::UtcNow.AddSeconds(45)
 $taskReady=$false
