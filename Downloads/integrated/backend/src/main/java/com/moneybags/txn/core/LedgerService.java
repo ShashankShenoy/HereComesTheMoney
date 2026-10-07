@@ -427,7 +427,7 @@ public class LedgerService {
             throw invalid("DUPLICATE_BANK_ACCOUNT", "A journal may contain only one line per bank account");
         if (!List.of("OPENING_FUNDING","DEPOSIT","WITHDRAWAL","TRANSFER","FEE","INTEREST","ADJUSTMENT",
                 "PAYMENT_PROVISIONAL","PAYMENT_REFUND","SETTLEMENT","RETURN","LOAN_DISBURSEMENT","LOAN_REPAYMENT",
-                "LOAN_ACCRUAL","LOAN_FEE","LOAN_WAIVER","LOAN_WRITE_OFF","LOAN_SETTLEMENT").contains(request.journalType()))
+                "LOAN_ACCRUAL","LOAN_FEE","LOAN_WAIVER","LOAN_WRITE_OFF","LOAN_SETTLEMENT","CARD_PURCHASE","CARD_REFUND","CARD_REPAYMENT","CARD_INTEREST").contains(request.journalType()))
             throw invalid("JOURNAL_TYPE", "Unsupported journal type");
         if (request.transactionId() == null && request.paymentId() == null && request.settlementCycleId() == null)
             throw invalid("JOURNAL_SCOPE", "A transaction, payment, or settlement reference is required");

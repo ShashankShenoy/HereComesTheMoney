@@ -3,7 +3,7 @@ import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const files=['app.js','assistant.js','assistant-markdown.js','presentation.js','api.js','ui.js','jet.js','domains.js','banking.js','comparisons.js','i18n.js','server.mjs','style.css','professional.css','index.html','favicon.svg','package.json'];
+const files=['app.js','assistant.js','assistant-markdown.js','presentation.js','api.js','ui.js','jet.js','domains.js','banking.js','credit-cards.js','credit-cards.css','comparisons.js','i18n.js','server.mjs','style.css','professional.css','index.html','favicon.svg','package.json'];
 for(const file of files.filter(x=>/\.(m?js)$/.test(x))){
  const result=spawnSync(process.execPath,['--check',path.join(root,file)],{stdio:'inherit'});
  if(result.status!==0)process.exit(result.status);

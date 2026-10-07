@@ -21,6 +21,8 @@ public class BankCheckerWriteBoundary implements HandlerInterceptor, WebMvcConfi
     private static final List<Pattern> DECISIONS = List.of(
         "/iam/access-requests/[^/]+/decision",
         "/products/approvals/[^/]+/decision",
+        "/credit-cards/products/[^/]+/decision",
+        "/credit-cards/applications/[^/]+/decision",
         "/transactions/[^/]+/reversal-decision",
         "/period-closes/[^/]+/decision",
         "/payments/approvals/[^/]+/decision",

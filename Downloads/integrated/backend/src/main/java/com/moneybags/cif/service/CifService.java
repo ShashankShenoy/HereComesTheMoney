@@ -870,6 +870,9 @@ public class CifService implements CustomerFactsPort {
       "Only verified customers can activate"
     );
     if ("CLOSED".equals(in.status())) {
+      bad(db.count("SELECT COUNT(*) FROM M11_CC_CARD WHERE CIF_ID=? AND STATUS<>'CLOSED'",cif)>0
+        || db.count("SELECT COUNT(*) FROM M11_CC_APPLICATION WHERE CIF_ID=? AND STATUS='PENDING'",cif)>0,
+        "OPEN_CREDIT_CARDS", "Close credit cards and cancel pending card applications before CIF closure");
       bad(
         db.count(
             "SELECT COUNT(*) FROM M04_BANK_ACCOUNT A WHERE (A.PRIMARY_CIF_ID=? OR EXISTS (SELECT 1 FROM M04_ACCOUNT_PARTY AP WHERE AP.ACCOUNT_ID=A.ACCOUNT_ID AND AP.CIF_ID=?)) AND A.LIFECYCLE_STATUS NOT IN ('CLOSED','CANCELLED')",

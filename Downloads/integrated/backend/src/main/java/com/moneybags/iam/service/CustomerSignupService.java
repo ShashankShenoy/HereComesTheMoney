@@ -22,7 +22,7 @@ public class CustomerSignupService {
     private static final List<String> CUSTOMER_PERMISSIONS=List.of(
         "ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE",
         "STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW",
-        "FX_READ","LOAN_READ","LOAN_ACCEPT","CIF_READ","PRODUCT_READ");
+        "FX_READ","LOAN_READ","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY");
     private final JdbcTemplate jdbc;
     private final SchemaRepository schema;
     private final PasswordEncoder passwords;
