@@ -32,6 +32,21 @@ public class BootstrapService {
             Long linked=jdbc.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=? AND PERMISSION_ID=?",Long.class,roleId,pid);
             if(linked==null||linked==0)schema.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",roleId,"PERMISSION_ID",pid));
         }
+        // A bank administrator also inherits permissions installed before bootstrap
+        // by another module, rather than only the list compiled into this build.
+        for(String pid:jdbc.queryForList("SELECT PERMISSION_ID FROM M01_IAM_PERMISSION",String.class)) {
+            Long linked=jdbc.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=? AND PERMISSION_ID=?",Long.class,roleId,pid);
+            if(linked==null||linked==0)schema.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",roleId,"PERMISSION_ID",pid));
+        }
+        var existingChecker=jdbc.queryForList("SELECT ROLE_ID,STATUS FROM M01_IAM_ROLE WHERE ROLE_CODE=?",BankRolePolicy.CHECKER);
+        if(!existingChecker.isEmpty()&&!"ACTIVE".equals(existingChecker.get(0).get("STATUS")))throw new IllegalStateException("BANK_CHECKER role must be active");
+        String checkerRoleId=existingChecker.isEmpty()?UUID.randomUUID().toString():(String)existingChecker.get(0).get("ROLE_ID");
+        if(existingChecker.isEmpty())schema.insert(SchemaTable.M01_IAM_ROLE,map("ROLE_ID",checkerRoleId,"ROLE_CODE",BankRolePolicy.CHECKER,"DISPLAY_NAME","Bank Checker","STATUS","ACTIVE","SENSITIVE_FLAG","Y"));
+        for(String permission:BankRolePolicy.CHECKER_PERMISSIONS) {
+            String permissionId=jdbc.queryForObject("SELECT PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",String.class,permission);
+            Long linked=jdbc.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=? AND PERMISSION_ID=?",Long.class,checkerRoleId,permissionId);
+            if(linked==null||linked==0)schema.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",checkerRoleId,"PERMISSION_ID",permissionId));
+        }
         String user=UUID.randomUUID().toString();OffsetDateTime now=OffsetDateTime.now(clock);
         schema.insert(SchemaTable.M01_IAM_USER,map("USER_ID",user,"USERNAME",username.trim(),"USER_TYPE","EMPLOYEE","STATUS","ACTIVE","EMPLOYEE_REF","LOCAL-BOOTSTRAP-ADMIN"));
         schema.insert(SchemaTable.M01_IAM_CREDENTIAL,map("CREDENTIAL_ID",UUID.randomUUID().toString(),"USER_ID",user,"PASSWORD_HASH",passwords.encode(password),"HASH_SCHEME","BCRYPT","STATUS","ACTIVE"));

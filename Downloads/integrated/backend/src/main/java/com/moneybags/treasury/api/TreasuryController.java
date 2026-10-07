@@ -35,17 +35,17 @@ public class TreasuryController {
 
     /** Lists reserve account configuration. */
     @GetMapping("/reserve-accounts")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<ReserveAccount> accounts() { return service.reserveAccounts(); }
 
     /** Returns the current reserve read model. */
     @GetMapping("/reserve-accounts/{id}/position")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public ReservePosition position(@PathVariable long id) { return service.position(id); }
 
     /** Confirmed entries in the bank's local RBI/RTGS reserve mirror. */
     @GetMapping("/reserve-accounts/{id}/ledger")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<ReserveLedgerLine> reserveLedger(@PathVariable long id,
                                                   @RequestParam(defaultValue="50") int limit,
                                                   @RequestParam(defaultValue="0") int offset) {
@@ -54,7 +54,7 @@ public class TreasuryController {
     }
 
     @GetMapping("/reserve-accounts/{id}/reconciliation")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public ReserveReconciliation reserveReconciliation(@PathVariable long id) {
         return service.reserveReconciliation(id);
     }
@@ -70,7 +70,7 @@ public class TreasuryController {
 
     /** Lists liquidity holds for support and orchestration. */
     @GetMapping("/liquidity-holds")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
     public List<LiquidityHold> holds(@RequestParam(required=false) Long reserveAccountId,
                                      @RequestParam(required=false) String status) {
         return service.holds(reserveAccountId, status);
@@ -93,7 +93,7 @@ public class TreasuryController {
 
     /** Lists recent settlement cycles. */
     @GetMapping("/settlement-cycles")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<SettlementCycle> cycles(@RequestParam(required=false) String status,
                                         @RequestParam(required=false) String railCode) {
         return service.cycles(status, railCode);
@@ -108,7 +108,7 @@ public class TreasuryController {
 
     /** Lists the immutable payment membership of a cycle. */
     @GetMapping("/settlement-cycles/{id}/items")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<SettlementCycleItem> items(@PathVariable long id) { return service.cycleItems(id); }
 
     /** Freezes cycle membership and totals. */
@@ -146,7 +146,7 @@ public class TreasuryController {
 
     /** Lists the prioritized reconciliation queue. */
     @GetMapping("/reconciliation-exceptions")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<ReconciliationException> exceptions(@RequestParam(required=false) String status,
                                                      @RequestParam(required=false) String severity) {
         return service.exceptions(status, severity);
@@ -171,7 +171,7 @@ public class TreasuryController {
 
     /** Lists maker/checker work. */
     @GetMapping("/work-items")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<WorkItem> work(@RequestParam(required=false) String status,
                                @RequestParam(required=false) String ownerId) {
         return service.workItems(status, ownerId);
@@ -187,7 +187,7 @@ public class TreasuryController {
 
     /** Records an independent checker decision. */
     @PostMapping("/work-items/{id}/decision")
-    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_WORK_APPROVE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public ResponseEntity<Void> decide(@PathVariable long id, @Valid @RequestBody WorkDecision body) {
         service.decideWork(id, new WorkDecision(body.decision(), com.moneybags.integration.CurrentActor.get().userId(), body.glJournalId(), body.expectedVersion()));
         return ResponseEntity.noContent().build();

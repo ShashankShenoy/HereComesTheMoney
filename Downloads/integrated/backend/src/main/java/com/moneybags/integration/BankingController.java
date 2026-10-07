@@ -123,7 +123,7 @@ public class BankingController {
   hashes.audit("TRANSACTION_DETAIL_VIEWED","TRANSACTION",Long.toString(id),accountId==null?"GL_RECONCILE":access.bankAdminTransactionRead()?"BANK_ADMIN":hashes.proofLabel());
   return detail;
  }
- @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){access.global("GL_ADMIN");return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
+ @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){try{access.global("GL_READ");}catch(com.moneybags.common.api.BusinessException denied){access.global("GL_ADMIN");}return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
  @GetMapping("/audit") public List<Map<String,Object>> audit(){access.global("IAM_AUDIT_READ");return db.rows("SELECT * FROM MBX_AUDIT ORDER BY OCCURRED_AT DESC FETCH FIRST 100 ROWS ONLY");}
  @GetMapping("/facilities") public List<Map<String,Object>> facilities(){return db.rows("SELECT FACILITY_ID,FACILITY_NUMBER,PRIMARY_CIF_ID,BRANCH_CODE,STATUS FROM M08_LOAN_FACILITY ORDER BY FACILITY_ID DESC FETCH FIRST 100 ROWS ONLY").stream().filter(f->{try{access.facility("LOAN_READ",((Number)f.get("FACILITY_ID")).longValue());return true;}catch(com.moneybags.common.api.BusinessException e){return false;}}).toList();}
 }

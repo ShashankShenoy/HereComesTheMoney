@@ -15,8 +15,15 @@ public class DecisionClient {
  public record Decision(boolean allowed,String authorizationRef,String reasonCode){}
  public Decision decide(DecisionQuery q){
   var u=CurrentActor.get();if(!u.userId().equals(q.actorId()))return deny();
-  String permission=q.action().contains("POLICY")||q.action().contains("NARRATION")||q.action().contains("MASK")?"STATEMENT_ADMIN":"STATEMENT_READ";
-  if(q.accountId()==null)return new Decision(u.permissions().contains(permission),UUID.randomUUID().toString(),"PERMISSION_REQUIRED");
+  String permission=q.action().endsWith("_APPROVE")?"STATEMENT_APPROVE":
+      q.action().endsWith("_READ")?"STATEMENT_CATALOG_READ":
+      q.action().contains("POLICY")||q.action().contains("NARRATION")||q.action().contains("MASK")?"STATEMENT_ADMIN":"STATEMENT_READ";
+  if(q.accountId()==null){
+   boolean allowed=u.permissions().contains(permission)
+       || ("STATEMENT_CATALOG_READ".equals(permission)||"STATEMENT_APPROVE".equals(permission))
+          && u.permissions().contains("STATEMENT_ADMIN");
+   return new Decision(allowed,UUID.randomUUID().toString(),allowed?null:"PERMISSION_REQUIRED");
+  }
   var a=db.one("SELECT PRIMARY_CIF_ID,BRANCH_CODE,CURRENCY_CODE FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",q.accountId());
   String cif=(String)a.get("PRIMARY_CIF_ID");
   boolean customer="CUSTOMER".equals(u.userType());

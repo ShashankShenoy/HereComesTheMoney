@@ -7,10 +7,10 @@ export const bankingPages={
  banking:{title:'Bank overview',permission:null,icon:'▦',intro:'Customer relationships, money movement, and daily operations in one workspace.',prefix:[]},
  accounts:{title:'Accounts',permission:'ACCOUNT_READ',icon:'▤',intro:'Open accounts, manage holders and nominees, apply controls, and review closure requests.',prefix:['/accounts','/banking/accounts']},
  transactions:{title:'Transactions & ledger',permission:'TXN_READ',icon:'⇄',intro:'Review account transactions, status history and journals; post authorized transfers and reconcile the ledger.',prefix:['/transactions','/banking/transactions','/journals','/gl/','/banking/gl-accounts','/period-closes','/fees','/reconciliation/']},
- teller:{title:'Teller cash',permission:'TELLER_OPERATE',icon:'▣',intro:'Open your cash till, accept deposits, make withdrawals, and balance at close.',prefix:['/teller']},
- beneficiaries:{title:'Beneficiaries',permission:'PAYMENT_CREATE',icon:'♧',intro:'Register payment recipients and complete independent verification.',prefix:['/beneficiaries']},
+ teller:{title:'Teller cash',permission:'TELLER_READ',icon:'▣',intro:'Open your cash till, accept deposits, make withdrawals, and balance at close.',prefix:['/teller']},
+ beneficiaries:{title:'Beneficiaries',permission:'BENEFICIARY_VERIFY',icon:'♧',intro:'Register payment recipients and complete independent verification.',prefix:['/beneficiaries']},
  payments:{title:'Payments & clearing',permission:'PAYMENT_READ',icon:'↗',intro:'Initiate payments and follow simulated UPI, IMPS, NEFT, and RTGS processing.',prefix:['/payments','/dispatches','/clearing-batches','/reconciliation-exceptions','/approvals','/rail-messages']},
- treasury:{title:'Treasury & RBI ledger',permission:'TREASURY_RECONCILE',icon:'◈',intro:'Review the simulated local RBI reserve ledger, liquidity holds, settlement cycles, and reconciliation.',prefix:['/treasury/']},
+ treasury:{title:'Treasury & RBI ledger',permission:'TREASURY_READ',icon:'◈',intro:'Review the simulated local RBI reserve ledger, liquidity holds, settlement cycles, and reconciliation.',prefix:['/treasury/']},
  loans:{title:'Loans',permission:'LOAN_READ',icon:'⌂',intro:'Origination, assessment, sanction, offers, documentation, and servicing.',prefix:['/loans','/banking/facilities']},
  statements:{title:'Statements & documents',permission:'STATEMENT_READ',icon:'▧',intro:'Create date-range statements from the posted ledger and download PDF or CSV records.',prefix:['/reporting','/statements','/statement-','/catalog']},
  privacy:{title:'Privacy & compliance',permission:'PRIVACY_CONSENT_VIEW',icon:'◇',intro:'Manage processing purposes, consent, legal holds, privacy cases, and audit evidence.',prefix:['/privacy']},
@@ -57,7 +57,9 @@ async function resolveAccountNumbers(value){
 export function configureBanking(render){renderApp=render;}
 const displayLabels={ACCOUNT_NUMBER:'Account number',ACCOUNT_STATUS:'Status',CURRENCY_CODE:'Currency',BRANCH_CODE:'Branch',PRIMARY_CIF_ID:'Primary CIF',ACCOUNT_ID:'Account ID',TXN_ID:'Transaction ID',PRODUCT_VERSION_ID:'Product version',primaryCifId:'Primary CIF ID',productId:'Product ID',productVersionId:'Product version ID',branchCode:'Branch code',operationMode:'Operation mode',requestId:'Request reference',requestKey:'Request reference'};
 const label=v=>tField(displayLabels[v]||v.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
-const allow=p=>!p||getSession()?.user?.permissions?.includes(p);
+const allow=p=>!p||getSession()?.user?.permissions?.includes(p)||({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]&&getSession()?.user?.permissions?.includes({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]));
+const checker=()=>getSession()?.user?.roles?.includes('BANK_CHECKER')&&!getSession()?.user?.roles?.includes('BANK_ADMIN');
+const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|payments\/(?:approvals\/[^/]+\/decision|[^/]+\/authorize-simulation)|treasury\/work-items\/[^/]+\/decision|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/tills\/[^/]+\/close|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
 const customerWorkflows=new Set([
  'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers',
  'GET /beneficiaries','POST /beneficiaries',
@@ -154,7 +156,7 @@ function transactionPanel(){
  return '<div id="transaction-activity"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSACTION ACTIVITY</p><h3>Account transactions</h3></div></div><div class="panel-body"><p class="hint">'+(bankAdmin?'An active, global BANK_ADMIN assignment can review account transactions without a holder key. Access is recorded in the audit trail.':getSession().user.userType==='CUSTOMER'?'Your sign-in gives access to accounts linked to you.':'Your role and account scope are checked. An account holder must also provide a key for protected details.')+'</p>'+(!bankAdmin&&getSession().user.userType!=='CUSTOMER'?'<p class="hint">'+(getCustomerHash()?'A key is saved in this tab. Reload this account to check it.':'No account-holder key is saved in this tab.')+'</p><button type="button" class="btn small" data-action="nav" data-id="customerAccess">Open account-holder key section</button>':'')+'<form id="transaction-search-form" class="module-search"><label class="field">Account number<input name="accountNumber" list="bank-account-numbers" maxlength="20" required value="'+esc(transactionAccountNumber)+'" placeholder="Enter an account number"></label>'+hints+'<button type="submit" class="btn primary">Load transactions</button></form><p id="transaction-error" class="form-error" role="alert"></p>'+rows+internal+'</div></section>'+detail+'</div>';
 }
 function treasuryPanel(){
- const allowed=allow('TREASURY_RECONCILE');
+ const allowed=allow('TREASURY_READ');
  const options=reserveAccounts.map(a=>'<option value="'+esc(a.id)+'" '+(String(a.id)===String(reserveAccountId)?'selected':'')+'>'+esc(a.code)+' · '+esc(a.accountType)+'</option>').join('');
  const position=reservePosition?'<div class="stats"><div class="stat"><div class="stat-title">Confirmed balance</div><div class="stat-value">'+esc(formatAmount(reservePosition.confirmedBalance,reservePosition.currency))+'</div></div><div class="stat"><div class="stat-title">Active liquidity holds</div><div class="stat-value">'+esc(formatAmount(reservePosition.activeHoldAmount,reservePosition.currency))+'</div></div><div class="stat"><div class="stat-title">Available reserve</div><div class="stat-value">'+esc(formatAmount(reservePosition.availableBalance,reservePosition.currency))+'</div></div></div><p class="hint"><span>Position as of</span> '+esc(formatDate(reservePosition.asOf))+'</p>':'';
  const recon=reserveReconciliation?'<div class="notice">Reserve mirror reconciliation: <strong>'+esc(reserveReconciliation.isMatched==='Y'?'Matched':'Difference found')+'</strong> · Ledger-derived '+esc(formatAmount(reserveReconciliation.ledgerBalance,reserveReconciliation.currency))+' · Difference '+esc(formatAmount(reserveReconciliation.difference,reserveReconciliation.currency))+'</div>':'';
@@ -242,15 +244,15 @@ export async function bankingScreen(page){
   return head+customerSummary+'<section aria-label="Key figures"><div class="section-heading-row"><h2 class="section-heading">Current position</h2><span class="overview-mode">'+esc(d.mode)+'</span></div><div class="stats">'+metrics.map(([key,title])=>'<div class="stat"><div class="stat-title">'+title+'</div><div class="stat-value">'+Number(d[key]).toLocaleString('en-IN')+'</div></div>').join('')+'</div></section><section aria-label="Operational areas"><h2 class="section-heading">Operational areas</h2><div class="module-grid">'+Object.entries(bankingPages).filter(([k,v])=>!['banking','customerAccess'].includes(k)&&allow(v.permission)).map(([k,v])=>'<button class="module-card" data-action="nav" data-id="'+k+'"><span class="module-icon" aria-hidden="true">'+v.icon+'</span><strong>'+esc(v.title)+'</strong><span>'+esc(v.intro)+'</span><b>Open '+esc(v.title)+' →</b></button>').join('')+'</div></section>';
  }
  if(page==='accounts'&&customer)return head+await customerAccountsScreen();
- if(page==='treasury'&&!allow('TREASURY_RECONCILE')&&!allow('TREASURY_LIQUIDITY_MANAGE'))return head+'<section class="panel"><div class="panel-heading"><h3>Reserve ledger access</h3></div><div class="panel-body"><div class="notice">This bank-wide reserve ledger requires Treasury Reconcile access. Ask an administrator to assign that permission through the normal access request and approval process.</div></div></section>';
+ if(page==='treasury'&&!allow('TREASURY_READ')&&!allow('TREASURY_LIQUIDITY_MANAGE'))return head+'<section class="panel"><div class="panel-heading"><h3>Reserve ledger access</h3></div><div class="panel-body"><div class="notice">This bank-wide reserve ledger requires Treasury read access. Ask an administrator to assign that permission through the normal access request and approval process.</div></div></section>';
  if(page==='transactions'&&!transactionOperationsOpen)return head+transactionPanel()+'<section class="panel"><div class="panel-body"><h3>Ledger actions</h3><p class="hint">Transfers, reversals, fees, and reconciliation are available when you need them.</p><button class="btn" type="button" data-bank-show-operations>Show ledger actions</button></div></section>';
  await loadContract();
  if(page==='treasury'){
   reserveAccounts=await api('/treasury/reserve-accounts');
   if(reserveAccounts.length&&!reserveAccountId)await loadReserve(reserveAccounts[0].id);
-  if(!allow('TREASURY_LIQUIDITY_MANAGE'))return head+treasuryPanel();
+  if(!allow('TREASURY_LIQUIDITY_MANAGE')&&!checker())return head+treasuryPanel();
  }
- const choices=operations.filter(o=>config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path)));
+ const choices=operations.filter(o=>config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path)));
  const initial={accounts:'/banking/accounts',teller:'/teller/tills',beneficiaries:'/beneficiaries',payments:'/payments',treasury:'/treasury/reserve-accounts',loans:'/banking/facilities',currency:'/fx/rates',privacy:'/privacy/purposes'}[page];
  const op=choices.find(o=>o.id===selected[page])||choices.find(o=>o.method==='GET'&&o.path===initial)||choices.find(o=>o.method==='GET'&&!o.path.includes('{'))||choices[0];
  if(!op)return head+'<div class="notice">No workflow is available in this deployment.</div>';
@@ -268,8 +270,8 @@ export async function bankingScreen(page){
 async function loadReserve(id,offset=0){
  const [position,reconciliation,ledger]=await Promise.all([
   api('/treasury/reserve-accounts/'+encodeURIComponent(id)+'/position'),
-  allow('TREASURY_RECONCILE')?api('/treasury/reserve-accounts/'+encodeURIComponent(id)+'/reconciliation'):Promise.resolve(null),
-  allow('TREASURY_RECONCILE')?api('/treasury/reserve-accounts/'+encodeURIComponent(id)+'/ledger?'+new URLSearchParams({limit:'50',offset:String(offset)})):Promise.resolve(null)
+  allow('TREASURY_READ')?api('/treasury/reserve-accounts/'+encodeURIComponent(id)+'/reconciliation'):Promise.resolve(null),
+  allow('TREASURY_READ')?api('/treasury/reserve-accounts/'+encodeURIComponent(id)+'/ledger?'+new URLSearchParams({limit:'50',offset:String(offset)})):Promise.resolve(null)
  ]);
  reserveAccountId=String(id);reserveOffset=offset;
  reservePosition=position;reserveReconciliation=reconciliation;reserveLedger=ledger;

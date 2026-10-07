@@ -69,12 +69,12 @@ public class IamAdminService {
     }
     private boolean checkerSetupAvailable(){
         return db.count("SELECT COUNT(*) FROM M01_IAM_ACCESS_REQUEST WHERE STATUS='APPROVED'")==0&&
-            db.count("SELECT COUNT(DISTINCT A.USER_ID) FROM M01_IAM_USER_ROLE A JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID WHERE R.ROLE_CODE='BANK_ADMIN' AND A.STATUS='ACTIVE' AND A.SCOPE_TYPE='GLOBAL' AND U.STATUS='ACTIVE' AND A.VALID_FROM<=? AND (A.VALID_TO IS NULL OR A.VALID_TO>?)",now(),now())<2;
+            db.count("SELECT COUNT(DISTINCT A.USER_ID) FROM M01_IAM_USER_ROLE A JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID WHERE R.ROLE_CODE=? AND A.STATUS='ACTIVE' AND A.SCOPE_TYPE='GLOBAL' AND U.STATUS='ACTIVE' AND A.VALID_FROM<=? AND (A.VALID_TO IS NULL OR A.VALID_TO>?)",BankRolePolicy.CHECKER,now(),now())==0;
     }
     @Transactional public M01IamUserRow setupChecker(UserPrincipal actor,CreateUser request){
         guard.require(actor,"IAM_ACCESS_APPROVE");
         // Serialize setup on the one reserved administrator role, not on a racy count.
-        var role=db.one("SELECT * FROM M01_IAM_ROLE WHERE ROLE_CODE='BANK_ADMIN' FOR UPDATE",M01IamRoleRow.class).orElseThrow(()->missing("Bootstrap role"));
+        var role=db.one("SELECT * FROM M01_IAM_ROLE WHERE ROLE_CODE=? FOR UPDATE",M01IamRoleRow.class,BankRolePolicy.CHECKER).orElseThrow(()->missing("Bank Checker role; run the role migration first"));
         if(!checkerSetupAvailable())throw new BusinessException(HttpStatus.CONFLICT,"SETUP_COMPLETE","One-time checker setup is already complete");
         if(!"EMPLOYEE".equals(request.userType()))bad("The initial checker must be an employee");
         var user=create(actor,request,"INITIAL_CHECKER_CREATED");
@@ -125,6 +125,8 @@ public class IamAdminService {
     @Transactional public M01IamPermissionRow createPermission(UserPrincipal actor,PermissionInput r){
         guard.require(actor,"IAM_ROLE_MANAGE");if(r.permissionCode().startsWith("IAM_")||r.permissionCode().startsWith("SYSTEM_"))bad("Core administration permissions are reserved");
         String pid=id();db.insert(SchemaTable.M01_IAM_PERMISSION,map("PERMISSION_ID",pid,"PERMISSION_CODE",r.permissionCode(),"RESOURCE_CODE",r.resourceCode(),"ACTION_CODE",r.actionCode(),"STEP_UP_REQUIRED",r.stepUpRequired()?"Y":"N"));
+        db.jdbc().update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ROLE_ID,? FROM M01_IAM_ROLE WHERE ROLE_CODE='BANK_ADMIN'",pid);
+        db.jdbc().update("UPDATE M01_IAM_USER SET ENTITLEMENT_VERSION=ENTITLEMENT_VERSION+1,ROW_VERSION=ROW_VERSION+1,UPDATED_AT=? WHERE USER_ID IN (SELECT A.USER_ID FROM M01_IAM_USER_ROLE A JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID WHERE R.ROLE_CODE='BANK_ADMIN' AND A.STATUS='ACTIVE')",now());
         event(actor,"PERMISSION_CREATED","IAM_PERMISSION",pid,null,r.permissionCode());return db.one("SELECT * FROM M01_IAM_PERMISSION WHERE PERMISSION_ID=?",M01IamPermissionRow.class,pid).orElseThrow();
     }
     public List<M01IamRoleRow> roles(UserPrincipal actor){guard.require(actor,"IAM_USER_READ");return db.rows("SELECT * FROM M01_IAM_ROLE ORDER BY ROLE_CODE",M01IamRoleRow.class);}
@@ -133,12 +135,12 @@ public class IamAdminService {
     private void permissionIds(List<String> ids){if(new HashSet<>(ids).size()!=ids.size())bad("Duplicate permissions");for(String pid:ids)if(db.count("SELECT COUNT(*) FROM M01_IAM_PERMISSION WHERE PERMISSION_ID=?",pid)!=1)bad("Unknown permission");}
     private void setPermissions(String role,List<String> ids){db.jdbc().update("DELETE FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=?",role);for(String pid:ids)db.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",role,"PERMISSION_ID",pid));}
     @Transactional public M01IamRoleRow createRole(UserPrincipal actor,RoleInput r){
-        guard.require(actor,"IAM_ROLE_MANAGE");if("BANK_ADMIN".equals(r.roleCode()))bad("The bootstrap role is reserved");permissionIds(r.permissionIds());
+        guard.require(actor,"IAM_ROLE_MANAGE");if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER).contains(r.roleCode()))bad("The bank administration roles are reserved");permissionIds(r.permissionIds());
         String rid=id();db.insert(SchemaTable.M01_IAM_ROLE,map("ROLE_ID",rid,"ROLE_CODE",r.roleCode(),"DISPLAY_NAME",r.displayName(),"SENSITIVE_FLAG",r.sensitive()?"Y":"N"));setPermissions(rid,r.permissionIds());
         event(actor,"ROLE_CREATED","IAM_ROLE",rid,null,r.roleCode());return role(rid,false);
     }
     @Transactional public M01IamRoleRow updateRole(UserPrincipal actor,String rid,RoleUpdate r){
-        guard.require(actor,"IAM_ROLE_MANAGE");var old=role(rid,true);if("BANK_ADMIN".equals(old.roleCode()))bad("The bootstrap role cannot be edited or retired");
+        guard.require(actor,"IAM_ROLE_MANAGE");var old=role(rid,true);if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER).contains(old.roleCode()))bad("The bank administration roles cannot be edited or retired");
         if(!old.rowVersion().equals(r.rowVersion()))conflict("Role changed; reload before saving");permissionIds(r.permissionIds());
         db.jdbc().update("UPDATE M01_IAM_ROLE SET DISPLAY_NAME=?,SENSITIVE_FLAG=?,STATUS=?,ROW_VERSION=ROW_VERSION+1 WHERE ROLE_ID=?",r.displayName(),r.sensitive()?"Y":"N",r.status(),rid);
         setPermissions(rid,r.permissionIds());bumpRoleUsers(rid);event(actor,"ROLE_UPDATED","IAM_ROLE",rid,old.status(),r.status());return role(rid,false);
