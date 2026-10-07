@@ -2,7 +2,7 @@ import {api,getSession,getCustomerHash,setCustomerHash} from './api.js';
 import {esc,table,field,select,badge,errorText,toast,dialog} from './ui.js';
 import {enhanceForms,validateJet,jetReady} from './jet.js';
 import {formatAmount,formatDecimal,formatDate,fieldKind,rowCurrency} from './presentation.js';
-import {tField} from './i18n.js';
+import {t,tField} from './i18n.js';
 export const bankingPages={
  banking:{title:'Bank overview',permission:null,icon:'▦',intro:'Customer relationships, money movement, and daily operations in one workspace.',prefix:[]},
  accounts:{title:'Accounts',permission:'ACCOUNT_READ',icon:'▤',intro:'Open accounts, manage holders and nominees, apply controls, and review closure requests.',prefix:['/accounts','/banking/accounts']},
@@ -19,17 +19,21 @@ export const bankingPages={
 };
 let renderApp, contract, contractLoad, operations=[], selected={}, results={}, active='banking';
 let transactionAccountNumber='',transactionAccountId='',transactionLegacy=false,transactionRows=null,transactionDetail=null,transactionVisibleCount=25;
-let transactionOperationsOpen=false;
+let transactionSection='accounts';
 let keyHolderAccountNumber='',keyHolders=null,accountOptions=[],accountOptionsFetchedAt=0,accountOptionsPending=null,accountOptionsActor=null;
 let reserveAccountId='',reserveAccounts=[],reservePosition=null,reserveReconciliation=null,reserveLedger=null,reserveOffset=0;
-const transactionReadOperations=new Set(['GET /banking/transactions','GET /banking/transactions/{id}/details','GET /transactions/{id}']);
+let glLedgerAccountId='',glLedger=null,glLedgerJournal=null,glLedgerAccounts=null,glLedgerOffset=0;
+let cashLedgerAccounts=null,cashLedgerError='';
+const transactionReadOperations=new Set(['GET /banking/transactions','GET /banking/transactions/{id}/details','GET /transactions/{id}','GET /banking/gl-accounts/{id}/ledger']);
 function accountHints(id){return '<datalist id="'+id+'">'+accountOptions.map(a=>'<option value="'+esc(a.ACCOUNT_NUMBER)+'">'+esc(a.ACCOUNT_STATUS||'Account')+'</option>').join('')+'</datalist>';}
 function resetAccountOptionsForActor(){
  const actor=getSession()?.user?.userId;
  if(actor===accountOptionsActor)return;
  accountOptionsActor=actor;accountOptions=[];accountOptionsFetchedAt=0;accountOptionsPending=null;
- transactionAccountNumber='';transactionAccountId='';transactionLegacy=false;transactionRows=null;transactionDetail=null;transactionVisibleCount=25;transactionOperationsOpen=false;
+ transactionAccountNumber='';transactionAccountId='';transactionLegacy=false;transactionRows=null;transactionDetail=null;transactionVisibleCount=25;transactionSection='accounts';
  keyHolderAccountNumber='';keyHolders=null;reserveAccountId='';reserveAccounts=[];reservePosition=null;reserveReconciliation=null;reserveLedger=null;reserveOffset=0;
+ glLedgerAccountId='';glLedger=null;glLedgerJournal=null;glLedgerAccounts=null;glLedgerOffset=0;
+ cashLedgerAccounts=null;cashLedgerError='';
  selected={};results={};
 }
 function loadAccountOptions(){
@@ -59,7 +63,7 @@ const displayLabels={ACCOUNT_NUMBER:'Account number',ACCOUNT_STATUS:'Status',CUR
 const label=v=>tField(displayLabels[v]||v.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
 const allow=p=>!p||getSession()?.user?.permissions?.includes(p)||({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]&&getSession()?.user?.permissions?.includes({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]));
 const checker=()=>getSession()?.user?.roles?.includes('BANK_CHECKER')&&!getSession()?.user?.roles?.includes('BANK_ADMIN');
-const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|payments\/(?:approvals\/[^/]+\/decision|[^/]+\/authorize-simulation)|treasury\/work-items\/[^/]+\/decision|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/tills\/[^/]+\/close|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
+const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|payments\/(?:approvals\/[^/]+\/decision|[^/]+\/authorize-simulation)|treasury\/(?:work-items\/[^/]+\/decision|reserve-openings\/[^/]+\/confirm)|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/(?:tills\/[^/]+\/(?:close|replenish)|cash-deliveries\/[^/]+\/confirm)|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
 const customerWorkflows=new Set([
  'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers',
  'GET /beneficiaries','POST /beneficiaries',
@@ -81,7 +85,12 @@ const workflowTitles={
  'post /accounts/{id}/restrictions':'Add account restriction','post /accounts/{id}/restrictions/{restrictionId}/release':'Release account restriction','post /accounts/{id}/limits':'Set account limit','post /accounts/{id}/interest-overrides':'Set interest override','post /accounts/{id}/product-version-adoptions':'Adopt product version',
  'post /accounts/{id}/closures':'Request account closure','post /accounts/{id}/closures/{requestId}/approve':'Approve account closure','post /accounts/{id}/closures/{requestId}/reject':'Reject account closure','post /accounts/{id}/majority-reviews':'Start majority review','post /accounts/{id}/majority-reviews/decisions':'Decide majority review',
  'get /banking/accounts':'Account directory','get /banking/transactions':'Transactions','get /banking/facilities':'Loan facilities','get /banking/gl-accounts':'General ledger accounts',
- 'get /teller/tills':'List teller tills','post /teller/tills':'Open a teller till','post /teller/tills/{id}/close':'Independently close a teller till','post /teller/cash':'Post a cash deposit or withdrawal',
+ 'get /teller/tills':'List teller tills','post /teller/tills':'Open a teller till','post /teller/tills/{id}/close':'Independently close a teller till','post /teller/tills/{id}/replenish':'Replenish an open teller till','get /teller/replenishments':'List teller replenishments','post /teller/cash':'Post a cash deposit or withdrawal',
+ 'get /teller/vaults':'List branch vault cash','post /teller/vaults':'Register branch vault cash',
+ 'get /teller/cash-deliveries':'List RBI cash deliveries','post /teller/cash-deliveries':'Request simulated RBI cash delivery',
+ 'post /teller/cash-deliveries/{id}/confirm':'Confirm counted RBI cash delivery',
+ 'get /treasury/reserve-openings':'List synthetic reserve openings','post /treasury/reserve-openings':'Request synthetic opening reserve',
+ 'post /treasury/reserve-openings/{id}/confirm':'Approve opening reserve',
  'get /beneficiaries':'List beneficiaries','post /beneficiaries':'Register a beneficiary','post /beneficiaries/{id}/verify':'Verify a beneficiary',
  'post /payments/initiate':'Initiate a beneficiary payment','post /payments/{id}/authorize-simulation':'Authorize simulated payment','post /payments/{id}/simulate-outcome':'Record simulated rail outcome',
  'get /treasury/reserve-accounts':'List reserve accounts','post /treasury/reserve-accounts':'Create a reserve account and zero position',
@@ -155,6 +164,32 @@ function transactionPanel(){
  const internal=allow('GL_RECONCILE')?'<details class="ledger-internal"><summary>Look up an internal ledger transaction</summary><p class="hint">For a transaction with no customer account, such as a reserve opening or a bank adjustment. For account transactions, use the list above.</p><form id="internal-transaction-form" class="module-search"><label class="field">Transaction ID<input name="transactionId" inputmode="numeric" pattern="[0-9]+" required placeholder="Enter a transaction ID"></label><button type="submit" class="btn">View internal transaction</button></form><p id="internal-transaction-error" class="form-error" role="alert"></p></details>':'';
  return '<div id="transaction-activity"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSACTION ACTIVITY</p><h3>Account transactions</h3></div></div><div class="panel-body"><p class="hint">'+(bankAdmin?'An active, global BANK_ADMIN assignment can review account transactions without a holder key. Access is recorded in the audit trail.':getSession().user.userType==='CUSTOMER'?'Your sign-in gives access to accounts linked to you.':'Your role and account scope are checked. An account holder must also provide a key for protected details.')+'</p>'+(!bankAdmin&&getSession().user.userType!=='CUSTOMER'?'<p class="hint">'+(getCustomerHash()?'A key is saved in this tab. Reload this account to check it.':'No account-holder key is saved in this tab.')+'</p><button type="button" class="btn small" data-action="nav" data-id="customerAccess">Open account-holder key section</button>':'')+'<form id="transaction-search-form" class="module-search"><label class="field">Account number<input name="accountNumber" list="bank-account-numbers" maxlength="20" required value="'+esc(transactionAccountNumber)+'" placeholder="Enter an account number"></label>'+hints+'<button type="submit" class="btn primary">Load transactions</button></form><p id="transaction-error" class="form-error" role="alert"></p>'+rows+internal+'</div></section>'+detail+'</div>';
 }
+function glLedgerPanel(){
+ if(!allow('GL_RECONCILE'))return '';
+ const tr=value=>esc(t(value));
+ const account=glLedger?.account,postings=glLedger?.postings||[];
+ const options=(glLedgerAccounts||[]).map(a=>'<option value="'+esc(a.GL_ACCOUNT_ID)+'" label="'+esc(a.GL_CODE+' · '+a.GL_NAME)+'"></option>').join('');
+ const summary=account?'<div class="gl-ledger-summary"><div><strong>'+esc(account.GL_CODE)+'</strong> · '+esc(account.GL_NAME)+'<p class="hint">'+tr('Account class')+': '+esc(account.ACCOUNT_CLASS)+' · '+tr('Normal side')+': '+esc(account.NORMAL_SIDE)+'</p></div><div><span class="muted">'+tr('Current GL balance')+'</span><strong class="amount-value">'+esc(formatAmount(glLedger.balance,account.CURRENCY_CODE))+'</strong></div></div>':'';
+ const rows=glLedger===null?'<div class="empty">'+tr('Choose a GL account to view its posted entries.')+'</div>':postings.length?table(['Booked','Journal','Type','Debit','Credit','Running balance','Narrative','Details'].map(t),postings.map(p=>[
+  esc(formatDate(p.BOOKED_AT)),esc(p.JOURNAL_ID),esc(p.JOURNAL_TYPE),p.ENTRY_SIDE==='DR'?esc(formatAmount(p.AMOUNT,'INR')):'—',p.ENTRY_SIDE==='CR'?esc(formatAmount(p.AMOUNT,'INR')):'—',esc(formatAmount(p.RUNNING_BALANCE,'INR')),esc(p.NARRATIVE||p.JOURNAL_DESCRIPTION||'—'),'<button type="button" class="btn small" data-gl-journal="'+esc(p.JOURNAL_ID)+'">'+tr('View journal')+'</button>'
+ ]),t('No postings for this GL account.')):'<div class="empty">'+tr('No postings for this GL account.')+'</div>';
+ const paging=glLedger&&glLedger.total>0?'<div class="form-actions"><button type="button" class="btn small" data-gl-page="previous" '+(glLedgerOffset===0?'disabled':'')+'>'+tr('Previous')+'</button><span class="muted">'+tr('Showing')+' '+esc(glLedgerOffset+1)+'–'+esc(glLedgerOffset+postings.length)+' '+tr('of')+' '+esc(glLedger.total)+' '+tr('postings')+'</span><button type="button" class="btn small" data-gl-page="next" '+(glLedgerOffset+postings.length>=glLedger.total?'disabled':'')+'>'+tr('Next')+'</button></div>':'';
+ const detail=glLedgerJournal?(()=>{const j=glLedgerJournal.journal,c=glLedgerJournal.control;return '<div class="gl-journal-detail"><div class="section-heading-row"><h4>'+tr('Journal details')+' · '+esc(j.JOURNAL_ID)+'</h4><button type="button" class="btn small" data-gl-journal-close>'+tr('Close details')+'</button></div><p class="hint">'+esc(j.DESCRIPTION||'—')+' · '+esc(j.JOURNAL_TYPE)+' · '+esc(formatDate(j.BOOKED_AT))+'</p><dl class="details result-details">'+[
+  [t('Value date'),formatDate(j.VALUE_DATE)],[t('Transaction ID'),j.TXN_ID],[t('Payment ID'),j.PAYMENT_ID],[t('Reversal of journal'),j.REVERSAL_OF_JOURNAL_ID]
+ ].map(([key,value])=>'<div><dt>'+esc(key)+'</dt><dd>'+esc(value??'—')+'</dd></div>').join('')+'</dl><div class="notice">'+tr('Balance control')+': '+esc(c.IS_BALANCED==='Y'?t('Balanced'):t('Difference found'))+' · '+tr('Total debits')+' '+esc(formatAmount(c.DEBIT_TOTAL,'INR'))+' · '+tr('Total credits')+' '+esc(formatAmount(c.CREDIT_TOTAL,'INR'))+' · '+tr('Difference')+' '+esc(formatAmount(c.BALANCE_DIFFERENCE,'INR'))+'</div>'+table(['Line','GL account','Debit','Credit','Narrative','Customer account ID','Loan facility ID'].map(t),(glLedgerJournal.lines||[]).map(p=>[
+  esc(p.LINE_NO),esc(p.GL_CODE)+' · '+esc(p.GL_NAME),p.ENTRY_SIDE==='DR'?esc(formatAmount(p.AMOUNT,'INR')):'—',p.ENTRY_SIDE==='CR'?esc(formatAmount(p.AMOUNT,'INR')):'—',esc(p.NARRATIVE||'—'),esc(p.BANK_ACCOUNT_ID??'—'),esc(p.LOAN_FACILITY_ID??'—')
+ ]),t('No journal lines found.'))+'</div>';})():'';
+ return '<section class="panel" id="gl-ledger-section"><div class="panel-heading"><div><p class="eyebrow">'+tr('GENERAL LEDGER')+'</p><h3>'+tr('GL account ledger')+'</h3></div></div><div class="panel-body"><p class="hint">'+tr('Review every posted entry for one GL account. Running balances follow the account’s normal debit or credit side.')+'</p><form id="gl-ledger-form" class="module-search"><label class="field">'+tr('GL account ID')+'<input data-jet-source="true" name="glAccountId" list="gl-ledger-accounts" inputmode="numeric" pattern="[0-9]+" required value="'+esc(glLedgerAccountId)+'" placeholder="'+tr('Enter a GL account ID')+'"></label><datalist id="gl-ledger-accounts">'+options+'</datalist><button type="submit" class="btn primary">'+tr('Load GL ledger')+'</button></form><p id="gl-ledger-error" class="form-error" role="alert"></p>'+summary+rows+paging+detail+'</div></section>';
+}
+function transactionTabs(){
+ const tabs=[['accounts','Account transactions'],...(allow('GL_RECONCILE')?[['gl','GL account ledger']]:[]),['operations','Operations']];
+ if(!tabs.some(([id])=>id===transactionSection))transactionSection='accounts';
+ return '<div class="transaction-tabs" role="tablist" aria-label="'+esc(t('Transactions & ledger sections'))+'">'+tabs.map(([id,title])=>'<button type="button" role="tab" id="transaction-tab-'+id+'" aria-controls="transaction-section-'+id+'" aria-selected="'+(transactionSection===id)+'" tabindex="'+(transactionSection===id?'0':'-1')+'" data-transaction-tab="'+id+'">'+esc(t(title))+'</button>').join('')+'</div>';
+}
+function transactionTabPanel(section,content){
+ const sections=['accounts',...(allow('GL_RECONCILE')?['gl']:[]),'operations'];
+ return sections.map(id=>'<div id="transaction-section-'+id+'" role="tabpanel" aria-labelledby="transaction-tab-'+id+'" tabindex="0"'+(id===section?'':' hidden')+'>'+(id===section?content:'')+'</div>').join('');
+}
 function treasuryPanel(){
  const allowed=allow('TREASURY_READ');
  const options=reserveAccounts.map(a=>'<option value="'+esc(a.id)+'" '+(String(a.id)===String(reserveAccountId)?'selected':'')+'>'+esc(a.code)+' · '+esc(a.accountType)+'</option>').join('');
@@ -175,6 +210,10 @@ function inputs(schema,prefix='',required=[],depth=0){
  return Object.entries(schema.properties||{}).map(([name,raw])=>{
   const s=resolve(raw),key=prefix+name,req=required.includes(name);
   if(s.readOnly)return '';
+  if(!prefix&&name==='cashGlId'&&active==='teller'&&operations.find(o=>o.id===selected[active])?.path==='/teller/tills'){
+   if(cashLedgerAccounts?.length===1){const account=cashLedgerAccounts[0];return '<input type="hidden" name="cashGlId" value="'+esc(account.GL_ACCOUNT_ID)+'"><div class="field"><span>Cash ledger account</span><strong>'+esc(account.GL_NAME)+' ('+esc(account.GL_CODE)+')</strong><small>Selected automatically for this till.</small></div>';}
+   return select('Cash ledger account',key,[{value:'',label:'Choose a cash ledger account'},...(cashLedgerAccounts||[]).map(account=>({value:String(account.GL_ACCOUNT_ID),label:account.GL_NAME+' ('+account.GL_CODE+')'}))],'',true);
+  }
   if(!prefix&&/^(requestId|requestKey|correlationId|postingKey|approvalKey|holdKey)$/i.test(name))return '<input type="hidden" name="'+esc(key)+'" value="'+esc(defaults(key,s))+'">';
   if(!prefix&&name==='operationMode'&&active==='accounts')return select('Operation mode',key,[{value:'',label:'Select operation mode'},{value:'SELF_OPERATED',label:'Self operated'},{value:'ANYONE',label:'Any holder'},{value:'JOINTLY',label:'Jointly'},{value:'GUARDIAN_OPERATED',label:'Guardian operated'}],'',true);
   if(s.properties){
@@ -227,7 +266,6 @@ function staffAccessPage(head){
 }
 export async function bankingScreen(page){
  resetAccountOptionsForActor();
- if(page==='transactions'&&active!=='transactions')transactionOperationsOpen=false;
  active=page;const config=bankingPages[page];
  const customer=getSession().user.userType==='CUSTOMER';
  const head='<div class="page-heading"><div><p class="eyebrow">'+(customer?'YOUR BANKING':'BANKING OPERATIONS')+'</p><h1>'+esc(config.title)+'</h1><p>'+esc(customer&&page==='accounts'?'View your accounts and open an eligible savings or current account.':config.intro)+'</p></div></div>';
@@ -245,27 +283,52 @@ export async function bankingScreen(page){
  }
  if(page==='accounts'&&customer)return head+await customerAccountsScreen();
  if(page==='treasury'&&!allow('TREASURY_READ')&&!allow('TREASURY_LIQUIDITY_MANAGE'))return head+'<section class="panel"><div class="panel-heading"><h3>Reserve ledger access</h3></div><div class="panel-body"><div class="notice">This bank-wide reserve ledger requires Treasury read access. Ask an administrator to assign that permission through the normal access request and approval process.</div></div></section>';
- if(page==='transactions'&&!transactionOperationsOpen)return head+transactionPanel()+'<section class="panel"><div class="panel-body"><h3>Ledger actions</h3><p class="hint">Transfers, reversals, fees, and reconciliation are available when you need them.</p><button class="btn" type="button" data-bank-show-operations>Show ledger actions</button></div></section>';
+ if(page==='transactions'){
+  const tabs=transactionTabs();
+  if(transactionSection==='accounts')return head+tabs+transactionTabPanel('accounts',transactionPanel());
+  if(transactionSection==='gl')return head+tabs+transactionTabPanel('gl',glLedgerPanel());
+ }
  await loadContract();
  if(page==='treasury'){
   reserveAccounts=await api('/treasury/reserve-accounts');
   if(reserveAccounts.length&&!reserveAccountId)await loadReserve(reserveAccounts[0].id);
   if(!allow('TREASURY_LIQUIDITY_MANAGE')&&!checker())return head+treasuryPanel();
  }
- const choices=operations.filter(o=>config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path)));
+ const choices=operations.filter(o=>o.path!=='/teller/cash-ledger-accounts'&&config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path)));
  const initial={accounts:'/banking/accounts',teller:'/teller/tills',beneficiaries:'/beneficiaries',payments:'/payments',treasury:'/treasury/reserve-accounts',loans:'/banking/facilities',currency:'/fx/rates',privacy:'/privacy/purposes'}[page];
  const op=choices.find(o=>o.id===selected[page])||choices.find(o=>o.method==='GET'&&o.path===initial)||choices.find(o=>o.method==='GET'&&!o.path.includes('{'))||choices[0];
- if(!op)return head+'<div class="notice">No workflow is available in this deployment.</div>';
+ if(!op){const empty='<div class="notice">No workflow is available in this deployment.</div>';return head+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',empty):empty);}
  const firstLoad=!selected[page];selected[page]=op.id;
+ if(page==='teller'&&op.path==='/teller/tills'&&op.method==='POST'&&cashLedgerAccounts===null){
+  try{
+   try{cashLedgerAccounts=await api('/teller/cash-ledger-accounts');}
+   catch(error){
+    if(error.status!==404)throw error;
+    const accounts=await api('/banking/gl-accounts');
+    cashLedgerAccounts=accounts.filter(account=>account.ACCOUNT_CLASS==='ASSET'&&/cash/i.test(String(account.GL_CODE||'')+' '+String(account.GL_NAME||'')));
+   }
+   cashLedgerError='';
+  }
+  catch(error){cashLedgerAccounts=null;cashLedgerError=errorText(error);}
+ }
  if(firstLoad&&initial&&op.path===initial){try{results[page]=await api(initial);}catch{results[page]=null;}}
  const schema=schemaFor(op);
  const simpleInquiry=op.method==='GET'&&!Object.keys(schema.properties).length;
  const operationList=(items,group)=>items.length?'<div class="operation-group"><p class="operation-group-title">'+group+'</p>'+items.map(item=>'<button type="button" class="operation-choice '+(item.id===op.id?'active':'')+'" data-bank-operation="'+esc(item.id)+'" '+(item.id===op.id?'aria-current="true"':'')+'><span class="operation-choice-label">'+esc(item.title)+'</span></button>').join('')+'</div>':'';
  const catalog='<aside class="panel operation-catalog"><div class="panel-heading"><div><h3>Operations</h3><span class="muted">'+choices.length+' available</span></div><button id="operation-catalog-toggle" type="button" aria-expanded="false" aria-controls="operation-catalog-body">Choose operation</button></div><div class="panel-body" id="operation-catalog-body"><label class="field">Find an operation<input id="operation-search" type="search" placeholder="Search by name" autocomplete="off"></label><div class="operation-list">'+operationList(choices.filter(item=>item.method==='GET'),'View and inquire')+operationList(choices.filter(item=>item.method!=='GET'),'Create and maintain')+'</div><p class="operation-empty" hidden>No operations match this search.</p></div></aside>';
- const formPanel='<section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'INQUIRY':'MAINTENANCE')+'</p><h3>'+esc(op.title)+'</h3></div></div><div class="panel-body"><p class="hint">'+esc(op.description||'Complete the fields below. Your access is checked when you submit.')+'</p><form id="bank-workflow"><div class="grid2">'+inputs(schema,'',schema.required)+'</div><p class="form-error" role="alert"></p><div class="form-actions"><button type="submit" class="btn primary">'+(op.method==='GET'?'View records':'Submit operation')+'</button></div></form></div></section>';
+ const openingTill=page==='teller'&&op.path==='/teller/tills'&&op.method==='POST';
+ const noCashLedger=openingTill&&!cashLedgerAccounts?.length;
+ const cashLedgerNotice=noCashLedger?'<div class="notice">'+esc(cashLedgerError||'No active cash ledger account is configured. Ask an administrator to configure one before opening a till.')+'</div>':'';
+ const tillOpeningNotice=openingTill?'<div class="notice">Opening a till allocates INR 5,000 from counted branch vault cash. The vault decreases, the till increases, and a balanced cash journal records the transfer. At independent close, counted cash returns to the vault. The RBI reserve balance does not change. The branch vault must be registered first.</div>':'';
+ const deliveryNotice=page==='teller'&&op.path.startsWith('/teller/cash-deliveries')&&op.method==='POST'?'<div class="notice">Demo simulation: request a cash shipment against an active RBI current reserve. A different authorized checker must confirm the counted notes and receipt reference. Only confirmation moves the simulated RBI reserve and branch vault in one balanced posting. Do not use a live RBI reference.</div>':'';
+ const vaultNotice=page==='teller'&&op.path==='/teller/vaults'&&op.method==='POST'?'<div class="notice">For a new empty vault, enter counted cash 0. Select a dedicated active cash asset GL that has no postings or till assignment. The subsequent RBI cash delivery funds it.</div>':'';
+ const reserveOpeningNotice=page==='treasury'&&op.path.startsWith('/treasury/reserve-openings')&&op.method==='POST'?'<div class="notice">Synthetic demo opening: a bank administrator records the opening capital evidence. A different checker confirms it. Confirmation posts a balanced reserve asset and capital journal and creates the first entry in the local RBI mirror. No RBI network or physical cash movement occurs at this step.</div>':'';
+ const replenishNotice=page==='teller'&&op.path.endsWith('/replenish')&&op.method==='POST'?'<div class="notice">A second authorized person counts cash moved from the branch vault into this open till. The vault decreases and the till increases; the RBI reserve does not move again.</div>':'';
+ const formPanel='<section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'INQUIRY':'MAINTENANCE')+'</p><h3>'+esc(op.title)+'</h3></div></div><div class="panel-body"><p class="hint">'+esc(op.description||'Complete the fields below. Your access is checked when you submit.')+'</p>'+cashLedgerNotice+tillOpeningNotice+deliveryNotice+vaultNotice+reserveOpeningNotice+replenishNotice+'<form id="bank-workflow"><div class="grid2">'+inputs(schema,'',schema.required)+'</div><p class="form-error" role="alert"></p><div class="form-actions"><button type="submit" class="btn primary" '+(noCashLedger?'disabled':'')+'>'+(op.method==='GET'?'View records':'Submit operation')+'</button></div></form></div></section>';
  const resultPanel='<section class="panel result-panel" '+(op.method!=='GET'&&!results[page]?'hidden':'')+'><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'RECORDS':'TRANSACTION OUTCOME')+'</p><h3>'+esc(op.method==='GET'?op.title:'Operation result')+'</h3></div>'+(simpleInquiry?'<button class="btn small" id="bank-refresh" type="button">Refresh</button>':'<span class="muted">'+esc(op.title)+'</span>')+'</div><div class="panel-body" id="bank-result">'+(results[page]?renderRows(results[page]):'<div class="empty"><h3>No result to display</h3><p>Run the selected operation to view its result.</p></div>')+'</div></section>';
  const main=simpleInquiry?resultPanel:op.method==='GET'&&results[page]?resultPanel+formPanel:formPanel+resultPanel;
- return head+(page==='transactions'?transactionPanel()+'<div class="form-actions"><button class="btn small" type="button" data-bank-hide-operations>Hide ledger actions</button></div>':page==='treasury'?treasuryPanel():'')+'<div class="operation-layout">'+catalog+'<div class="operation-main">'+main+'</div></div>';
+ const layout='<div class="operation-layout">'+catalog+'<div class="operation-main">'+main+'</div></div>';
+ return head+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',layout):page==='treasury'?treasuryPanel():'')+(page==='transactions'?'':layout);
 }
 async function loadReserve(id,offset=0){
  const [position,reconciliation,ledger]=await Promise.all([
@@ -300,6 +363,36 @@ function refreshTransactionPanel(){
  existing.outerHTML=transactionPanel();
  bindTransactionForms();
 }
+function refreshGlLedgerPanel(){
+ const existing=document.querySelector('#gl-ledger-section');
+ if(!existing)return;
+ existing.outerHTML=glLedgerPanel();
+ bindGlLedgerForms();
+}
+function bindGlLedgerForms(){
+ const form=document.querySelector('#gl-ledger-form');
+ const input=form?.querySelector('input[name="glAccountId"]');
+ input?.addEventListener('focus',async()=>{
+  if(glLedgerAccounts!==null)return;
+  try{glLedgerAccounts=await api('/banking/gl-accounts');const list=document.querySelector('#gl-ledger-accounts');if(list)list.innerHTML=glLedgerAccounts.map(a=>'<option value="'+esc(a.GL_ACCOUNT_ID)+'" label="'+esc(a.GL_CODE+' · '+a.GL_NAME)+'"></option>').join('');}
+  catch(error){toast(errorText(error),true);}
+ },{once:true});
+ if(form)form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;document.querySelector('#gl-ledger-error').textContent='';try{
+  const id=String(new FormData(form).get('glAccountId')).trim();
+  const ledger=await api('/banking/gl-accounts/'+encodeURIComponent(id)+'/ledger?limit=50&offset=0');
+  glLedgerAccountId=id;glLedgerOffset=0;glLedger=ledger;glLedgerJournal=null;refreshGlLedgerPanel();
+ }catch(error){document.querySelector('#gl-ledger-error').textContent=errorText(error);button.disabled=false;}};
+ document.querySelectorAll('[data-gl-page]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{
+  const offset=Math.max(0,glLedgerOffset+(button.dataset.glPage==='next'?50:-50));
+  const ledger=await api('/banking/gl-accounts/'+encodeURIComponent(glLedgerAccountId)+'/ledger?'+new URLSearchParams({limit:'50',offset:String(offset)}));
+  glLedgerOffset=offset;glLedger=ledger;glLedgerJournal=null;refreshGlLedgerPanel();
+ }catch(error){toast(errorText(error),true);button.disabled=false;}}));
+ document.querySelectorAll('[data-gl-journal]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{
+  glLedgerJournal=await api('/banking/journals/'+encodeURIComponent(button.dataset.glJournal));refreshGlLedgerPanel();
+  document.querySelector('#gl-ledger-section .gl-journal-detail')?.scrollIntoView({block:'nearest',behavior:'smooth'});
+ }catch(error){toast(errorText(error),true);button.disabled=false;}}));
+ const close=document.querySelector('[data-gl-journal-close]');if(close)close.onclick=()=>{glLedgerJournal=null;refreshGlLedgerPanel();};
+}
 function bindTransactionForms(){
  const transactionForm=document.querySelector('#transaction-search-form');
  transactionForm?.querySelector('input[name="accountNumber"]')?.addEventListener('focus',loadAccountOptions,{once:true});
@@ -312,10 +405,12 @@ function bindTransactionForms(){
 }
 export function bindBankingForms(){
  bindTransactionForms();
- const showOperations=document.querySelector('[data-bank-show-operations]');
- if(showOperations)showOperations.onclick=async()=>{transactionOperationsOpen=true;await renderApp();};
- const hideOperations=document.querySelector('[data-bank-hide-operations]');
- if(hideOperations)hideOperations.onclick=async()=>{transactionOperationsOpen=false;await renderApp();};
+ bindGlLedgerForms();
+ const tabs=[...document.querySelectorAll('[data-transaction-tab]')];
+ for(const tab of tabs){
+  tab.onclick=async()=>{if(transactionSection===tab.dataset.transactionTab)return;transactionSection=tab.dataset.transactionTab;await renderApp();document.querySelector('[data-transaction-tab="'+transactionSection+'"]')?.focus();};
+  tab.onkeydown=event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;const index=tabs.indexOf(tab);const next=event.key==='ArrowRight'?index+1:event.key==='ArrowLeft'?index-1:event.key==='Home'?0:tabs.length-1;event.preventDefault();tabs[(next+tabs.length)%tabs.length].click();};
+ }
  const reserveForm=document.querySelector('#reserve-ledger-form');
  if(reserveForm)reserveForm.onsubmit=async e=>{e.preventDefault();const button=reserveForm.querySelector('button');button.disabled=true;document.querySelector('#reserve-error').textContent='';try{await loadReserve(new FormData(reserveForm).get('reserveAccountId'));await renderApp();}catch(error){document.querySelector('#reserve-error').textContent=errorText(error);button.disabled=false;}};
  document.querySelectorAll('[data-reserve-page]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;try{await loadReserve(reserveAccountId,Math.max(0,reserveOffset+(button.dataset.reservePage==='next'?50:-50)));await renderApp();}catch(error){toast(errorText(error),true);button.disabled=false;}}));
@@ -343,6 +438,7 @@ export function bindBankingForms(){
    if(query.size)path+='?'+query;
    const collected=op.requestBody?await resolveAccountNumbers(collect(schema.body,data)):undefined;const body=collected?.__body??collected;const headers={'Idempotency-Key':body?.requestKey||body?.requestId||form.dataset.requestKey};for(const p of op.parameters||[])if(p.in==='header'&&p.name==='If-Match'&&values[p.name]!==undefined)headers[p.name]=values[p.name];
    const response=await api(path,{method:op.method,body,headers});
+   if(op.method==='POST'&&op.path==='/teller/vaults')cashLedgerAccounts=null;
    results[active]=response??{message:'Operation completed'};
    document.querySelector('.result-panel').hidden=false;
    document.querySelector('#bank-result').innerHTML=renderRows(results[active]);

@@ -8,6 +8,7 @@ import com.moneybags.treasury.api.TreasuryRequests.*;
 import com.moneybags.treasury.domain.DomainException;
 import com.moneybags.treasury.repository.TreasuryRepository;
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
@@ -197,6 +198,63 @@ public class TreasuryService {
         event("treasury.reserve-movement.confirmed.v1", "TREASURY_ENTRY", entry.id(), entry);
         audit(actor, "MOVEMENT_CONFIRM", "TREASURY_ENTRY", entry.id(), "SUCCESS", null);
         return entry;
+    }
+
+    public record CashDeliveryPosting(long evidenceId, long treasuryEntryId) {}
+
+    /** Locks and checks the simulated RBI position before any cash-delivery journal is posted. */
+    @Transactional
+    public ReserveAccount requireCashDeliveryCapacity(long reserveAccountId, BigDecimal amount) {
+        ReserveAccount account = repository.findReserveAccount(reserveAccountId)
+            .orElseThrow(() -> DomainException.notFound("Reserve account", reserveAccountId));
+        if (!"ACTIVE".equals(account.status()) || !"RBI_CURRENT".equals(account.accountType()))
+            throw DomainException.invalid("Cash delivery requires an active RBI current reserve account");
+        ReservePosition position = repository.lockPosition(reserveAccountId);
+        ReserveReconciliation control = repository.findReserveReconciliation(reserveAccountId)
+            .orElseThrow(() -> DomainException.notFound("Reserve reconciliation", reserveAccountId));
+        if (!"Y".equals(control.isMatched()))
+            throw DomainException.conflict("RESERVE_RECONCILIATION", "Reserve ledger and position do not agree");
+        if (position.availableBalance().subtract(account.safetyBuffer()).compareTo(amount) < 0)
+            throw DomainException.conflict("INSUFFICIENT_RESERVE_LIQUIDITY", "Cash shipment exceeds available RBI reserve after the safety buffer");
+        return account;
+    }
+
+    /** Commits verified cash receipt to the local reserve mirror in the caller's journal transaction. */
+    @Transactional
+    public CashDeliveryPosting confirmCashDelivery(String deliveryId, long reserveAccountId, BigDecimal amount,
+                                                    String shipmentRef, String receiptRef, long journalId,
+                                                    OffsetDateTime occurredAt, String checker) {
+        requireCashDeliveryCapacity(reserveAccountId, amount);
+        long evidenceId = repository.insertCashDeliveryEvidence(deliveryId, reserveAccountId, amount,
+            shipmentRef, receiptRef, occurredAt,
+            sha256((deliveryId + "|" + shipmentRef + "|" + receiptRef + "|" + amount.toPlainString()).getBytes(StandardCharsets.UTF_8)));
+        TreasuryEntry entry = repository.insertCashDeliveryEntry(deliveryId, reserveAccountId, evidenceId,
+            amount, shipmentRef, journalId, occurredAt);
+        repository.applyEntryToPosition(entry);
+        event("treasury.cash-delivery.confirmed.v1", "TREASURY_ENTRY", entry.id(),
+            java.util.Map.of("deliveryId", deliveryId, "reserveAccountId", reserveAccountId,
+                "amount", amount, "journalId", journalId));
+        audit(checker, "CASH_DELIVERY_CONFIRMED", "TREASURY_ENTRY", entry.id(), "SUCCESS", null);
+        return new CashDeliveryPosting(evidenceId, entry.id());
+    }
+
+    /** Adds one approved synthetic capital opening to the local RBI mirror. */
+    @Transactional
+    public CashDeliveryPosting confirmReserveOpening(String openingId, long reserveAccountId, BigDecimal amount,
+                                                     String evidenceRef, long journalId,
+                                                     OffsetDateTime occurredAt, String checker) {
+        repository.lockPosition(reserveAccountId);
+        long evidenceId = repository.insertReserveOpeningEvidence(openingId, reserveAccountId, amount,
+            evidenceRef, occurredAt,
+            sha256((openingId + "|" + evidenceRef + "|" + amount.toPlainString()).getBytes(StandardCharsets.UTF_8)));
+        TreasuryEntry entry = repository.insertReserveOpeningEntry(openingId, reserveAccountId, evidenceId,
+            amount, evidenceRef, journalId, occurredAt);
+        repository.applyEntryToPosition(entry);
+        event("treasury.reserve-opening.confirmed.v1", "TREASURY_ENTRY", entry.id(),
+            java.util.Map.of("openingId", openingId, "reserveAccountId", reserveAccountId,
+                "amount", amount, "journalId", journalId));
+        audit(checker, "RESERVE_OPENING_CONFIRMED", "TREASURY_ENTRY", entry.id(), "SUCCESS", null);
+        return new CashDeliveryPosting(evidenceId, entry.id());
     }
 
     /** Opens an exception from automated reconciliation or an operator. */

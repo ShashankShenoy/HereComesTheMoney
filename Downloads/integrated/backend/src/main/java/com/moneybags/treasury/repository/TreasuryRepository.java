@@ -284,6 +284,75 @@ public class TreasuryRepository {
             .param("id", id).query(this::evidence).optional();
     }
 
+    /** Records the verified receipt of notes as a distinct cash-delivery scope. */
+    public long insertCashDeliveryEvidence(String deliveryId, long reserveAccountId, BigDecimal amount,
+                                           String shipmentRef, String receiptRef, OffsetDateTime occurredAt,
+                                           byte[] evidenceHash) {
+        jdbc.sql("""
+            INSERT INTO M07_SETTLEMENT_EVIDENCE
+              (RESERVE_ACCOUNT_ID,CASH_DELIVERY_ID,RAIL_CODE,EVIDENCE_TYPE,EVIDENCE_STATUS,
+               MOVEMENT_SIDE,AMOUNT,EXTERNAL_SETTLEMENT_REF,EVIDENCE_HASH,EVIDENCE_REF,OCCURRED_AT)
+            VALUES (:accountId,:deliveryId,'CASH','CASH_DELIVERY','VERIFIED',
+                    'OUT',:amount,:shipmentRef,:hash,:receiptRef,:occurredAt)
+            """).param("accountId", reserveAccountId).param("deliveryId", deliveryId)
+            .param("amount", amount).param("shipmentRef", shipmentRef)
+            .param("hash", evidenceHash).param("receiptRef", receiptRef)
+            .param("occurredAt", occurredAt).update();
+        return jdbc.sql("SELECT EVIDENCE_ID FROM M07_SETTLEMENT_EVIDENCE WHERE CASH_DELIVERY_ID=:id")
+            .param("id", deliveryId).query(Long.class).single();
+    }
+
+    /** Appends the reserve debit associated with one physically received shipment. */
+    public TreasuryEntry insertCashDeliveryEntry(String deliveryId, long reserveAccountId, long evidenceId,
+                                                 BigDecimal amount, String shipmentRef, long journalId,
+                                                 OffsetDateTime occurredAt) {
+        jdbc.sql("""
+            INSERT INTO M07_CENTRAL_TREASURY_LEDGER
+              (RESERVE_ACCOUNT_ID,CASH_DELIVERY_ID,EVIDENCE_ID,RAIL_CODE,MOVEMENT_SIDE,
+               AMOUNT,EXTERNAL_SETTLEMENT_REF,GL_JOURNAL_ID,SETTLED_AT)
+            VALUES (:accountId,:deliveryId,:evidenceId,'CASH','OUT',
+                    :amount,:shipmentRef,:journalId,:occurredAt)
+            """).param("accountId", reserveAccountId).param("deliveryId", deliveryId)
+            .param("evidenceId", evidenceId).param("amount", amount)
+            .param("shipmentRef", shipmentRef).param("journalId", journalId)
+            .param("occurredAt", occurredAt).update();
+        return jdbc.sql("SELECT * FROM M07_CENTRAL_TREASURY_LEDGER WHERE CASH_DELIVERY_ID=:id")
+            .param("id", deliveryId).query(this::entry).single();
+    }
+
+    /** Records an evidenced synthetic capital opening without a payment or clearing scope. */
+    public long insertReserveOpeningEvidence(String openingId, long reserveAccountId, BigDecimal amount,
+                                             String evidenceRef, OffsetDateTime occurredAt, byte[] evidenceHash) {
+        jdbc.sql("""
+            INSERT INTO M07_SETTLEMENT_EVIDENCE
+              (RESERVE_ACCOUNT_ID,RESERVE_OPENING_ID,RAIL_CODE,EVIDENCE_TYPE,EVIDENCE_STATUS,
+               MOVEMENT_SIDE,AMOUNT,EXTERNAL_SETTLEMENT_REF,EVIDENCE_HASH,EVIDENCE_REF,OCCURRED_AT)
+            VALUES (:accountId,:openingId,'RBI','RESERVE_OPENING','VERIFIED',
+                    'IN',:amount,:evidenceRef,:hash,:evidenceRef,:occurredAt)
+            """).param("accountId", reserveAccountId).param("openingId", openingId)
+            .param("amount", amount).param("evidenceRef", evidenceRef)
+            .param("hash", evidenceHash).param("occurredAt", occurredAt).update();
+        return jdbc.sql("SELECT EVIDENCE_ID FROM M07_SETTLEMENT_EVIDENCE WHERE RESERVE_OPENING_ID=:id")
+            .param("id", openingId).query(Long.class).single();
+    }
+
+    public TreasuryEntry insertReserveOpeningEntry(String openingId, long reserveAccountId, long evidenceId,
+                                                    BigDecimal amount, String evidenceRef, long journalId,
+                                                    OffsetDateTime occurredAt) {
+        jdbc.sql("""
+            INSERT INTO M07_CENTRAL_TREASURY_LEDGER
+              (RESERVE_ACCOUNT_ID,RESERVE_OPENING_ID,EVIDENCE_ID,RAIL_CODE,MOVEMENT_SIDE,
+               AMOUNT,EXTERNAL_SETTLEMENT_REF,GL_JOURNAL_ID,SETTLED_AT)
+            VALUES (:accountId,:openingId,:evidenceId,'RBI','IN',
+                    :amount,:evidenceRef,:journalId,:occurredAt)
+            """).param("accountId", reserveAccountId).param("openingId", openingId)
+            .param("evidenceId", evidenceId).param("amount", amount)
+            .param("evidenceRef", evidenceRef).param("journalId", journalId)
+            .param("occurredAt", occurredAt).update();
+        return jdbc.sql("SELECT * FROM M07_CENTRAL_TREASURY_LEDGER WHERE RESERVE_OPENING_ID=:id")
+            .param("id", openingId).query(this::entry).single();
+    }
+
     /** Appends one immutable reserve movement linked to a Module 5 GL journal. */
     public TreasuryEntry insertTreasuryEntry(SettlementEvidence evidence, long glJournalId) {
         jdbc.sql("""

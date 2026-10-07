@@ -100,6 +100,24 @@ class IntegratedContextTest {
    .andExpect(status().isOk()).andExpect(jsonPath("$.reserveAccountId").value(1)).andExpect(jsonPath("$.isMatched").value("Y"));
   mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
  }
+ @Test @Order(2) void glRegisterIsPagedAndReconciliationOnly()throws Exception{
+  String admin=login("admin"),customer=login("customer"),viewer=nonAdminViewer();
+  String path="/api/v1/banking/gl-accounts/6/ledger";
+  mvc.perform(get(path).header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
+  mvc.perform(get(path).header("Authorization","Bearer "+viewer)).andExpect(status().isForbidden());
+  mvc.perform(get(path+"?limit=0").header("Authorization","Bearer "+admin)).andExpect(status().isBadRequest());
+  var page=value(mvc.perform(get(path+"?limit=1&offset=0").header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertEquals(6,page.path("account").path("GL_ACCOUNT_ID").asLong());
+  assertEquals("DR",page.path("account").path("NORMAL_SIDE").asText());
+  assertTrue(page.path("total").asLong()>0);
+  assertEquals(1,page.path("postings").size());
+  assertEquals(0,page.path("balance").decimalValue().compareTo(page.path("postings").get(0).path("RUNNING_BALANCE").decimalValue()));
+  long journalId=page.path("postings").get(0).path("JOURNAL_ID").asLong();
+  var detail=value(mvc.perform(get("/api/v1/banking/journals/"+journalId).header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertEquals("Y",detail.path("control").path("IS_BALANCED").asText());
+  assertTrue(detail.path("lines").size()>=2);
+  mvc.perform(get("/api/v1/banking/journals/"+journalId).header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
+ }
  @Test @Order(4) void newAccountsActivateThroughRealLedgerFence()throws Exception{
   String admin=login("admin");String request=UUID.randomUUID().toString();
   long id=value(send("/accounts",admin,Map.of("requestId",request,"primaryCifId","demo-cif-1","productId",1,"productVersionId",1,"branchCode","MUM001","operationMode","SELF_OPERATED","additionalParties",List.of())).andExpect(status().isCreated())).path("id").asLong();
@@ -109,14 +127,77 @@ class IntegratedContextTest {
  }
  @Test @Order(5) void tellerPostingIsBalancedAndIdempotent()throws Exception{
   String admin=login("admin"),checker=login("checker");
-  String till=value(send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isOk())).path("tillId").asText();
+  mvc.perform(get("/api/v1/teller/cash-ledger-accounts").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[0].GL_CODE").value("CASH"))
+    .andExpect(jsonPath("$[1]").doesNotExist());
+  send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",6)).andExpect(status().isConflict());
+  BigDecimal reserveBefore=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
+  int reserveEntriesBefore=db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE RESERVE_ACCOUNT_ID=1",Integer.class);
+  BigDecimal vaultBefore=db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class);
+  JsonNode opening=value(send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isOk()));
+  String till=opening.path("tillId").asText();
+  assertEquals(0,new BigDecimal("5000").compareTo(new BigDecimal(opening.path("openingCash").asText())));
+  assertEquals(0,vaultBefore.subtract(new BigDecimal("5000")).compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class)));
+  assertEquals(0,new BigDecimal("5000").compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
+  assertEquals(0,reserveBefore.compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals(reserveEntriesBefore,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE RESERVE_ACCOUNT_ID=1",Integer.class));
+  assertEquals(0,db.queryForObject("SELECT DIFFERENCE FROM M07_V_RESERVE_POSITION_RECON WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class).compareTo(BigDecimal.ZERO));
+  assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",BigDecimal.class,opening.path("fundingJournalId").asLong()).compareTo(BigDecimal.ZERO));
   BigDecimal before=balance(1);
   var command=Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",1,"direction","DEPOSIT","amount","100.00","reason","Test deposit");
   send("/teller/cash",admin,command).andExpect(status().isOk());
   send("/teller/cash",admin,command).andExpect(status().isOk());
   assertEquals(0,before.add(new BigDecimal("100")).compareTo(balance(1)));
-  send("/teller/tills/"+till+"/close",admin,Map.of("countedCash","100","reason","Close till")).andExpect(status().isConflict());
-  send("/teller/tills/"+till+"/close",checker,Map.of("countedCash","100","reason","Independent close")).andExpect(status().isOk());
+  var withdrawal=Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",1,"direction","WITHDRAWAL","amount","1500.00","reason","Test withdrawal");
+  send("/teller/cash",admin,withdrawal).andExpect(status().isOk());
+  assertEquals(0,before.subtract(new BigDecimal("1400")).compareTo(balance(1)));
+  assertEquals(0,new BigDecimal("3600").compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
+  send("/teller/cash",admin,Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",1,"direction","WITHDRAWAL","amount","3600.01","reason","Too much cash"))
+    .andExpect(status().isConflict());
+  assertEquals(0,before.subtract(new BigDecimal("1400")).compareTo(balance(1)));
+  var topUp=Map.of("requestKey",UUID.randomUUID().toString(),"amount","400.00","evidenceRef","COUNTED_VAULT_TRANSFER");
+  send("/teller/tills/"+till+"/replenish",admin,topUp).andExpect(status().isConflict());
+  var replenished=value(send("/teller/tills/"+till+"/replenish",checker,topUp).andExpect(status().isOk()));
+  send("/teller/tills/"+till+"/replenish",checker,topUp).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("4000").compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM MBX_TILL_REPLENISHMENT WHERE TILL_ID=?",Integer.class,till));
+  assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",BigDecimal.class,replenished.path("journalId").asLong()).compareTo(BigDecimal.ZERO));
+  send("/teller/tills/"+till+"/close",admin,Map.of("countedCash","4000","reason","Close till")).andExpect(status().isConflict());
+  send("/teller/tills/"+till+"/close",checker,Map.of("countedCash","4000","reason","Independent close")).andExpect(status().isOk());
+  assertEquals(0,vaultBefore.subtract(new BigDecimal("1400")).compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class)));
+  assertEquals(0,BigDecimal.ZERO.compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM MBX_TILL_CASH_RETURN WHERE TILL_ID=?",Integer.class,till));
+  assertEquals(0,reserveBefore.compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals(reserveEntriesBefore,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE RESERVE_ACCOUNT_ID=1",Integer.class));
+  // A separately evidenced cash delivery, not till opening, moves the RBI mirror.
+  db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (90,'TEST_VAULT_CASH','Test branch vault cash','ASSET','DR')");
+  send("/teller/vaults",admin,Map.of("branchCode","DEL999","vaultGlId",90,"countedCash","0","evidenceRef","EMPTY_VAULT_TEST"))
+    .andExpect(status().isOk());
+  String shipmentRef="SIM-CASH-"+UUID.randomUUID();
+  var request=Map.of("requestKey",UUID.randomUUID().toString(),"branchCode","DEL999","reserveAccountId",1,
+    "amount","5000.00","shipmentRef",shipmentRef,"requestEvidenceRef","SIMULATED_RBI_ADVICE");
+  String delivery=value(send("/teller/cash-deliveries",admin,request).andExpect(status().isOk())).path("deliveryId").asText();
+  assertEquals(delivery,value(send("/teller/cash-deliveries",admin,request).andExpect(status().isOk())).path("deliveryId").asText());
+  send("/teller/cash-deliveries/"+delivery+"/confirm",checker,Map.of("countedCash","4999.99","receiptEvidenceRef","COUNTED_TEST"))
+    .andExpect(status().isConflict());
+  send("/teller/cash-deliveries/"+delivery+"/confirm",admin,Map.of("countedCash","5000.00","receiptEvidenceRef","COUNTED_TEST"))
+    .andExpect(status().isConflict());
+  var confirmed=value(send("/teller/cash-deliveries/"+delivery+"/confirm",checker,
+    Map.of("countedCash","5000.00","receiptEvidenceRef","COUNTED_TEST")).andExpect(status().isOk()));
+  send("/teller/cash-deliveries/"+delivery+"/confirm",checker,
+    Map.of("countedCash","5000.00","receiptEvidenceRef","COUNTED_TEST")).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("5000").compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='DEL999'",BigDecimal.class)));
+  assertEquals(0,reserveBefore.subtract(new BigDecimal("5000")).compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE CASH_DELIVERY_ID=? AND RAIL_CODE='CASH' AND MOVEMENT_SIDE='OUT'",Integer.class,delivery));
+  assertEquals(0,db.queryForObject("SELECT DIFFERENCE FROM M07_V_RESERVE_POSITION_RECON WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class).compareTo(BigDecimal.ZERO));
+  assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",BigDecimal.class,confirmed.path("journalId").asLong()).compareTo(BigDecimal.ZERO));
+  String oversized=value(send("/teller/cash-deliveries",admin,Map.of("requestKey",UUID.randomUUID().toString(),"branchCode","DEL999",
+    "reserveAccountId",1,"amount","2000000.00","shipmentRef","SIM-CASH-"+UUID.randomUUID(),"requestEvidenceRef","TEST_OVERSIZED"))
+    .andExpect(status().isOk())).path("deliveryId").asText();
+  send("/teller/cash-deliveries/"+oversized+"/confirm",checker,
+    Map.of("countedCash","2000000.00","receiptEvidenceRef","COUNTED_OVERSIZED"))
+    .andExpect(status().isConflict());
+  assertEquals("PENDING",db.queryForObject("SELECT STATUS FROM MBX_RBI_CASH_DELIVERY WHERE DELIVERY_ID=?",String.class,oversized));
  }
  @Test @Order(6) void rateApprovalRejectsSelfApproval()throws Exception{
   String admin=login("admin"),checker=login("checker");var now=java.time.OffsetDateTime.now();
@@ -148,6 +229,7 @@ class IntegratedContextTest {
  }
  @Test @Order(9) void simulatedPaymentSettlesCustomerSuspenseAndReserve()throws Exception{
   String customer=login("customer"),checker=login("checker");
+  BigDecimal reserveBefore=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
   String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Test recipient","accountToken","test-recipient-token","bankCode","TEST0123456")).andExpect(status().isOk())).path("beneficiaryId").asText();
   send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
   BigDecimal before=balance(1);
@@ -159,7 +241,7 @@ class IntegratedContextTest {
   send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
   send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
   assertEquals("SETTLED",db.queryForObject("SELECT STATUS FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",String.class,payment));
-  assertEquals(0,new BigDecimal("999500").compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals(0,reserveBefore.subtract(new BigDecimal("500")).compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
  }
  @Test @Order(10) void loanOriginationDisbursementAndScheduleAreLinked()throws Exception{
@@ -404,6 +486,27 @@ class IntegratedContextTest {
   mvc.perform(post("/api/v1/assistant/mcp").header("Authorization","Bearer "+checker).contentType(MediaType.APPLICATION_JSON).content("{}"))
     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("CHECKER_APPROVAL_ONLY"));
   mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+ }
+ @Test @Order(19) void syntheticReserveOpeningRequiresIndependentApprovalAndBalancesBothBooks()throws Exception{
+  String admin=login("admin"),checker=login("checker");
+  db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (91,'OPENING_RBI','Synthetic opening RBI reserve','ASSET','DR')");
+  db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (92,'OPENING_CAPITAL','Synthetic opening capital','EQUITY','CR')");
+  db.update("INSERT INTO M07_RESERVE_ACCOUNT(RESERVE_ACCOUNT_ID,RESERVE_ACCOUNT_CODE,ACCOUNT_TYPE,EXTERNAL_ACCOUNT_REF,GL_ACCOUNT_ID) VALUES (77,'OPENING-TEST','RBI_CURRENT','SIMULATED-OPENING-TEST',91)");
+  db.update("INSERT INTO M07_RESERVE_POSITION(RESERVE_ACCOUNT_ID,CONFIRMED_BALANCE,ACTIVE_HOLD_AMOUNT) VALUES (77,0,0)");
+  var command=Map.of("requestKey",UUID.randomUUID().toString(),"reserveAccountId",77,"equityGlId",92,
+    "amount","50000.00","evidenceRef","DEMO-OPENING-RESERVE-TEST");
+  send("/treasury/reserve-openings",checker,command).andExpect(status().isForbidden());
+  String opening=value(send("/treasury/reserve-openings",admin,command).andExpect(status().isOk())).path("openingId").asText();
+  assertEquals(opening,value(send("/treasury/reserve-openings",admin,command).andExpect(status().isOk())).path("openingId").asText());
+  send("/treasury/reserve-openings/"+opening+"/confirm",admin,Map.of()).andExpect(status().isConflict());
+  var confirmed=value(send("/treasury/reserve-openings/"+opening+"/confirm",checker,Map.of()).andExpect(status().isOk()));
+  send("/treasury/reserve-openings/"+opening+"/confirm",checker,Map.of()).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("50000").compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=77",BigDecimal.class)));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE RESERVE_OPENING_ID=? AND RAIL_CODE='RBI' AND MOVEMENT_SIDE='IN'",Integer.class,opening));
+  assertEquals(0,db.queryForObject("SELECT DIFFERENCE FROM M07_V_RESERVE_POSITION_RECON WHERE RESERVE_ACCOUNT_ID=77",BigDecimal.class).compareTo(BigDecimal.ZERO));
+  assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",BigDecimal.class,confirmed.path("journalId").asLong()).compareTo(BigDecimal.ZERO));
+  assertEquals(0,new BigDecimal("50000").compareTo(db.queryForObject("SELECT SUM(AMOUNT) FROM M05_GL_POSTING WHERE GL_ACCOUNT_ID=91 AND ENTRY_SIDE='DR'",BigDecimal.class)));
+  assertEquals(0,new BigDecimal("50000").compareTo(db.queryForObject("SELECT SUM(AMOUNT) FROM M05_GL_POSTING WHERE GL_ACCOUNT_ID=92 AND ENTRY_SIDE='CR'",BigDecimal.class)));
  }
  JsonNode mcp(String token,String method,String name,Object arguments)throws Exception{
   Map<String,Object> params="tools/call".equals(method)?Map.of("name",name,"arguments",arguments):Map.of();

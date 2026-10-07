@@ -27,6 +27,7 @@ public class BankingAccess {
  }
  public Map<String,Object> facility(String permission,long id){var f=db.one("SELECT FACILITY_ID,PRIMARY_CIF_ID,BRANCH_CODE FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",id);access.require(CurrentActor.get(),new AuthorizationInput(permission,(String)f.get("BRANCH_CODE"),null,(String)f.get("PRIMARY_CIF_ID"),"LOAN","INR",null,null,null,null));return f;}
  public void global(String permission){new com.moneybags.iam.security.IamGuard(db.jdbc(),java.time.Clock.systemUTC()).require(CurrentActor.get(),permission);}
+ public void branch(String permission,String branchCode){access.require(CurrentActor.get(),new AuthorizationInput(permission,branchCode,null,null,null,"INR",null,null,null,null));}
  /** Bank-wide transaction review belongs only to a current, unrestricted BANK_ADMIN assignment. */
  public boolean bankAdminTransactionRead(){
   var u=CurrentActor.get();
