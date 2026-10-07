@@ -1,6 +1,7 @@
 -- Credit card extension. Apply ONCE as the schema owner after migrations 001-014.
 -- Formerly named 011-credit-cards.sql on feature/credit-card-service.
 -- If that former script is already installed, skip this file and run acceptance/credit-cards.sql.
+-- 015 is installation order; M11_CC_* remains the permanent module namespace. Do not rename tables.
 -- Oracle DDL commits implicitly: back up and inspect first. Never rerun 001 on existing data.
 -- No existing customer balances or journal rows are changed by this migration.
 SET DEFINE OFF
