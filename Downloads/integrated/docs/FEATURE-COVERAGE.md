@@ -59,7 +59,7 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Reversal/correction/adjustment | Independent transfer reversals and trusted service journals; immutable entries retained. No arbitrary employee journal editor. |
 | Value date, booking date, channel | Persisted in M05; immediate transfers require the current business date. |
 | Real-time balances | Transactional M05 position updates plus reconciliation views. |
-| Teller cash control | Per-teller/day till, no negative cash and counted-cash independent closure. Vault/denomination management is not modeled. |
+| Teller cash control | Per-teller/day till, no negative cash and counted-cash independent closure. Opening a till allocates INR 5,000 from a registered branch vault and posts a balanced vault-to-till cash journal. Independent close returns counted cash to the vault with another balanced journal. Vault registration is reconciled to an existing cash GL balance. Denominations and physical handoff verification are not modeled. RBI reserve is unaffected by internal cash transfers. |
 | Status/failure tracking | Transaction history, explicit errors/correlation IDs and module operational queues. Rejected rolled-back attempts are not represented as successful postings. |
 | Kafka brokerage | Optional committed-outbox publisher for M05–M08, leases, retry and dead-letter states. Broker delivery is untested; core posting is synchronous and atomic, not a Kafka command processor. |
 

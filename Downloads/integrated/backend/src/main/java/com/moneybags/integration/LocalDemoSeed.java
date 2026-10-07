@@ -63,6 +63,7 @@ public class LocalDemoSeed implements ApplicationRunner {
    db.update("INSERT INTO M05_GL_PRODUCT_MAPPING(PRODUCT_VERSION_ID,POSTING_TYPE,GL_ROLE_CODE,GL_ACCOUNT_ID,EFFECTIVE_FROM,CREATED_BY) VALUES (1,?,'CUSTOMER_LIABILITY',1,?,?)",type,LocalDate.now().minusDays(30),admin);
   db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (6,'RESERVE','Simulated reserve','ASSET','DR')");
   db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (7,'EQUITY','Demo opening equity','EQUITY','CR')");
+  db.update("INSERT INTO M05_GL_ACCOUNT(GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (8,'VAULT_CASH','Branch vault cash','ASSET','DR')");
   db.update("INSERT INTO M05_GL_PRODUCT_MAPPING(PRODUCT_VERSION_ID,POSTING_TYPE,GL_ROLE_CODE,GL_ACCOUNT_ID,EFFECTIVE_FROM,CREATED_BY) VALUES (1,'PAYMENT','SETTLEMENT_SUSPENSE',3,?,?)",LocalDate.now().minusDays(30),admin);
   db.update("INSERT INTO M07_RESERVE_ACCOUNT(RESERVE_ACCOUNT_ID,RESERVE_ACCOUNT_CODE,ACCOUNT_TYPE,EXTERNAL_ACCOUNT_REF,GL_ACCOUNT_ID) VALUES (1,'DEMO-RBI','RBI_CURRENT','SIMULATED-NOT-REAL',6)");
   db.update("INSERT INTO M05_TXN_TRANSACTION_LOG(TXN_ID,ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,AMOUNT,VALUE_DATE) VALUES (3,?,'BRANCH','demo-reserve',?,'demo-reserve','ADJUSTMENT','POSTED',1000000,?)",admin,CustomerHashService.digest("demo-reserve"),LocalDate.now());
@@ -77,8 +78,9 @@ public class LocalDemoSeed implements ApplicationRunner {
   for(int i=1;i<=2;i++){
    BigDecimal amount=BigDecimal.valueOf(i==1?75000:25000);
    db.update("INSERT INTO M05_TXN_TRANSACTION_LOG(TXN_ID,ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,?,'BRANCH',?,?,'demo-opening','OPENING_FUNDING','POSTED',?,1,?,?)",i,admin,"demo-funding-"+i,CustomerHashService.digest("demo-funding-"+i),i,amount,LocalDate.now());
-   ledger.postJournal(new JournalRequest("demo-funding-"+i,"OPENING_FUNDING",(long)i,null,null,null,null,null,LocalDate.now(),"Synthetic opening funds",List.of(new JournalLine(2L,null,null,null,"DR",amount,"Demo cash"),new JournalLine(1L,(long)i,null,null,"CR",amount,"Opening funds"))),admin);
+   ledger.postJournal(new JournalRequest("demo-funding-"+i,"OPENING_FUNDING",(long)i,null,null,null,null,null,LocalDate.now(),"Synthetic opening funds",List.of(new JournalLine(8L,null,null,null,"DR",amount,"Demo vault cash"),new JournalLine(1L,(long)i,null,null,"CR",amount,"Opening funds"))),admin);
   }
+  db.update("INSERT INTO MBX_BRANCH_VAULT(BRANCH_CODE,VAULT_GL_ID,CASH_BALANCE,OPENING_EVIDENCE_REF) VALUES ('MUM001',8,100000,'LOCAL_SYNTHETIC_OPENING')");
   db.update("INSERT INTO MBX_CURRENCY(CURRENCY_CODE,DISPLAY_NAME) VALUES ('INR','Indian rupee')");
   db.update("INSERT INTO MBX_CURRENCY(CURRENCY_CODE,DISPLAY_NAME) VALUES ('USD','US dollar')");
   db.update("INSERT INTO MBX_CURRENCY(CURRENCY_CODE,DISPLAY_NAME) VALUES ('EUR','Euro')");

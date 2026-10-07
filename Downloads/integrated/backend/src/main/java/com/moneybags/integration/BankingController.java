@@ -2,6 +2,7 @@ package com.moneybags.integration;
 import org.springframework.web.bind.annotation.*;
 import com.moneybags.common.database.BusinessRepository;
 import com.moneybags.txn.core.LedgerService;
+import org.springframework.http.HttpStatus;
 import java.util.*;
 @RestController @RequestMapping("/api/v1/banking")
 public class BankingController {
@@ -123,7 +124,43 @@ public class BankingController {
   hashes.audit("TRANSACTION_DETAIL_VIEWED","TRANSACTION",Long.toString(id),accountId==null?"GL_RECONCILE":access.bankAdminTransactionRead()?"BANK_ADMIN":hashes.proofLabel());
   return detail;
  }
- @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){try{access.global("GL_READ");}catch(com.moneybags.common.api.BusinessException denied){access.global("GL_ADMIN");}return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
+ @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){try{access.global("GL_READ");}catch(com.moneybags.common.api.BusinessException denied){try{access.global("GL_RECONCILE");}catch(com.moneybags.common.api.BusinessException reconcileDenied){access.global("GL_ADMIN");}}return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
+ private void requireGlLedgerAccess(){
+  if(!"EMPLOYEE".equals(CurrentActor.get().userType()))throw new com.moneybags.common.api.BusinessException(HttpStatus.FORBIDDEN,"STAFF_ONLY","The GL register is for authorized bank staff");
+  access.global("GL_RECONCILE");
+ }
+ /** Staff-only GL register. The running balance includes earlier postings even on later pages. */
+ @GetMapping("/gl-accounts/{id}/ledger") public Map<String,Object> glLedger(@PathVariable long id,@RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset){
+  requireGlLedgerAccess();
+  if(limit<1||limit>100||offset<0)throw new com.moneybags.common.api.BusinessException(HttpStatus.BAD_REQUEST,"INVALID_PAGE","Use a page size from 1 to 100 and a nonnegative offset");
+  var account=db.one("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE,CURRENCY_CODE,ACTIVE_FLAG FROM M05_GL_ACCOUNT WHERE GL_ACCOUNT_ID=?",id);
+  long total=db.count("SELECT COUNT(*) FROM M05_GL_POSTING WHERE GL_ACCOUNT_ID=?",id);
+  var postings=db.rows("""
+    SELECT * FROM (
+      SELECT P.POSTING_ID,P.JOURNAL_ID,P.LINE_NO,P.ENTRY_SIDE,P.AMOUNT,P.NARRATIVE,
+             J.BOOKED_AT,J.VALUE_DATE,J.JOURNAL_TYPE,J.DESCRIPTION AS JOURNAL_DESCRIPTION,
+             J.TXN_ID,J.PAYMENT_ID,J.SETTLEMENT_CYCLE_ID,J.LOAN_FACILITY_ID,
+             SUM(CASE WHEN P.ENTRY_SIDE=? THEN P.AMOUNT ELSE -P.AMOUNT END)
+               OVER (ORDER BY J.BOOKED_AT,J.JOURNAL_ID,P.LINE_NO,P.POSTING_ID
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS RUNNING_BALANCE
+        FROM M05_GL_POSTING P JOIN M05_GL_JOURNAL J ON J.JOURNAL_ID=P.JOURNAL_ID
+       WHERE P.GL_ACCOUNT_ID=?
+    ) H ORDER BY H.BOOKED_AT DESC,H.JOURNAL_ID DESC,H.LINE_NO DESC,H.POSTING_ID DESC
+    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+    """,account.get("NORMAL_SIDE"),id,offset,limit);
+  var balance=db.jdbc().queryForObject("SELECT COALESCE(SUM(CASE WHEN ENTRY_SIDE=? THEN AMOUNT ELSE -AMOUNT END),0) FROM M05_GL_POSTING WHERE GL_ACCOUNT_ID=?",java.math.BigDecimal.class,account.get("NORMAL_SIDE"),id);
+  hashes.audit("GL_LEDGER_VIEWED","GL_ACCOUNT",Long.toString(id),"GL_RECONCILE");
+  return Map.of("account",account,"balance",balance,"total",total,"limit",limit,"offset",offset,"postings",postings);
+ }
+ /** The paired lines and balance control for a journal selected from the GL register. */
+ @GetMapping("/journals/{id}") public Map<String,Object> glJournal(@PathVariable long id){
+  requireGlLedgerAccess();
+  var journal=db.one("SELECT JOURNAL_ID,POSTING_KEY,TXN_ID,PAYMENT_ID,SETTLEMENT_CYCLE_ID,LOAN_FACILITY_ID,JOURNAL_TYPE,CURRENCY_CODE,BOOKED_AT,VALUE_DATE,REVERSAL_OF_JOURNAL_ID,DESCRIPTION,CREATED_BY FROM M05_GL_JOURNAL WHERE JOURNAL_ID=?",id);
+  var control=db.one("SELECT LINE_COUNT,DEBIT_TOTAL,CREDIT_TOTAL,BALANCE_DIFFERENCE,IS_BALANCED FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",id);
+  var lines=db.rows("SELECT P.POSTING_ID,P.LINE_NO,P.GL_ACCOUNT_ID,G.GL_CODE,G.GL_NAME,P.BANK_ACCOUNT_ID,P.LOAN_FACILITY_ID,P.LOAN_COMPONENT_CODE,P.ENTRY_SIDE,P.AMOUNT,P.NARRATIVE FROM M05_GL_POSTING P JOIN M05_GL_ACCOUNT G ON G.GL_ACCOUNT_ID=P.GL_ACCOUNT_ID WHERE P.JOURNAL_ID=? ORDER BY P.LINE_NO",id);
+  hashes.audit("GL_JOURNAL_VIEWED","GL_JOURNAL",Long.toString(id),"GL_RECONCILE");
+  return Map.of("journal",journal,"control",control,"lines",lines);
+ }
  @GetMapping("/audit") public List<Map<String,Object>> audit(){access.global("IAM_AUDIT_READ");return db.rows("SELECT * FROM MBX_AUDIT ORDER BY OCCURRED_AT DESC FETCH FIRST 100 ROWS ONLY");}
  @GetMapping("/facilities") public List<Map<String,Object>> facilities(){return db.rows("SELECT FACILITY_ID,FACILITY_NUMBER,PRIMARY_CIF_ID,BRANCH_CODE,STATUS FROM M08_LOAN_FACILITY ORDER BY FACILITY_ID DESC FETCH FIRST 100 ROWS ONLY").stream().filter(f->{try{access.facility("LOAN_READ",((Number)f.get("FACILITY_ID")).longValue());return true;}catch(com.moneybags.common.api.BusinessException e){return false;}}).toList();}
 }

@@ -42,6 +42,8 @@ Generated from the running assembled backend on 2026-10-05. All API paths below 
 | GET | `/api/v1/banking/audit` | audit_3 |
 | GET | `/api/v1/banking/facilities` | facilities |
 | GET | `/api/v1/banking/gl-accounts` | gl |
+| GET | `/api/v1/banking/gl-accounts/{id}/ledger?limit=50&offset=0` | Paged GL postings with chronological running balance and current balance (GL_RECONCILE) |
+| GET | `/api/v1/banking/journals/{id}` | Full journal lines and debit/credit balance control for GL review (GL_RECONCILE) |
 | GET | `/api/v1/banking/overview` | overview |
 | GET | `/api/v1/banking/transactions` | transactions |
 | GET | `/api/v1/beneficiaries` | beneficiaries |
@@ -266,6 +268,16 @@ Generated from the running assembled backend on 2026-10-05. All API paths below 
 | POST | `/api/v1/teller/cash` | cash |
 | GET | `/api/v1/teller/tills` | tills |
 | POST | `/api/v1/teller/tills` | open |
+| GET | `/api/v1/teller/vaults` | List counted branch vault cash (TELLER_APPROVE) |
+| POST | `/api/v1/teller/vaults` | Register counted vault cash, including an empty vault, against a dedicated cash GL (GL_ADMIN and TELLER_APPROVE) |
+| GET | `/api/v1/teller/cash-deliveries` | List simulated RBI cash-delivery requests and their journal/ledger references (TELLER_READ) |
+| POST | `/api/v1/teller/cash-deliveries` | Request an evidenced simulated RBI cash shipment to a branch vault (TREASURY_LIQUIDITY_MANAGE and TELLER_APPROVE) |
+| POST | `/api/v1/teller/cash-deliveries/{id}/confirm` | Independent counted receipt posts reserve-to-vault journal and reserve ledger entry atomically (TREASURY_WORK_APPROVE and TELLER_APPROVE) |
+| GET | `/api/v1/teller/replenishments` | List audited vault-to-till replenishments (TELLER_READ) |
+| POST | `/api/v1/teller/tills/{id}/replenish` | A second person moves counted cash from branch vault to an open till in a balanced journal (TELLER_APPROVE) |
+| GET | `/api/v1/treasury/reserve-openings` | List synthetic opening-capital requests (TREASURY_READ) |
+| POST | `/api/v1/treasury/reserve-openings` | Request an evidenced simulated RBI opening reserve funded by equity (TREASURY_LIQUIDITY_MANAGE and GL_ADMIN) |
+| POST | `/api/v1/treasury/reserve-openings/{id}/confirm` | Independent checker posts the opening reserve journal and local RBI mirror entry (TREASURY_WORK_APPROVE) |
 | POST | `/api/v1/teller/tills/{id}/close` | close |
 | POST | `/api/v1/transactions/transfers` | Post an internal transfer |
 | GET | `/api/v1/transactions/{id}` | Get a transaction |
