@@ -1,15 +1,16 @@
-param([int]$BackendPort = 8091, [int]$FrontendPort = 5174)
+param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $runtime = Join-Path $taskRoot '.runtime'
 $record = Join-Path $runtime 'oracle-alpha-processes.json'
 if (Test-Path -LiteralPath $record) { throw 'An Oracle demo run record exists. Run stop-oracle-alpha.ps1 first.' }
+$envFile = Join-Path $taskRoot '.env.ps1'
+if (-not (Test-Path -LiteralPath $envFile)) { throw 'The ignored .env.ps1 Oracle settings are missing.' }
+& (Join-Path $taskRoot 'build-before-start.ps1') -CheckOnly:$SkipBuild
 $jar = Join-Path $taskRoot 'backend\target\moneybags-integrated-1.0.0.jar'
-if (-not (Test-Path -LiteralPath $jar)) { throw 'Build the backend JAR first: mvn -f backend/pom.xml verify' }
-if (-not (Test-Path -LiteralPath (Join-Path $taskRoot 'frontend\node_modules'))) { throw 'Install frontend dependencies first: npm --prefix frontend ci' }
-if (-not (Test-Path -LiteralPath (Join-Path $taskRoot '.env.ps1'))) { throw 'The ignored .env.ps1 Oracle settings are missing.' }
+if (-not (Test-Path -LiteralPath $jar)) { throw 'Maven verify finished without creating the backend JAR.' }
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
-. (Join-Path $taskRoot '.env.ps1')
+. $envFile
 $env:INTERNAL_BANK_CODES = 'MCPB0000002' # Synthetic Demo B bank code; real deployments configure their own.
 $env:CUSTOMER_SIGNUP_ENABLED = 'true'
 $env:FRONTEND_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
@@ -18,7 +19,7 @@ $backend = Start-Process -FilePath 'java.exe' -ArgumentList @(
 ) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-backend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-backend.err.log') -PassThru
 $env:BACKEND_URL = "http://127.0.0.1:$BackendPort"
 $env:PORT = "$FrontendPort"
-$frontend = Start-Process -FilePath 'node.exe' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend') -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-frontend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-frontend.err.log') -PassThru
+$frontend = Start-Process -FilePath 'node.exe' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend\dist') -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-frontend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-frontend.err.log') -PassThru
 $deadline = [datetime]::UtcNow.AddSeconds(60)
 while ([datetime]::UtcNow -lt $deadline) {
   try {

@@ -11,7 +11,7 @@ Set `INTERNAL_BANK_CODES` to the comma-separated IFSC codes owned by this Moneyb
 ## Start it
 
 1. Apply `database/007-assistant-intents.sql` after scripts `002` through `006`, then apply `database/008-assistant-internal-transfer.sql`. The local H2 profile includes the updated action constraint in `backend/src/main/resources/local-schema.sql`.
-2. If the local app is running, stop it with `& ./stop-local.ps1`. Rebuild from this `integrated/` directory with `mvn -f backend/pom.xml verify` and `npm --prefix frontend run build` before starting it again. The start script uses the backend JAR and does not rebuild it automatically.
+2. If the local app is running, stop it with `& ./stop-local.ps1`. Start it again with `& ./start-local.ps1`; the launcher calls `build-before-start.ps1` to run Maven clean verify, npm ci, the frontend check, and the frontend build before launching the app.
 3. Set the model provider, model, and key in the **backend process environment**. Choose a Responses API model that supports function calling. The key is never placed in the frontend or database. For the free OpenRouter Gemma model:
 
    ```powershell

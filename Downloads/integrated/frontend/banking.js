@@ -294,7 +294,8 @@ export async function bankingScreen(page){
   if(reserveAccounts.length&&!reserveAccountId)await loadReserve(reserveAccounts[0].id);
   if(!allow('TREASURY_LIQUIDITY_MANAGE')&&!checker())return head+treasuryPanel();
  }
- const choices=operations.filter(o=>o.path!=='/teller/cash-ledger-accounts'&&config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path)));
+ const adminAccounts=page==='accounts'&&getSession()?.user?.roles?.includes('BANK_ADMIN');
+ const choices=operations.filter(o=>config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&!(adminAccounts&&o.method==='GET'&&o.path==='/accounts/by-number/{number}')&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path)));
  const initial={accounts:'/banking/accounts',teller:'/teller/tills',beneficiaries:'/beneficiaries',payments:'/payments',treasury:'/treasury/reserve-accounts',loans:'/banking/facilities',currency:'/fx/rates',privacy:'/privacy/purposes'}[page];
  const op=choices.find(o=>o.id===selected[page])||choices.find(o=>o.method==='GET'&&o.path===initial)||choices.find(o=>o.method==='GET'&&!o.path.includes('{'))||choices[0];
  if(!op){const empty='<div class="notice">No workflow is available in this deployment.</div>';return head+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',empty):empty);}

@@ -8,19 +8,17 @@ One Spring Boot application, one Oracle JET / Knockout frontend, and the supplie
 
 ## Start the local demo
 
-Prerequisites: Java 17+, Maven 3.9+, Node.js 20+ and npm. Run these commands from the repository root:
+Prerequisites: Java 17+, Maven 3.9+, Node.js 20+ and npm. From the repository root, start the app with:
 
 ```powershell
-mvn -f integrated/backend/pom.xml verify
-npm --prefix integrated/frontend ci
-npm --prefix integrated/frontend run check
-npm --prefix integrated/frontend run build
 & ./integrated/start-local.ps1
 ```
 
+On every start, the launcher calls `build-before-start.ps1`, which runs Maven clean verify, npm ci, the frontend check, and the frontend build. It serves the newly built `frontend/dist` files.
+
 Open [the banking workspace](http://localhost:5173). The backend listens at `http://127.0.0.1:8090`; [API documentation](http://localhost:5173/swagger) and [health](http://localhost:5173/actuator/health) use the same frontend proxy.
 
-The starter runs Java and Node in hidden processes and checks backend health. Logs and verified process IDs are stored under `.runtime/`. Stop only those processes with:
+The starter runs Java and Node in hidden processes and checks backend health. A failed build stops startup before either process launches. Logs and verified process IDs are stored under `.runtime/`. Stop the running app before pulling changes and starting again:
 
 ```powershell
 & ./integrated/stop-local.ps1
@@ -103,7 +101,11 @@ java -jar integrated/backend/target/moneybags-integrated-1.0.0.jar
 
 For the development proxy, set `BACKEND_URL=http://127.0.0.1:8080` and run `node integrated/frontend/dist/server.mjs`. Use a TLS reverse proxy and institution-managed deployment configuration outside the local demo.
 
-On this workstation, `& ./integrated/start-oracle-alpha.ps1` starts that same application against the already configured ALPHA schema with OpenRouter, at `http://localhost:5174`; `& ./integrated/stop-oracle-alpha.ps1` stops it. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
+On this workstation, `& ./integrated/start-oracle-alpha.ps1` runs the same four build commands and starts that application against the already configured ALPHA schema with OpenRouter, at `http://localhost:5174`; `& ./integrated/stop-oracle-alpha.ps1` stops it. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
+
+After pulling new code, run `stop-oracle-alpha.ps1` and then `start-oracle-alpha.ps1` from the same updated checkout. The restart rebuilds the JAR and UI and replaces the running processes.
+
+If the Oracle VPN blocks Maven Central, stop Oracle Alpha and run `& ./integrated/build-before-start.ps1` while disconnected from the VPN. Reconnect, then run `& ./integrated/start-oracle-alpha.ps1 -SkipBuild`. The `-SkipBuild` path verifies that the source files, JAR, and frontend output match the completed build; it refuses to launch after a pull or source edit until you rebuild.
 
 ## Verification and handoff
 
