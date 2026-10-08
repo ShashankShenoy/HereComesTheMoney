@@ -17,6 +17,7 @@ import org.slf4j.*;
 public class GlobalExceptionHandler {
     private static final Logger LOG=LoggerFactory.getLogger(GlobalExceptionHandler.class);
     @ExceptionHandler(BusinessException.class) public ResponseEntity<ApiError> business(BusinessException e,HttpServletRequest r) { return error(e.status(),e.code(),e.getMessage(),r,Map.of()); }
+    @ExceptionHandler(com.moneybags.txn.api.ApiException.class) public ResponseEntity<ApiError> transaction(com.moneybags.txn.api.ApiException e,HttpServletRequest r) { return error(e.status(),e.code(),e.getMessage(),r,Map.of()); }
     @ExceptionHandler(MethodArgumentNotValidException.class) public ResponseEntity<ApiError> validation(MethodArgumentNotValidException e,HttpServletRequest r) {
         Map<String,String> fields=new LinkedHashMap<>();e.getBindingResult().getFieldErrors().forEach(f->fields.putIfAbsent(f.getField(),f.getDefaultMessage()));
         return error(HttpStatus.BAD_REQUEST,"VALIDATION_ERROR","Check the highlighted fields",r,fields);

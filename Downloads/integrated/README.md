@@ -78,9 +78,11 @@ The combined release preserves the newer teller/vault/RBI migrations `011`–`01
 - Credit card products, independent application approval, simulated purchases/refunds, card controls, monthly billing and linked-account repayments. See [credit card setup and workflow](docs/CREDIT-CARDS.md).
 - IAM, customer/CIF/KYC and versioned product administration.
 - Account opening, parties, nominees, restrictions, limits, approved overrides and closure controls.
+- Monthly fixed-rate savings interest credits and customer fixed deposits funded from an existing account, with maturity payout.
 - Transfers, teller cash, fixed-fee collection, reversal workflows, holds, double-entry journals and reconciliation.
 - Verified beneficiaries, simulated interbank payments, clearing operations and reserve settlement.
 - Loan origination, independent sanction, acceptance, disbursement, fixed monthly schedules, due-interest accrual and repayments.
+- Customer loan applications: eligible loan products, self-service submission, application/offer status, account-bound offer acceptance and repayment schedules.
 - Immutable statement snapshots with PDF/CSV/HTML downloads and hash-gated access.
 - Customer chat and authenticated MCP tools for exact internal-transfer and outbound-payment drafts, payment status, the last 1–100 transactions, and statement generation, request status, preview, and download paths.
 - Purpose/consent, legal-hold, casework and audit-evidence workflows.
@@ -88,6 +90,20 @@ The combined release preserves the newer teller/vault/RBI migrations `011`–`01
 - Optional Kafka publication from transactional outboxes for M05–M08.
 
 Banking screens use the backend OpenAPI contract to render Oracle JET fields and Knockout observables, including nested objects, repeating lines, dates, idempotency keys and optimistic-version headers. The menu uses Oracle JET CoreRouter. Original IAM/CIF/product screens remain integrated. Credit cards have a dedicated customer/staff workspace using the same Oracle JET forms and authenticated APIs.
+
+### Customer loan application flow
+
+Sign in as a customer and open **Loans → Apply for a loan**. Only active INR loan products offered to the linked CIF, home branch and `WEB` channel appear. Enter an amount within the displayed product limits, a term in months and a purpose. The customer-specific `POST /api/v1/loans/my/applications` accepts `cifId`, `productId`, `productVersionId`, `amount`, `tenureMonths` and `purposeCode`, plus an `Idempotency-Key` header. The backend derives the branch from the linked CIF, fixes the channel to `WEB`, checks verified KYC and product rules, creates the application and submits its first immutable revision. It returns a `SUBMITTED` application; no approval or funds movement occurs at this step. `GET /api/v1/loans/my/applications` returns only applications in the signed-in customer's current CIF scope.
+
+A bank officer then assesses the application, a separate checker decides it, and an authorized officer issues an offer using the existing Loans operations. The customer can view offers and accept an issued offer with their own active INR disbursement and repayment accounts. The bank finishes document verification, facility conversion and disbursement. The customer can then view the facility and repayment schedule. The `LOAN_APPLY` permission is assigned to the retail customer role; staff use the existing `LOAN_CREATE` workflow.
+
+The local demo includes a suitable loan product. An existing Oracle schema needs the additive `database/016-customer-loan-apply.sql` permission migration and an active, approved, available loan product/version/rule before customers will see an Apply button. Run the migration as the schema owner, then have the customer sign out and in to refresh the session permissions. The migration does not create a loan product or approve any application.
+
+### Deposit interest and fixed deposits
+
+Customers open **Accounts** to view savings interest credits and available fixed deposit products. A fixed deposit is a separate contract funded from the customer's active INR savings/current account; its principal and fixed interest return to that account at maturity. The funding account cannot close while a fixed deposit is active. Interest on savings accounts uses each day's closing posted balance, the approved fixed rate (or approved account override), and the product's day-count basis. One balanced credit posts for each completed calendar month; retries do not duplicate it. Interest begins at migration rollout, so the new service does not create historical back-payments.
+
+For Oracle, apply [the additive deposit migration](database/018-deposit-interest.sql) as the schema owner, verify the GL account mappings, set `DEPOSIT_INTEREST_ENABLED=true`, rebuild, and restart the backend. The application never migrates Oracle at startup. A deposit product must be created in Product master with a single fixed SIMPLE interest rule paid `AT_MATURITY`, term limits, WEB/INR availability, independent approval, and activation. The local H2 demo has an example fixed deposit product. Floating rates, tiered rates, early withdrawal, tax withholding, and deposit insurance logic are outside this flow. See [the operations guide](docs/DEPOSIT-INTEREST.md).
 
 ### Customer assistant and MCP
 
@@ -99,7 +115,7 @@ The same role-filtered tools are available at `POST /api/v1/assistant/mcp` with 
 
 Read [the Oracle and operations runbook](docs/OPERATIONS.md) first. The application does not migrate Oracle at startup.
 
-- For an existing installed schema, inspect compatibility and apply only missing additive scripts `002` through `015` with your DBA. The `012-rbi-cash-delivery-readiness.sql` file is a read-only diagnostic, not another migration.
+- For an existing installed schema, inspect compatibility and apply only missing additive scripts `002` through `019` with your DBA. The `012-rbi-cash-delivery-readiness.sql` file is a read-only diagnostic, not another migration.
 - `database/001-original-oracle.sql` is the supplied **destructive clean-install script**. It is retained for traceability and fresh disposable schemas. Never run it against an existing database containing needed data.
 - Supply `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and `FRONTEND_ORIGINS` through your environment or secret manager. No original connection-guide credentials were copied into application configuration.
 - Omit `--spring.profiles.active=local`. Enable first-admin bootstrap only for an empty IAM setup, with a new private password.

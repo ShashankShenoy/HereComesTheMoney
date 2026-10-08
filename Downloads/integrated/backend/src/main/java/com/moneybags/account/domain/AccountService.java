@@ -22,6 +22,7 @@ import java.util.*;
 public class AccountService {
     private final AccountStore accounts;
     private final WorkflowStore workflows;
+    private final CustomerRequestStore customerRequests;
     private final EventStore events;
     private final ModuleClients peers;
     private final Actor actor;
@@ -29,10 +30,10 @@ public class AccountService {
     private final com.moneybags.integration.AccountOverrideApprovals approvals;
     private final boolean demoCustomerOpening;
 
-    public AccountService(AccountStore accounts, WorkflowStore workflows, EventStore events,
+    public AccountService(AccountStore accounts, WorkflowStore workflows, CustomerRequestStore customerRequests, EventStore events,
                           ModuleClients peers, Actor actor, TransactionTemplate tx,com.moneybags.integration.AccountOverrideApprovals approvals,
                           @Value("${moneybags.customer-signup.enabled:false}") boolean demoCustomerOpening) {
-        this.accounts = accounts; this.workflows = workflows; this.events = events;
+        this.accounts = accounts; this.workflows = workflows; this.customerRequests = customerRequests; this.events = events;
         this.peers = peers; this.actor = actor; this.tx = tx;this.approvals=approvals;this.demoCustomerOpening=demoCustomerOpening;
     }
 
@@ -274,10 +275,20 @@ public class AccountService {
     }
     /** Replaces nominations as one unit, checking that active shares total exactly 100. */
     public void replaceNominees(long id, ReplaceNominees command) {
+        actor.require("ACCOUNT_OFFICER"); authorize("ACCOUNT_NOMINEE_CHANGE", id);
+        replaceNomineesChecked(id, command);
+    }
+    public void replaceNomineesSelf(long id, ReplaceNominees command) {
+        AccountView a = accounts.account(id, false);
+        requireDemoCustomer(a.primaryCifId());
+        if (!"SELF_OPERATED".equals(a.operationMode()) || !accounts.activePrimary(id, a.primaryCifId()) ||
+                accounts.activeParties(id).stream().anyMatch(p -> !"PRIMARY_HOLDER".equals(p.get("PARTY_ROLE"))))
+            throw forbidden();
+        replaceNomineesChecked(id, command);
+    }
+    private void replaceNomineesChecked(long id, ReplaceNominees command) {
         AccountView a = accounts.account(id, false);
         requireMutable(a);
-        if (!actor.has("ACCOUNT_OFFICER") && !accounts.activePrimary(id, actor.cifId())) throw forbidden();
-        authorize("ACCOUNT_NOMINEE_CHANGE", id);
         BigDecimal total = command.nominees().stream().map(NomineeInput::sharePercentage)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         if (total.compareTo(new BigDecimal("100.00")) != 0) throw bad("Nominee shares must total 100");
@@ -297,6 +308,18 @@ public class AccountService {
     /** Creates a pending control; the restriction becomes active only on Module 5 ack. */
     public CommandResult restrict(long id, RestrictionCommand command) {
         actor.require("ACCOUNT_OFFICER"); authorize("ACCOUNT_RESTRICT", id);
+        return restrictChecked(id, command);
+    }
+    /** A sole account holder can secure an active account immediately; bank staff release the control. */
+    public CommandResult restrictSelf(long id, SelfSafetyBlock request) {
+        AccountView account = accounts.account(id, false);
+        requireSolePrimaryCustomer(account);
+        if (!Set.of("FREEZE", "DEBIT_BLOCK").contains(request.type()))
+            throw bad("Choose a temporary freeze or debit block");
+        return restrictChecked(id, new RestrictionCommand(request.requestId(), request.type(), null,
+                "CUSTOMER_SAFETY", request.details(), "CUSTOMER", request.requestId(), null));
+    }
+    private CommandResult restrictChecked(long id, RestrictionCommand command) {
         validateRestriction(command);
         Optional<Map<String, Object>> existing = workflows.restrictionByRequest(command.requestId());
         if (existing.isPresent()) {
@@ -363,6 +386,94 @@ public class AccountService {
                     Map.of("accountId", id, "limit", command));
         });
     }
+    /** Records a customer preference; it has no effect on the enforced account limit. */
+    public Map<String,Object> requestLimitSelf(long id, SelfLimitRequest request) {
+        AccountView account = accounts.account(id, false);
+        requireCustomerAccount(account);
+        if (!"ACTIVE".equals(account.lifecycleStatus())) throw conflict("Account must be active");
+        if (!"INTERNAL_TRANSFER".equals(request.operationCode()) ||
+                !Set.of("PER_TRANSACTION","DAY").contains(request.periodCode()))
+            throw bad("Invalid operation or period");
+        return insertCustomerRequest(id,request.requestId(),"LIMIT_CHANGE",request.operationCode(),
+                request.periodCode(),request.requestedAmount(),request.reason());
+    }
+    /** An authorized party can report an issue for bank follow-up. */
+    public Map<String,Object> reportIssueSelf(long id, SelfIssueRequest request) {
+        AccountView account = accounts.account(id, false);
+        requireCustomerAccount(account);
+        if (Set.of("CANCELLED","CLOSED").contains(account.lifecycleStatus()))
+            throw conflict("This account is no longer open");
+        return insertCustomerRequest(id,request.requestId(),"ISSUE",null,null,null,request.details());
+    }
+    private Map<String,Object> insertCustomerRequest(long id,String requestId,String type,
+            String operation,String period,BigDecimal amount,String details) {
+        var old=customerRequests.byRequest(requestId);
+        if(old.isPresent()) {
+            var prior=old.get();
+            if(((Number)prior.get("ACCOUNT_ID")).longValue()!=id || !actor.id().equals(prior.get("REQUESTED_BY_USER_ID")) ||
+                    !type.equals(prior.get("REQUEST_TYPE")) || !Objects.equals(operation,prior.get("OPERATION_CODE")) ||
+                    !Objects.equals(period,prior.get("PERIOD_CODE")) ||
+                    !(amount==null ? prior.get("REQUESTED_AMOUNT")==null :
+                            prior.get("REQUESTED_AMOUNT") instanceof BigDecimal stored && amount.compareTo(stored)==0) ||
+                    !details.equals(prior.get("DETAILS"))) throw conflict("Request ID belongs to another request");
+            return prior;
+        }
+        return tx.execute(status -> {
+            requireRead(accounts.account(id,true));
+            customerRequests.insert(id,requestId,type,operation,period,amount,details,actor.id());
+            events.audit(id,"CUSTOMER_"+type+"_REQUESTED",actor.id(),"SUCCESS",requestId,
+                    Map.of("requestType",type));
+            return customerRequests.byRequest(requestId).orElseThrow();
+        });
+    }
+    public List<Map<String,Object>> myCustomerRequests(long id) {
+        requireCustomerAccount(accounts.account(id,false));
+        return customerRequests.mine(id,actor.id());
+    }
+    public List<Map<String,Object>> pendingCustomerRequests() {
+        actor.require("ACCOUNT_OFFICER");
+        return customerRequests.pending().stream().filter(row -> {
+            try { requireRead(accounts.account(((Number)row.get("ACCOUNT_ID")).longValue(),false)); return true; }
+            catch (ApiException | com.moneybags.common.api.BusinessException denied) { return false; }
+        }).toList();
+    }
+    /** An officer applies an approved limit through the existing product-policy path. */
+    public void decideCustomerRequest(long id,String requestId,LimitRequestDecision decision) {
+        actor.require("ACCOUNT_OFFICER");
+        accounts.account(id,false);
+        String choice=decision.decision().toUpperCase(Locale.ROOT);
+        if(!Set.of("APPROVED","REJECTED","RESOLVED").contains(choice)) throw bad("Invalid decision");
+        tx.executeWithoutResult(status -> {
+            accounts.account(id,true);
+            var row=customerRequests.lock(requestId);
+            if(((Number)row.get("ACCOUNT_ID")).longValue()!=id) throw forbidden();
+            if(!"PENDING".equals(row.get("REQUEST_STATUS"))) throw conflict("Request already decided");
+            if(actor.id().equals(row.get("REQUESTED_BY_USER_ID"))) throw forbidden();
+            boolean limit="LIMIT_CHANGE".equals(row.get("REQUEST_TYPE"));
+            authorize(limit?"ACCOUNT_LIMIT_CHANGE":"ACCOUNT_RESTRICT",id);
+            if(limit && "RESOLVED".equals(choice) || !limit && "APPROVED".equals(choice))
+                throw bad("Decision does not match request type");
+            if("REJECTED".equals(choice) && (decision.reason()==null || decision.reason().isBlank()))
+                throw bad("Explain the rejection");
+            Long applied=null;
+            if("APPROVED".equals(choice)) {
+                if(decision.productLimitRuleId()==null && decision.overridePolicyId()==null)
+                    throw bad("Choose an approved product limit rule or override policy");
+                LimitCommand command=new LimitCommand(requestId,"CUSTOMER_REQUEST",
+                        String.valueOf(row.get("OPERATION_CODE")),null,String.valueOf(row.get("PERIOD_CODE")),
+                        "CALENDAR","Asia/Kolkata",(BigDecimal)row.get("REQUESTED_AMOUNT"),
+                        decision.productLimitRuleId(),decision.overridePolicyId(),
+                        java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).toString(),null,
+                        decision.approvedByUserId());
+                addLimit(id,command);
+                applied=customerRequests.appliedLimitId(requestId);
+                if(applied==null)throw conflict("Approved limit was not recorded");
+            }
+            customerRequests.decide(requestId,choice,decision.reason(),applied,actor.id());
+            events.audit(id,"CUSTOMER_REQUEST_DECIDED",actor.id(),"SUCCESS",requestId,
+                    Map.of("decision",choice,"requestType",String.valueOf(row.get("REQUEST_TYPE"))));
+        });
+    }
     /** Saves an approved rate exception bound to the account's current version. */
     public void addInterestOverride(long id, InterestCommand command) {
         actor.require("ACCOUNT_OFFICER");
@@ -410,6 +521,22 @@ public class AccountService {
     /** Begins closure and requests a closed Module 5 posting fence. */
     public CommandResult requestClosure(long id, ReasonCommand command) {
         actor.require("ACCOUNT_OFFICER"); authorize("ACCOUNT_CLOSE_REQUEST", id);
+        return requestClosureChecked(id, command);
+    }
+    /** Customer may request review only for their own sole-operated, fully settled account. */
+    public CommandResult requestClosureSelf(long id, ReasonCommand command) {
+        AccountView a = accounts.account(id, false);
+        requireDemoCustomer(a.primaryCifId());
+        if (!"SELF_OPERATED".equals(a.operationMode()) || !accounts.activePrimary(id, a.primaryCifId()) ||
+                accounts.activeParties(id).stream().anyMatch(p -> !"PRIMARY_HOLDER".equals(p.get("PARTY_ROLE"))))
+            throw forbidden();
+        if (!peers.closureFundsSettled(id).cleared()) throw conflict("Transfer or withdraw the balance and clear holds before requesting closure");
+        if (!peers.paymentClearance(id).cleared() || !peers.loanClearance(id).cleared() ||
+                !peers.termDepositClearance(id).cleared())
+            throw conflict("Settle payments, loans and fixed deposits before requesting closure");
+        return requestClosureChecked(id, command);
+    }
+    private CommandResult requestClosureChecked(long id, ReasonCommand command) {
         if (workflows.closureByRequest(command.requestId()).isPresent()) {
             Map<String, Object> prior = workflows.closureByRequest(command.requestId()).orElseThrow();
             if (((Number) prior.get("ACCOUNT_ID")).longValue() != id) throw conflict("Request ID belongs to another account");
@@ -419,6 +546,7 @@ public class AccountService {
         return tx.execute(status -> {
             AccountView a = accounts.account(id, true);
             if (!Set.of("ACTIVE", "DORMANT").contains(a.lifecycleStatus())) throw conflict("Account cannot enter closure");
+            if (!peers.termDepositClearance(id).cleared()) throw conflict("An active fixed deposit must mature before closing its funding account");
             if (workflows.liveRestriction(id)) throw conflict("Resolve live restrictions before closure");
             workflows.requestClosure(id, command, a.lifecycleStatus(), actor.id(), command.requestId());
             accounts.lifecycle(id, "CLOSING", "CLOSING", actor.id());
@@ -446,12 +574,14 @@ public class AccountService {
         ModuleClients.Clearance txn = peers.transactionClearance(id, controlVersion);
         ModuleClients.Clearance pay = peers.paymentClearance(id);
         ModuleClients.Clearance loan = peers.loanClearance(id);
-        if (!txn.cleared() || !pay.cleared() || !loan.cleared() ||
+        ModuleClients.Clearance termDeposit = peers.termDepositClearance(id);
+        if (!txn.cleared() || !pay.cleared() || !loan.cleared() || !termDeposit.cleared() ||
                 txn.reference() == null || txn.reference().isBlank() ||
                 pay.reference() == null || pay.reference().isBlank() ||
-                loan.reference() == null || loan.reference().isBlank())
+                loan.reference() == null || loan.reference().isBlank() ||
+                termDeposit.reference() == null || termDeposit.reference().isBlank())
             throw conflict("Financial or payment obligations remain");
-        String clearance = clearanceDigest(txn.reference(), pay.reference(), loan.reference());
+        String clearance = clearanceDigest(txn.reference(), pay.reference(), loan.reference(), termDeposit.reference());
         tx.executeWithoutResult(status -> {
             AccountView a = accounts.account(id, true);
             if (a.rowVersion() != before.rowVersion() || !"CLOSING".equals(a.lifecycleStatus()))
@@ -467,7 +597,7 @@ public class AccountService {
             events.outbox(id, "ACCOUNT_CLOSED", requestId, Map.of("accountId", id, "clearanceRef", clearance));
             events.audit(id, "ACCOUNT_CLOSE_APPROVE", actor.id(), "SUCCESS", requestId,
                     Map.of("transactionClearance", txn.reference(), "paymentClearance", pay.reference(),
-                            "loanClearance", loan.reference()));
+                            "loanClearance", loan.reference(), "termDepositClearance", termDeposit.reference()));
         });
     }
     /** Rejects closure, restores the previous lifecycle, and requests a new posting fence. */
@@ -547,6 +677,18 @@ public class AccountService {
     private void requireRead(AccountView account) {
         peers.read(account.id());
     }
+    private void requireCustomerAccount(AccountView account) {
+        if(!"CUSTOMER".equals(CurrentActor.get().userType())) throw forbidden();
+        requireRead(account);
+    }
+    private void requireSolePrimaryCustomer(AccountView account) {
+        requireCustomerAccount(account);
+        if(!CurrentActor.get().cifIds().contains(account.primaryCifId()) ||
+                !accounts.activePrimary(account.id(),account.primaryCifId()) ||
+                !"SELF_OPERATED".equals(account.operationMode()) ||
+                accounts.activeParties(account.id()).stream().anyMatch(p -> !"PRIMARY_HOLDER".equals(p.get("PARTY_ROLE"))))
+            throw forbidden();
+    }
     /** Blocks administrative changes after an account enters closing or a terminal state. */
     private void requireMutable(AccountView account) {
         if (!Set.of("PENDING_OPEN", "ACTIVE", "DORMANT").contains(account.lifecycleStatus()))
@@ -584,11 +726,11 @@ public class AccountService {
     }
     /** Treats absent additional parties as an empty list. */
     private List<PartyInput> nullSafe(List<PartyInput> parties) { return parties == null ? List.of() : parties; }
-    /** Fits three durable clearance references into the schema's 80-character field. */
-    private String clearanceDigest(String transaction, String payment, String loan) {
+    /** Fits durable clearance references into the schema's 80-character field. */
+    private String clearanceDigest(String... references) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(
-                    (transaction + "\n" + payment + "\n" + loan).getBytes(StandardCharsets.UTF_8));
+                    String.join("\n", references).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException ex) { throw new IllegalStateException("SHA-256 unavailable", ex); }
     }

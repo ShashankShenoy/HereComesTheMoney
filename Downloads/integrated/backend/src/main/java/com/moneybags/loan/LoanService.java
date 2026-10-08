@@ -40,6 +40,18 @@ public class LoanService {
             """,(rs,n)->application(rs),branch,status,status,limit);
     }
 
+    /** Lists a customer's own applications, then applies the current IAM scope to every row. */
+    public List<Application> myApplications(UserPrincipal actor) {
+        requireCustomer(actor);
+        List<String> cifs=actor.cifIds().stream().distinct().toList();
+        if(cifs.isEmpty())return List.of();
+        String placeholders=String.join(",",Collections.nCopies(cifs.size(),"?"));
+        return db.query("SELECT * FROM M08_LOAN_APPLICATION WHERE PRIMARY_CIF_ID IN ("+placeholders+
+            ") ORDER BY CREATED_AT DESC FETCH FIRST 100 ROWS ONLY",(rs,n)->application(rs),cifs.toArray())
+            .stream().filter(a->access.allowed(actor,new AuthorizationInput(
+                "LOAN_READ",a.branchCode(),null,a.cifId(),"LOAN","INR",null,null,null,null))).toList();
+    }
+
     /** Reads one application after evaluating its actual branch and CIF scope. */
     public Application application(UserPrincipal actor,long id) {
         Application a=load(id,false);
@@ -71,13 +83,15 @@ public class LoanService {
             """,id);
     }
 
-    /** Lists offer status and dates; document storage references stay private. */
+    /** Lists offer status, dates, and approved terms for customer review. */
     public List<Map<String,Object>> offers(UserPrincipal actor,long id) {
         Application a=load(id,false);
         require(actor,"LOAN_READ",a.branchCode(),a.cifId(),null,null,null,null);
         return db.queryForList("""
-            SELECT OFFER_ID,OFFER_NUMBER,DECISION_ID,STATUS,ISSUED_AT,EXPIRES_AT,ACCEPTED_AT
-            FROM M08_LOAN_OFFER WHERE APPLICATION_ID=? ORDER BY ISSUED_AT DESC FETCH FIRST 100 ROWS ONLY
+            SELECT O.OFFER_ID,O.OFFER_NUMBER,O.DECISION_ID,O.STATUS,O.ISSUED_AT,O.EXPIRES_AT,O.ACCEPTED_AT,
+              D.SANCTIONED_AMOUNT,D.SANCTIONED_TENURE_MONTHS,D.INTEREST_TYPE,D.ANNUAL_RATE_PCT
+            FROM M08_LOAN_OFFER O JOIN M08_LOAN_DECISION D ON D.DECISION_ID=O.DECISION_ID
+            WHERE O.APPLICATION_ID=? ORDER BY O.ISSUED_AT DESC FETCH FIRST 100 ROWS ONLY
             """,id);
     }
 
@@ -94,7 +108,28 @@ public class LoanService {
     /** Starts a draft only when CIF/KYC and a live loan product version permit it. */
     @Transactional
     public Application create(UserPrincipal actor,CreateApplication input,String key) {
-        require(actor,"LOAN_CREATE",input.branchCode(),input.cifId(),null,null,null,null);
+        return createWithPermission(actor,input,key,"LOAN_CREATE");
+    }
+
+    /** A customer can apply only for a linked CIF; branch and WEB channel are server-owned. */
+    @Transactional
+    public Application apply(UserPrincipal actor,SelfApplication input,String key) {
+        requireCustomer(actor);
+        if(!actor.cifIds().contains(input.cifId()))
+            throw new BusinessException(HttpStatus.FORBIDDEN,"FORBIDDEN","Customer CIF is not linked to this user");
+        List<String> branches=db.queryForList(
+            "SELECT HOME_BRANCH_REF FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,input.cifId());
+        if(branches.isEmpty()||branches.get(0)==null||branches.get(0).isBlank())
+            throw conflict("CIF_NOT_ELIGIBLE","Customer home branch is unavailable");
+        CreateApplication request=new CreateApplication(input.cifId(),input.productId(),input.productVersionId(),
+            branches.get(0),"WEB",input.amount(),input.tenureMonths(),input.purposeCode());
+        Application draft=createWithPermission(actor,request,key,"LOAN_APPLY");
+        return "DRAFT".equals(draft.status())?submitWithPermission(actor,draft.id(),"LOAN_APPLY"):draft;
+    }
+
+    /** Reuses the same underwriting and idempotency checks for staff and self-service intake. */
+    private Application createWithPermission(UserPrincipal actor,CreateApplication input,String key,String permission) {
+        require(actor,permission,input.branchCode(),input.cifId(),null,null,null,null);
         requireKey(key);
         byte[] requestHash=sha256(toJson(input));
         List<Map<String,Object>> previous=db.queryForList("""
@@ -170,8 +205,13 @@ public class LoanService {
     /** Freezes a JSON revision before review; later assessment and decisions bind to this revision. */
     @Transactional
     public Application submit(UserPrincipal actor,long id) {
+        return submitWithPermission(actor,id,"LOAN_CREATE");
+    }
+
+    /** Freezes either a staff-created or customer-created draft for independent review. */
+    private Application submitWithPermission(UserPrincipal actor,long id,String permission) {
         Application a=load(id,true);
-        require(actor,"LOAN_CREATE",a.branchCode(),a.cifId(),null,null,null,null);
+        require(actor,permission,a.branchCode(),a.cifId(),null,null,null,null);
         if(!"DRAFT".equals(a.status()))throw conflict("INVALID_STATE","Only a draft can be submitted");
         String snapshot=toJson(Map.of("applicationId",id,"cifId",a.cifId(),"productVersionId",a.productVersionId(),
             "amount",a.amount(),"tenureMonths",a.tenureMonths(),"purposeCode",a.purposeCode()));
@@ -183,6 +223,11 @@ public class LoanService {
         history("APPLICATION",id,"DRAFT","SUBMITTED","SUBMITTED",actor);
         event("LoanApplicationSubmitted",id,Map.of("applicationId",id,"revisionId",revision));
         return load(id,false);
+    }
+
+    private static void requireCustomer(UserPrincipal actor) {
+        if(!"CUSTOMER".equals(actor.userType()))
+            throw new BusinessException(HttpStatus.FORBIDDEN,"FORBIDDEN","Customer sign-in is required");
     }
 
     /** Records a manual affordability assessment; a score is evidence, never an automatic decision. */
@@ -282,6 +327,7 @@ public class LoanService {
     /** Captures customer acceptance against active Module 4 accounts; no disbursement occurs here. */
     @Transactional
     public Map<String,Object> accept(UserPrincipal actor,long offerId,AcceptOffer input) {
+        requireCustomer(actor);
         Map<String,Object> row=one("SELECT APPLICATION_ID,STATUS,EXPIRES_AT FROM M08_LOAN_OFFER WHERE OFFER_ID=? FOR UPDATE",offerId);
         long appId=((Number)row.get("APPLICATION_ID")).longValue();
         Application a=load(appId,true);
@@ -330,6 +376,14 @@ public class LoanService {
             a.branchCode(),a.cifId(),null,null,null,maker);
         Map<String,Object> doc=one("SELECT STATUS,DOCUMENT_TYPE FROM M08_LOAN_DOCUMENT_REF WHERE DOCUMENT_REF_ID=? AND APPLICATION_ID=? FOR UPDATE",documentId,applicationId);
         if(!"RECEIVED".equals(doc.get("STATUS")))throw conflict("INVALID_STATE","Only received documents can be verified");
+        List<String> recorders=db.queryForList("""
+            SELECT ACTOR_USER_ID FROM M08_SECURITY_AUDIT_EVENT
+            WHERE ACTION_CODE='DOCUMENT_RECORDED' AND RESOURCE_TYPE='DOCUMENT' AND RESOURCE_ID=?
+            ORDER BY OCCURRED_AT DESC FETCH FIRST 1 ROWS ONLY
+            """,String.class,String.valueOf(documentId));
+        if(recorders.isEmpty()||recorders.get(0)==null)
+            throw conflict("DOCUMENT_ORIGIN_REQUIRED","Document recorder evidence is missing");
+        require(actor,"LOAN_DOCUMENT_VERIFY",a.branchCode(),a.cifId(),null,null,null,recorders.get(0));
         db.update("UPDATE M08_LOAN_DOCUMENT_REF SET STATUS='VERIFIED',VERIFIED_BY_USER_ID=?,VERIFIED_AT=SYSTIMESTAMP WHERE DOCUMENT_REF_ID=?",actor.userId(),documentId);
         event("LoanDocumentVerified",applicationId,Map.of("applicationId",applicationId,"documentRefId",documentId));
         audit("DOCUMENT_VERIFIED","DOCUMENT",documentId,actor);

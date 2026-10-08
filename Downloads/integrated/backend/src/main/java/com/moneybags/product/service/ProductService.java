@@ -457,6 +457,8 @@ public class ProductService implements ProductDefinitionsPort {
       "RULE_PRODUCT_MISMATCH",
       "Loan terms apply only to loan products"
     );
+    conflict(code.equals("term") && !type.equals("DEPOSIT"),
+      "RULE_PRODUCT_MISMATCH", "Term deposit limits apply only to deposit products");
     if (f.key().equals("PRODUCT_VERSION_ID")) {
       db
         .jdbc()
@@ -1104,9 +1106,16 @@ public class ProductService implements ProductDefinitionsPort {
         snapshotRules(snapshot, "interest").isEmpty() ||
         snapshotRules(snapshot, "allocation").isEmpty())
     ) errors.add("Loan needs loan, interest and allocation rules");
-    if (
-      type.equals("DEPOSIT") && snapshotRules(snapshot, "interest").isEmpty()
-    ) errors.add("Deposit needs an interest rule");
+    if (type.equals("DEPOSIT") &&
+      (snapshotRules(snapshot, "interest").size()!=1 || snapshotRules(snapshot,"term").size()!=1))
+      errors.add("Fixed deposit needs one interest rule and term deposit limits");
+    if(type.equals("DEPOSIT")) for(var r:snapshotRules(snapshot,"interest"))
+      if(!"FIXED".equals(r.get("INTEREST_TYPE")) || !"SIMPLE".equals(r.get("INTEREST_METHOD")) ||
+         !"AT_MATURITY".equals(r.get("PAYOUT_FREQUENCY")))
+        errors.add("Fixed deposit currently supports a fixed simple rate paid at maturity");
+    if(type.equals("DEPOSIT")) for(var r:snapshotRules(snapshot,"interest"))
+      if(!Set.of("ACT_365","ACT_360","ACT_ACT").contains(r.get("DAY_COUNT_BASIS")))
+        errors.add("Fixed deposit day-count basis must be ACT_365, ACT_360 or ACT_ACT");
     for (var f : ProductRuleCatalog.FAMILIES.values())
       for (var r : snapshotRules(snapshot, f.code()))
         ProductRules.check(f.code(), r, errors);

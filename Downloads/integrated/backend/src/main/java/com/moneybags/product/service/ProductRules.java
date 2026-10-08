@@ -100,10 +100,17 @@ public final class ProductRules {
     range(r, "MIN_AMOUNT", "MAX_AMOUNT", errors);
     range(r, "MIN_VALUE", "MAX_VALUE", errors);
     range(r, "MIN_LOAN_AMOUNT", "MAX_LOAN_AMOUNT", errors);
+    range(r, "MIN_DEPOSIT_AMOUNT", "MAX_DEPOSIT_AMOUNT", errors);
     range(r, "MIN_TENURE_MONTHS", "MAX_TENURE_MONTHS", errors);
     dates(r, "EFFECTIVE_FROM_AT", "EFFECTIVE_TO_AT", errors);
     dates(r, "OFFER_FROM_AT", "OFFER_TO_AT", errors);
     dates(r, "VALID_FROM", "VALID_TO", errors);
+    if (family.equals("term")) {
+      if (r.get("MIN_DEPOSIT_AMOUNT") != null && decimal(r.get("MIN_DEPOSIT_AMOUNT")).signum() <= 0)
+        errors.add("Minimum fixed deposit amount must be positive");
+      if (r.get("MIN_TENURE_MONTHS") != null && decimal(r.get("MIN_TENURE_MONTHS")).signum() <= 0)
+        errors.add("Minimum fixed deposit term must be positive");
+    }
     switch (family) {
       case "interest" -> {
         choice(r, "INTEREST_TYPE", errors, "FIXED", "FLOATING");

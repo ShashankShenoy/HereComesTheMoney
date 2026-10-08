@@ -24,7 +24,7 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Requested feature | Implementation / boundary |
 | --- | --- |
 | Code, name, type, currency, availability dates | Versioned M03 product/availability workflows; branch and customer-segment context passed during opening. Deposit posting remains INR. |
-| Interest, fee, penalty, limit, eligibility rules | Rule-definition screens and validation retained. Fixed deposit fees and fixed monthly loan interest are executed; generalized deposit accrual, tax, penalty and complex pricing engines are not implemented. |
+| Interest, fee, penalty, limit, eligibility rules | Rule-definition screens and validation retained. Fixed-rate savings interest posts monthly from daily closing balances; fixed deposit interest posts at maturity. Loan interest and fixed fees execute. Floating/tiered deposit interest, tax, penalty and complex pricing engines are not implemented. |
 | Minimum balance, transaction restrictions | Opening-funding minimum, transfer policy, posting fences and available-funds checks are integrated. Maintenance minimum-balance charging and every policy family across every channel require additional engines. |
 | Draft, approved, active, suspended, retired | Product lifecycle and effective-version resolution retained. |
 | Maker-checker approval | Version-content hash and independent product approval retained. |

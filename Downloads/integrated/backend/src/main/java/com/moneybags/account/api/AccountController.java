@@ -61,6 +61,41 @@ public class AccountController {
     public List<Map<String, Object>> children(@PathVariable long id, @PathVariable String collection) {
         return service.children(id, collection);
     }
+    @GetMapping("/self/{id}/requests")
+    @Operation(summary = "List this customer's own limit requests and account issue reports")
+    public List<Map<String,Object>> myRequests(@PathVariable long id) {
+        return service.myCustomerRequests(id);
+    }
+    @GetMapping("/customer-requests")
+    @Operation(summary = "List pending customer account requests for authorized officers")
+    public List<Map<String,Object>> pendingRequests() {
+        return service.pendingCustomerRequests();
+    }
+    @PostMapping("/self/{id}/limit-requests")
+    @Operation(summary = "Request a bank-reviewed account limit change")
+    public ResponseEntity<Map<String,Object>> requestLimitSelf(@PathVariable long id,
+            @Valid @RequestBody SelfLimitRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.requestLimitSelf(id,request));
+    }
+    @PostMapping("/self/{id}/issues")
+    @Operation(summary = "Report an account issue for bank follow-up")
+    public ResponseEntity<Map<String,Object>> reportIssueSelf(@PathVariable long id,
+            @Valid @RequestBody SelfIssueRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.reportIssueSelf(id,request));
+    }
+    @PostMapping("/self/{id}/safety-blocks")
+    @Operation(summary = "Apply a customer-requested freeze or debit block to a sole-operated account")
+    public ResponseEntity<CommandResult> safetyBlockSelf(@PathVariable long id,
+            @Valid @RequestBody SelfSafetyBlock request) {
+        return ResponseEntity.accepted().body(synchronize(service.restrictSelf(id,request)));
+    }
+    @PostMapping("/{id}/customer-requests/{requestId}/decision")
+    @Operation(summary = "Decide a customer account request; approved limits still require product policy")
+    public ResponseEntity<Void> decideRequest(@PathVariable long id,@PathVariable String requestId,
+            @Valid @RequestBody LimitRequestDecision decision) {
+        service.decideCustomerRequest(id,requestId,decision);
+        return ResponseEntity.noContent().build();
+    }
     /** Starts activation; Module 5's acknowledgement completes it. */
     @PostMapping("/{id}/activate")
     @Operation(summary = "Request activation and posting-fence opening")
@@ -90,6 +125,11 @@ public class AccountController {
     @Operation(summary = "Replace active nominees, with shares totaling 100%")
     public ResponseEntity<Void> nominees(@PathVariable long id, @Valid @RequestBody ReplaceNominees request) {
         service.replaceNominees(id, request); return ResponseEntity.noContent().build();
+    }
+    @PutMapping("/self/{id}/nominees")
+    @Operation(summary = "Replace nominees on the signed-in customer's sole-operated account")
+    public ResponseEntity<Void> nomineesSelf(@PathVariable long id, @Valid @RequestBody ReplaceNominees request) {
+        service.replaceNomineesSelf(id, request); return ResponseEntity.noContent().build();
     }
     /** Begins a freeze, block, or lien request. */
     @PostMapping("/{id}/restrictions")
@@ -127,6 +167,11 @@ public class AccountController {
     @Operation(summary = "Request account closure")
     public ResponseEntity<CommandResult> closure(@PathVariable long id, @Valid @RequestBody ReasonCommand request) {
         return ResponseEntity.accepted().body(synchronize(service.requestClosure(id, request)));
+    }
+    @PostMapping("/self/{id}/closures")
+    @Operation(summary = "Request closure of the signed-in customer's sole-operated account")
+    public ResponseEntity<CommandResult> closureSelf(@PathVariable long id, @Valid @RequestBody ReasonCommand request) {
+        return ResponseEntity.accepted().body(synchronize(service.requestClosureSelf(id, request)));
     }
     /** Closes only after fresh authoritative clearances from peer modules. */
     @PostMapping("/{id}/closures/{requestId}/approve")

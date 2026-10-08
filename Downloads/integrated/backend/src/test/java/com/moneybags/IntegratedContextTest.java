@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureMockMvc @ActiveProfiles("local")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IntegratedContextTest {
- @Autowired MockMvc mvc;@Autowired ObjectMapper json;@Autowired JdbcTemplate db;
+ @Autowired MockMvc mvc;@Autowired ObjectMapper json;@Autowired JdbcTemplate db;@Autowired com.moneybags.txn.core.LedgerService ledger;
  @Autowired org.springframework.security.crypto.password.PasswordEncoder passwords;
  static final String HASH=("customer-demo-hash-"+"x".repeat(43)).substring(0,43);
  String login(String user)throws Exception{
@@ -253,8 +253,15 @@ class IntegratedContextTest {
   send("/loans/applications/"+id+"/decisions",admin,decision).andExpect(status().isConflict());
   send("/loans/applications/"+id+"/decisions",checker,decision).andExpect(status().isOk());
   long offer=value(send("/loans/applications/"+id+"/offers",admin,Map.of("documentRef","demo://offer","expiresAt",java.time.OffsetDateTime.now().plusDays(7).toString())).andExpect(status().isOk())).path("data").path("offerId").asLong();
+  var customerOffers=value(mvc.perform(get("/api/v1/loans/applications/"+id+"/offers").header("Authorization","Bearer "+customer)).andExpect(status().isOk())).path("data");
+  assertEquals("12000",customerOffers.get(0).path("SANCTIONED_AMOUNT").decimalValue().stripTrailingZeros().toPlainString());
+  assertEquals(12,customerOffers.get(0).path("SANCTIONED_TENURE_MONTHS").asInt());
+  assertEquals(0,new BigDecimal("12").compareTo(customerOffers.get(0).path("ANNUAL_RATE_PCT").decimalValue()));
+  mvc.perform(get("/api/v1/loans/applications/"+id+"/offers").header("Authorization","Bearer "+login("customer2"))).andExpect(status().isForbidden());
+  send("/loans/offers/"+offer+"/accept",admin,Map.of("disbursementAccountId",1,"repaymentAccountId",1)).andExpect(status().isForbidden());
   send("/loans/offers/"+offer+"/accept",customer,Map.of("disbursementAccountId",1,"repaymentAccountId",1)).andExpect(status().isOk());
   long doc=value(send("/loans/applications/"+id+"/documents",admin,Map.of("type","SIGNED_OFFER","storageReference","demo://signed-offer","sha256Hex","c".repeat(64))).andExpect(status().isOk())).path("data").path("documentRefId").asLong();
+  send("/loans/applications/"+id+"/documents/"+doc+"/verify",admin,Map.of()).andExpect(status().isForbidden());
   send("/loans/applications/"+id+"/documents/"+doc+"/verify",checker,Map.of()).andExpect(status().isOk());
   long facility=value(send("/loans/applications/"+id+"/convert",admin,Map.of()).andExpect(status().isOk())).path("data").path("facilityId").asLong();
   long disbursement=value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("disbursementId").asLong();
@@ -362,6 +369,53 @@ class IntegratedContextTest {
   var adminBody=Map.of("username","staff_signup_"+UUID.randomUUID().toString().substring(0,8),"legalName","Staff Created Customer","dateOfBirth","1993-06-20","password","NewCustomer!2026");
   mvc.perform(post("/api/v1/iam/users/demo-customer").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(adminBody))).andExpect(status().isUnauthorized());
   mvc.perform(post("/api/v1/iam/users/demo-customer").header("Authorization","Bearer "+login("admin")).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(adminBody))).andExpect(status().isOk());
+ }
+
+ /** Customer self-service intake is scoped, idempotent and immediately enters the staff review queue. */
+ @Test @Order(19) void customerCanApplyOnlyForOwnCifAndSeeOwnApplication()throws Exception{
+  String customer=login("customer"),other=login("customer2"),admin=login("admin"),key=UUID.randomUUID().toString();
+  var request=Map.of("cifId","demo-cif-1","productId",2,"productVersionId",2,
+      "amount","12000","tenureMonths",12,"purposeCode","PERSONAL");
+  var owned=mvc.perform(post("/api/v1/loans/my/applications").header("Authorization","Bearer "+customer)
+      .header("Idempotency-Key",key).contentType(MediaType.APPLICATION_JSON)
+      .content(json.writeValueAsString(request))).andExpect(status().isOk())
+      .andExpect(jsonPath("$.data.status").value("SUBMITTED")).andReturn();
+  long id=json.readTree(owned.getResponse().getContentAsString()).path("data").path("id").asLong();
+  assertTrue(id>0);
+  mvc.perform(get("/api/v1/loans/my/applications").header("Authorization","Bearer "+customer))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data[?(@.id == "+id+")].status").value("SUBMITTED"));
+  mvc.perform(get("/api/v1/loans/my/applications").header("Authorization","Bearer "+other))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data[?(@.id == "+id+")]").isEmpty());
+  mvc.perform(post("/api/v1/loans/my/applications").header("Authorization","Bearer "+customer)
+      .header("Idempotency-Key",key).contentType(MediaType.APPLICATION_JSON)
+      .content(json.writeValueAsString(request))).andExpect(status().isOk())
+      .andExpect(jsonPath("$.data.id").value(id));
+  var changed=new HashMap<>(request);changed.put("amount","13000");
+  mvc.perform(post("/api/v1/loans/my/applications").header("Authorization","Bearer "+customer)
+      .header("Idempotency-Key",key).contentType(MediaType.APPLICATION_JSON)
+      .content(json.writeValueAsString(changed))).andExpect(status().isConflict());
+  mvc.perform(post("/api/v1/loans/my/applications").header("Authorization","Bearer "+other)
+      .header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON)
+      .content(json.writeValueAsString(request))).andExpect(status().isForbidden());
+  mvc.perform(post("/api/v1/loans/my/applications").header("Authorization","Bearer "+admin)
+      .header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON)
+      .content(json.writeValueAsString(request))).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/loans/applications").param("branch","MUM001").header("Authorization","Bearer "+admin))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data[?(@.id == "+id+")].status").value("SUBMITTED"));
+  send("/loans/applications/"+id+"/assessments",admin,Map.of("monthlyIncome","50000","monthlyObligations","5000","recommendation","APPROVE","reasonCodes","AFFORDABLE")).andExpect(status().isOk());
+  send("/loans/applications/"+id+"/decisions",login("checker"),Map.of("code","APPROVE","reasonCodes","APPROVED","sanctionedAmount","12000","sanctionedTenureMonths",12,"annualRatePct","12","authorityCode","LOAN_SANCTION","authorityEvidenceRef","DEMO-AUTHORITY")).andExpect(status().isOk());
+  long offer=value(send("/loans/applications/"+id+"/offers",admin,Map.of("documentRef","demo://customer-offer","expiresAt",java.time.OffsetDateTime.now().plusDays(7).toString())).andExpect(status().isOk())).path("data").path("offerId").asLong();
+  send("/loans/offers/"+offer+"/accept",customer,Map.of("disbursementAccountId",1,"repaymentAccountId",1)).andExpect(status().isOk());
+  long document=value(send("/loans/applications/"+id+"/documents",admin,Map.of("type","SIGNED_OFFER","storageReference","demo://customer-signed-offer","sha256Hex","d".repeat(64))).andExpect(status().isOk())).path("data").path("documentRefId").asLong();
+  send("/loans/applications/"+id+"/documents/"+document+"/verify",login("checker"),Map.of()).andExpect(status().isOk());
+  long facility=value(send("/loans/applications/"+id+"/convert",admin,Map.of()).andExpect(status().isOk())).path("data").path("facilityId").asLong();
+  long disbursement=value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("disbursementId").asLong();
+  send("/loans/disbursements/"+disbursement+"/approve",login("checker"),Map.of("authorityCode","LOAN_SANCTION")).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/loans/facilities/"+facility).header("Authorization","Bearer "+customer))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data.STATUS").value("ACTIVE"));
+  mvc.perform(get("/api/v1/loans/facilities/"+facility+"/schedule").header("Authorization","Bearer "+customer))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(12));
+  mvc.perform(get("/api/v1/loans/facilities/"+facility).header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
  }
 
  @Test @Order(15) void assistantMcpEnforcesScopeAndExactConfirmation()throws Exception{
@@ -519,6 +573,215 @@ class IntegratedContextTest {
  JsonNode toolValue(JsonNode response)throws Exception{
   assertFalse(response.path("result").path("isError").asBoolean(),response.toString());
   return json.readTree(response.path("result").path("content").get(0).path("text").asText());
+ }
+
+ @Test @Order(20) void fixedDepositFundingAndMaturityAreBalancedAndScoped()throws Exception{
+  String customer=login("customer"),other=login("customer2"),admin=login("admin");
+  BigDecimal before=balance(1);String key=UUID.randomUUID().toString();
+  assertTrue(before.compareTo(new BigDecimal("1000000.00"))<0);
+  String unfundedKey=UUID.randomUUID().toString();
+  send("/term-deposits",customer,Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,
+    "amount","1000000.00","tenureMonths",1,"requestKey",unfundedKey))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INSUFFICIENT_FUNDS"))
+    .andExpect(jsonPath("$.message").value("Spendable funds are insufficient"));
+  assertEquals(0,before.compareTo(balance(1)));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM MBX_TERM_DEPOSIT WHERE REQUEST_KEY=?",Integer.class,unfundedKey));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_TXN_TRANSACTION_LOG WHERE REQUEST_KEY=?",Integer.class,"term-fund:"+unfundedKey));
+  var request=Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,"amount","1000.00","tenureMonths",1,"requestKey",key);
+  long id=value(send("/term-deposits",customer,request).andExpect(status().isOk())).path("TERM_DEPOSIT_ID").asLong();
+  assertTrue(id>0);
+  assertEquals(0,before.subtract(new BigDecimal("1000.00")).compareTo(balance(1)));
+  assertEquals(id,value(send("/term-deposits",customer,request).andExpect(status().isOk())).path("TERM_DEPOSIT_ID").asLong());
+  assertEquals(0,before.subtract(new BigDecimal("1000.00")).compareTo(balance(1)));
+  send("/term-deposits",other,Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,"amount","1000.00","tenureMonths",1,"requestKey",UUID.randomUUID().toString())).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/term-deposits/"+id).header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+  send("/term-deposits",customer,Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,"amount","1000.00","tenureMonths",2,"requestKey",key)).andExpect(status().isConflict());
+  send("/term-deposits/"+id+"/mature",admin,Map.of()).andExpect(status().isConflict());
+  db.update("UPDATE MBX_TERM_DEPOSIT SET START_DATE=?,MATURITY_DATE=? WHERE TERM_DEPOSIT_ID=?",
+    java.time.LocalDate.now().minusDays(2),java.time.LocalDate.now().minusDays(1),id);
+  var matured=value(send("/term-deposits/"+id+"/mature",admin,Map.of()).andExpect(status().isOk()));
+  assertEquals("MATURED",matured.path("STATUS").asText());
+  BigDecimal earned=db.queryForObject("SELECT MATURITY_INTEREST FROM MBX_TERM_DEPOSIT WHERE TERM_DEPOSIT_ID=?",BigDecimal.class,id);
+  assertEquals(0,before.add(earned).compareTo(balance(1)));
+  send("/term-deposits/"+id+"/mature",admin,Map.of()).andExpect(status().isOk());
+  assertEquals(0,before.add(earned).compareTo(balance(1)));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+ }
+
+ @Test @Order(21) void monthlySavingsInterestPostsOnceAndAppearsForOwner()throws Exception{
+  String customer=login("customer"),other=login("customer2"),admin=login("admin");
+  java.time.YearMonth month=java.time.YearMonth.now(java.time.ZoneId.of("Asia/Kolkata")).minusMonths(1);
+  db.update("UPDATE MBX_INTEREST_ROLLOUT SET START_DATE=? WHERE CONFIG_ID=1",month.atDay(1));
+  db.update("UPDATE M04_BANK_ACCOUNT SET OPENED_AT=?,ACTIVATED_AT=? WHERE ACCOUNT_ID=1",
+    month.atDay(1).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime(),
+    month.atDay(1).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime());
+  String adminId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String key=UUID.randomUUID().toString();
+  db.update("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,'BRANCH',?,?,?,'DEPOSIT','POSTED',1,1,1000,?)",
+    adminId,key,com.moneybags.integration.CustomerHashService.digest(key),key,month.atDay(1));
+  long txn=db.queryForObject("SELECT TXN_ID FROM M05_TXN_TRANSACTION_LOG WHERE REQUEST_KEY=?",Long.class,key);
+  ledger.postJournal(new com.moneybags.txn.api.Contracts.JournalRequest(key,"DEPOSIT",txn,null,null,null,null,null,month.atDay(1),"Past test funding",
+    List.of(new com.moneybags.txn.api.Contracts.JournalLine(2L,null,null,null,"DR",new BigDecimal("1000"),"Test cash"),
+      new com.moneybags.txn.api.Contracts.JournalLine(1L,1L,null,null,"CR",new BigDecimal("1000"),"Test funding"))),adminId);
+  BigDecimal before=balance(1);
+  mvc.perform(post("/api/v1/deposit-interest/runs").param("period",month.toString()).header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+  BigDecimal amount=db.queryForObject("SELECT INTEREST_AMOUNT FROM MBX_SAVINGS_INTEREST_PERIOD WHERE ACCOUNT_ID=1 AND PERIOD_MONTH=?",BigDecimal.class,month.atDay(1));
+  assertTrue(amount.signum()>0);
+  assertEquals(0,before.add(amount).compareTo(balance(1)));
+  mvc.perform(post("/api/v1/deposit-interest/runs").param("period",month.toString()).header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+  assertEquals(0,before.add(amount).compareTo(balance(1)));
+  mvc.perform(get("/api/v1/deposit-interest/accounts/1").header("Authorization","Bearer "+customer)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/deposit-interest/accounts/1").header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+ }
+
+ @Test @Order(22) @org.springframework.transaction.annotation.Transactional
+ void savingsWithoutApprovedInterestRuleDoesNotCreateAPosting() throws Exception {
+  String admin=login("admin");
+  java.time.YearMonth month=java.time.YearMonth.now(java.time.ZoneId.of("Asia/Kolkata")).minusMonths(2);
+  db.update("UPDATE MBX_INTEREST_ROLLOUT SET START_DATE=? WHERE CONFIG_ID=1",month.atDay(1));
+  db.update("UPDATE M04_BANK_ACCOUNT SET OPENED_AT=?,ACTIVATED_AT=? WHERE ACCOUNT_ID=1",
+    month.atDay(1).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime(),
+    month.atDay(1).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toOffsetDateTime());
+  db.update("DELETE FROM M03_PM_INTEREST_RULE WHERE PRODUCT_VERSION_ID=1");
+  String response=mvc.perform(post("/api/v1/deposit-interest/runs").param("period",month.toString())
+    .header("Authorization","Bearer "+admin)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+  assertTrue(response.contains("NOT_CONFIGURED"));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM MBX_SAVINGS_INTEREST_PERIOD WHERE ACCOUNT_ID=1 AND PERIOD_MONTH=?",
+    Integer.class,month.atDay(1)));
+ }
+
+ @Test @Order(23) void customerClosureRequiresOwnSettledSoleAccountAndBankReview() throws Exception {
+  String customer=login("customer"),other=login("customer2"),requestId=UUID.randomUUID().toString();
+  send("/accounts/self/1/closures",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "reasonCode","CUSTOMER_REQUEST")).andExpect(status().isConflict());
+  var opening=send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated()).andReturn();
+  long id=json.readTree(opening.getResponse().getContentAsString()).path("id").asLong();
+  send("/accounts/self/"+id+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isAccepted());
+  Map<String,Object> closure=Map.of("requestId",requestId,"reasonCode","CUSTOMER_REQUEST","remarks","No longer needed");
+  send("/accounts/self/"+id+"/closures",other,closure).andExpect(status().isForbidden());
+  send("/accounts/self/"+id+"/closures",customer,closure).andExpect(status().isAccepted());
+  assertEquals("CLOSING",db.queryForObject("SELECT ACCOUNT_STATUS FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",String.class,id));
+  assertEquals("CLOSED",db.queryForObject("SELECT DEBIT_STATUS FROM M05_POSTING_FENCE WHERE BANK_ACCOUNT_ID=?",String.class,id));
+  send("/accounts/self/"+id+"/closures",customer,closure).andExpect(status().isAccepted());
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_CLOSURE_REQUEST WHERE ACCOUNT_ID=?",Integer.class,id));
+ }
+
+ @Test @Order(24) void customerNomineesRequirePrimaryOwnershipAndFullShares() throws Exception {
+  String customer=login("customer"),other=login("customer2");
+  var opening=send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated()).andReturn();
+  long id=json.readTree(opening.getResponse().getContentAsString()).path("id").asLong();
+  send("/accounts/self/"+id+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isAccepted());
+  var nominee=Map.of("name","Test Nominee","relationship","SPOUSE","sharePercentage","100.00");
+  var body=Map.of("requestId",UUID.randomUUID().toString(),"nominees",List.of(nominee));
+  mvc.perform(put("/api/v1/accounts/self/"+id+"/nominees").header("Authorization","Bearer "+other)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body))).andExpect(status().isForbidden());
+  mvc.perform(put("/api/v1/accounts/"+id+"/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body))).andExpect(status().isForbidden());
+  mvc.perform(put("/api/v1/accounts/self/"+id+"/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("requestId",UUID.randomUUID().toString(),
+      "nominees",List.of(Map.of("name","Test Nominee","relationship","SPOUSE","sharePercentage","50.00"))))))
+    .andExpect(status().isBadRequest());
+  mvc.perform(put("/api/v1/accounts/self/"+id+"/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body))).andExpect(status().isNoContent());
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_NOMINEE WHERE ACCOUNT_ID=? AND IS_ACTIVE='Y'",Integer.class,id));
+  mvc.perform(get("/api/v1/accounts/"+id+"/nominees").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[0].NOMINEE_NAME").value("Test Nominee"));
+ }
+
+ @Test @Order(25) void customerLimitAndIssueRequestsNeedOfficerDecision() throws Exception {
+  String customer=login("customer"),other=login("customer2"),admin=login("admin");
+  String limitId=UUID.randomUUID().toString();
+  var request=Map.of("requestId",limitId,"operationCode","INTERNAL_TRANSFER",
+    "periodCode","DAY","requestedAmount","50000.00","reason","Temporary transfer need");
+  send("/accounts/self/1/limit-requests",other,request).andExpect(status().isForbidden());
+  send("/accounts/self/1/limit-requests",customer,request).andExpect(status().isCreated())
+    .andExpect(jsonPath("$.REQUEST_STATUS").value("PENDING"));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_LIMIT WHERE CHANGE_REQUEST_ID=?",Integer.class,limitId));
+  mvc.perform(get("/api/v1/accounts/self/1/requests").header("Authorization","Bearer "+other))
+    .andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/accounts/customer-requests").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk());
+  send("/accounts/1/customer-requests/"+limitId+"/decision",customer,
+    Map.of("decision","APPROVED","productLimitRuleId",1)).andExpect(status().isForbidden());
+  String reason="Outside current product policy";
+  send("/accounts/1/customer-requests/"+limitId+"/decision",admin,
+    Map.of("decision","REJECTED","reason",reason)).andExpect(status().isNoContent());
+  assertEquals("REJECTED",db.queryForObject("SELECT REQUEST_STATUS FROM MBX_ACCOUNT_CUSTOMER_REQUEST WHERE REQUEST_ID=?",String.class,limitId));
+  String issueId=UUID.randomUUID().toString();
+  send("/accounts/self/1/issues",customer,Map.of("requestId",issueId,"details","Card may be compromised"))
+    .andExpect(status().isCreated());
+  send("/accounts/1/customer-requests/"+issueId+"/decision",admin,
+    Map.of("decision","RESOLVED","reason","Customer contacted"))
+    .andExpect(status().isNoContent());
+  assertEquals("RESOLVED",db.queryForObject("SELECT REQUEST_STATUS FROM MBX_ACCOUNT_CUSTOMER_REQUEST WHERE REQUEST_ID=?",String.class,issueId));
+ }
+
+ @Test @Order(26) void approvedCustomerLimitUsesProductRuleAndSafetyBlockIsOwnerOnly() throws Exception {
+  String customer=login("customer"),other=login("customer2"),admin=login("admin");
+  db.update("INSERT INTO M03_PM_LIMIT_RULE(PRODUCT_VERSION_ID,RULE_CODE,OPERATION_CODE,PERIOD_CODE,MAX_AMOUNT,CURRENCY_CODE) VALUES (1,'CUSTOMER_LIMIT_TEST','INTERNAL_TRANSFER','DAY',100000,'INR')");
+  Long rule=db.queryForObject("SELECT LIMIT_RULE_ID FROM M03_PM_LIMIT_RULE WHERE RULE_CODE='CUSTOMER_LIMIT_TEST'",Long.class);
+  var opening=send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated()).andReturn();
+  long id=json.readTree(opening.getResponse().getContentAsString()).path("id").asLong();
+  send("/accounts/self/"+id+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isAccepted());
+  String requestId=UUID.randomUUID().toString();
+  send("/accounts/self/"+id+"/limit-requests",customer,Map.of("requestId",requestId,
+    "operationCode","INTERNAL_TRANSFER","periodCode","DAY","requestedAmount","50000.00","reason","Travel"))
+    .andExpect(status().isCreated());
+  send("/accounts/"+id+"/customer-requests/"+requestId+"/decision",admin,
+    Map.of("decision","APPROVED","productLimitRuleId",rule)).andExpect(status().isNoContent());
+  assertEquals(0,new BigDecimal("50000.00").compareTo(db.queryForObject(
+    "SELECT LIMIT_AMOUNT FROM M04_ACCOUNT_LIMIT WHERE CHANGE_REQUEST_ID=?",BigDecimal.class,requestId)));
+  var block=Map.of("requestId",UUID.randomUUID().toString(),"type","DEBIT_BLOCK","details","Suspicious activity");
+  send("/accounts/self/"+id+"/safety-blocks",other,block).andExpect(status().isForbidden());
+  send("/accounts/self/"+id+"/safety-blocks",customer,block).andExpect(status().isAccepted());
+  assertEquals("DEBIT_BLOCKED",db.queryForObject("SELECT ACCOUNT_STATUS FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",String.class,id));
+  assertEquals("ACTIVE",db.queryForObject("SELECT RESTRICTION_STATUS FROM M04_ACCOUNT_RESTRICTION WHERE REQUEST_ID=?",
+    String.class,block.get("requestId")));
+ }
+
+ @Test @Order(27) void interestPreviewIsReadOnlyAndScopedToAccountParty() throws Exception {
+  String customer=login("customer"),other=login("customer2");
+  mvc.perform(get("/api/v1/deposit-interest/accounts/1/accrual").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.status").exists());
+  mvc.perform(get("/api/v1/deposit-interest/accounts/1/accrual").header("Authorization","Bearer "+other))
+    .andExpect(status().isForbidden());
+ }
+
+ @Test @Order(28) void publicSignupDoesNotInheritUnexpectedRetailRolePermissions() throws Exception {
+  db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) " +
+    "SELECT R.ROLE_ID,P.PERMISSION_ID FROM M01_IAM_ROLE R CROSS JOIN M01_IAM_PERMISSION P " +
+    "WHERE R.ROLE_CODE='RETAIL_CUSTOMER' AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'");
+  String username="scoped_signup_"+UUID.randomUUID().toString().substring(0,8);
+  var body=Map.of("username",username,"legalName","Scoped Customer","dateOfBirth","1995-04-12",
+    "password","NewCustomer!2026");
+  mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
+    .content(json.writeValueAsString(body))).andExpect(status().isOk());
+  assertEquals("RETAIL_CUSTOMER_SIGNUP",db.queryForObject(
+    "SELECT R.ROLE_CODE FROM M01_IAM_USER U JOIN M01_IAM_USER_ROLE UR ON UR.USER_ID=U.USER_ID " +
+      "JOIN M01_IAM_ROLE R ON R.ROLE_ID=UR.ROLE_ID WHERE U.USERNAME=?",String.class,username));
+  assertEquals(0,db.queryForObject(
+    "SELECT COUNT(*) FROM M01_IAM_USER U JOIN M01_IAM_USER_ROLE UR ON UR.USER_ID=U.USER_ID " +
+      "JOIN M01_IAM_ROLE_PERMISSION RP ON RP.ROLE_ID=UR.ROLE_ID " +
+      "JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID " +
+      "WHERE U.USERNAME=? AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'",Integer.class,username));
+  var loginResult=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+    .content(json.writeValueAsString(Map.of("username",username,"password","NewCustomer!2026",
+      "clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
+  String customer=json.readTree(loginResult.getResponse().getContentAsString())
+    .path("data").path("accessToken").asText();
+  mvc.perform(get("/api/v1/banking/my-dashboard").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk());
+ }
+
+ @Test @Order(29) void accountPartiesShowNamesOnlyToAuthorizedCustomers() throws Exception {
+  mvc.perform(get("/api/v1/accounts/1/parties").header("Authorization","Bearer "+login("customer")))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[0].PARTY_NAME").value("Aarav Mehta (demo)"));
+  mvc.perform(get("/api/v1/accounts/1/parties").header("Authorization","Bearer "+login("customer2")))
+    .andExpect(status().isForbidden());
  }
 
 }

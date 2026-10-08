@@ -35,6 +35,16 @@ public final class Models {
             @NotBlank String resetRuleCode, @NotBlank String timeZoneId,
             @NotNull @DecimalMin("0.00") @Digits(integer=16,fraction=2) BigDecimal amount, Long productLimitRuleId,
             Long overridePolicyId, String effectiveFrom, String effectiveTo, String approvedByUserId) { }
+    public record SelfLimitRequest(@NotBlank @Size(max=60) String requestId,
+            @NotBlank String operationCode, @NotBlank String periodCode,
+            @NotNull @DecimalMin("0.01") @Digits(integer=16,fraction=2) BigDecimal requestedAmount,
+            @NotBlank @Size(max=500) String reason) { }
+    public record LimitRequestDecision(@NotBlank String decision, @Size(max=500) String reason,
+            Long productLimitRuleId, Long overridePolicyId, String approvedByUserId) { }
+    public record SelfIssueRequest(@NotBlank @Size(max=60) String requestId,
+            @NotBlank @Size(max=500) String details) { }
+    public record SelfSafetyBlock(@NotBlank @Size(max=60) String requestId,
+            @NotBlank String type, @NotBlank @Size(max=500) String details) { }
     public record InterestCommand(@NotBlank @Size(max=60) String requestId, @NotNull Long overridePolicyId,
             @NotNull @DecimalMin("0.00") BigDecimal ratePct, @NotBlank String reason,
             @NotNull OffsetDateTime effectiveFrom, OffsetDateTime effectiveTo,
@@ -59,10 +69,13 @@ public final class Models {
             @NotNull OffsetDateTime occurredAt, String correlationId) { }
     public record AccountView(@JsonFormat(shape=JsonFormat.Shape.STRING) long id, String number,
             String primaryCifId, @JsonFormat(shape=JsonFormat.Shape.STRING) long productId,
-            @JsonFormat(shape=JsonFormat.Shape.STRING) long productVersionId, String branchCode, String lifecycleStatus, String accountStatus,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) long productVersionId, String branchCode, String currencyCode,
+            String lifecycleStatus, String accountStatus,
             String operationMode, String majorityReviewStatus, BigDecimal ledgerBalance,
             BigDecimal blockedBalance, BigDecimal lienBalance, BigDecimal overdraftLimit,
-            BigDecimal availableBalance, @JsonFormat(shape=JsonFormat.Shape.STRING) long balanceSourceVersion,
+            BigDecimal availableBalance, BigDecimal interestAccrued,
+            OffsetDateTime lastInterestCalculationAt, OffsetDateTime lastInterestPostingAt,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) long balanceSourceVersion,
             @JsonFormat(shape=JsonFormat.Shape.STRING) long financialControlVersion,
             @JsonFormat(shape=JsonFormat.Shape.STRING) long rowVersion, OffsetDateTime openedAt, OffsetDateTime activatedAt,
             OffsetDateTime closedAt) { }

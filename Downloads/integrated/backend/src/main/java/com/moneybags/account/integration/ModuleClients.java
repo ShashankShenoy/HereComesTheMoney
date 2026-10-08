@@ -7,6 +7,7 @@ import com.moneybags.iam.service.AccessDecisionService;
 import com.moneybags.integration.CurrentActor;
 import com.moneybags.product.service.ProductDefinitionsPort;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import java.math.BigDecimal;
 import java.time.*;
@@ -17,7 +18,11 @@ public class ModuleClients {
  private final BusinessRepository db;
  private final AccessDecisionService access;
  private final ProductDefinitionsPort products;
- public ModuleClients(BusinessRepository db,AccessDecisionService access,ProductDefinitionsPort products) {this.db=db;this.access=access;this.products=products;}
+ private final boolean depositInterestEnabled;
+ public ModuleClients(BusinessRepository db,AccessDecisionService access,ProductDefinitionsPort products,
+                      @Value("${moneybags.deposit-interest.enabled:false}") boolean depositInterestEnabled) {
+  this.db=db;this.access=access;this.products=products;this.depositInterestEnabled=depositInterestEnabled;
+ }
  public record CustomerDecision(String decisionRef,String status,String kycStatus,Boolean minor,String homeBranch) {}
  public record ProductDecision(String decisionRef,String productType,String currency,String versionState,String ruleSetHash,BigDecimal minimumOpeningBalance) {}
  public record IamDecision(String decisionRef,boolean allowed) {}
@@ -71,6 +76,11 @@ public class ModuleClients {
   var rows=db.rows("SELECT T.CONSENT_REQUIRED FROM M03_PM_VERSION_TREATMENT T JOIN M03_PM_APPROVAL A ON A.APPROVAL_ID=T.APPROVAL_ID WHERE T.VERSION_TREATMENT_ID=? AND T.SOURCE_VERSION_ID=? AND T.TARGET_VERSION_ID=? AND A.REQUEST_STATUS='APPROVED' AND (T.MIGRATION_FROM_AT IS NULL OR T.MIGRATION_FROM_AT<=SYSTIMESTAMP)",id,from,to);
   return new Treatment(!rows.isEmpty(),!rows.isEmpty()&&"Y".equals(rows.get(0).get("CONSENT_REQUIRED")),ref());
  }
+ public Clearance closureFundsSettled(long id){
+  var rows=db.rows("SELECT POSTED_BALANCE,ACTIVE_HOLD_AMOUNT,ACTIVE_LIEN_AMOUNT,ACTIVE_BLOCK_AMOUNT FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=?",id);
+  return clear(rows.size()==1 && List.of("POSTED_BALANCE","ACTIVE_HOLD_AMOUNT","ACTIVE_LIEN_AMOUNT","ACTIVE_BLOCK_AMOUNT")
+    .stream().allMatch(k->((BigDecimal)rows.get(0).get(k)).signum()==0));
+ }
  public Clearance transactionClearance(long id,long version){
   var rows=db.rows("SELECT P.POSTED_BALANCE,P.ACTIVE_HOLD_AMOUNT,P.ACTIVE_LIEN_AMOUNT,P.ACTIVE_BLOCK_AMOUNT,F.DEBIT_STATUS,F.CREDIT_STATUS,F.CONTROL_VERSION FROM M05_ACCOUNT_POSITION P JOIN M05_POSTING_FENCE F ON F.BANK_ACCOUNT_ID=P.BANK_ACCOUNT_ID WHERE P.BANK_ACCOUNT_ID=?",id);
   if(rows.isEmpty())return clear(version==0);
@@ -79,6 +89,9 @@ public class ModuleClients {
  }
  public Clearance paymentClearance(long id){return clear(db.count("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE (SOURCE_ACCOUNT_ID=? OR DESTINATION_ACCOUNT_ID=?) AND STATUS NOT IN ('SETTLED','REJECTED','CANCELLED','REFUNDED')",id,id)==0);}
  public Clearance loanClearance(long id){return clear(db.count("SELECT COUNT(*) FROM M08_LOAN_FACILITY WHERE (DISBURSEMENT_ACCOUNT_ID=? OR REPAYMENT_ACCOUNT_ID=?) AND STATUS NOT IN ('CLOSED','CANCELLED')",id,id)==0 && db.count("SELECT COUNT(*) FROM M11_CC_CARD WHERE REPAYMENT_ACCOUNT_ID=? AND STATUS<>'CLOSED'",id)==0 && db.count("SELECT COUNT(*) FROM M11_CC_APPLICATION WHERE REPAYMENT_ACCOUNT_ID=? AND STATUS='PENDING'",id)==0);}
+ public Clearance termDepositClearance(long id){return clear(!depositInterestEnabled ||
+
+   db.count("SELECT COUNT(*) FROM MBX_TERM_DEPOSIT WHERE FUNDING_ACCOUNT_ID=? AND STATUS='ACTIVE'",id)==0);}
  private Clearance clear(boolean yes){return new Clearance(yes,ref(),yes?null:"Outstanding balance, control or obligation");}
 }
 

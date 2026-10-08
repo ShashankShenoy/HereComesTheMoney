@@ -45,6 +45,7 @@ public enum SchemaTable {
     M03_PM_BALANCE_RULE("product", com.moneybags.product.model.M03PmBalanceRuleRow.class),
     M03_PM_ACCOUNT_RULE("product", com.moneybags.product.model.M03PmAccountRuleRow.class),
     M03_PM_LOAN_RULE("product", com.moneybags.product.model.M03PmLoanRuleRow.class),
+    M03_PM_TERM_DEPOSIT_RULE("product", com.moneybags.product.model.M03PmTermDepositRuleRow.class),
     M03_PM_TRANSACTION_RULE("product", com.moneybags.product.model.M03PmTransactionRuleRow.class),
     M03_PM_AVAILABILITY("product", com.moneybags.product.model.M03PmAvailabilityRow.class),
     M03_PM_APPROVAL("product", com.moneybags.product.model.M03PmApprovalRow.class),

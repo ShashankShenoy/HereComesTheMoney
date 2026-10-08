@@ -23,8 +23,11 @@ dialog{border-radius:7px;color:#263b43}dialog::backdrop{background:#132b36a8}.di
 .gl-ledger-summary{display:flex;justify-content:space-between;align-items:start;gap:18px;flex-wrap:wrap;border:1px solid var(--border);border-radius:5px;padding:15px 17px;margin:18px 0}.gl-ledger-summary .hint{margin:5px 0 0}.gl-ledger-summary>div:last-child{display:grid;gap:4px;text-align:right}.gl-ledger-summary .amount-value{font-size:21px}.gl-journal-detail{border-top:1px solid var(--border);margin-top:22px;padding-top:18px}.gl-journal-detail .section-heading-row{margin-bottom:10px}.gl-journal-detail .result-details{padding:0;margin:10px 0 16px}.gl-journal-detail .notice{margin:14px 0}
 .transaction-tabs{display:flex;gap:6px;overflow-x:auto;border-bottom:1px solid var(--border);margin:0 0 20px;padding:0 1px;scrollbar-width:thin}.transaction-tabs button{flex:none;border:0;border-bottom:3px solid transparent;border-radius:4px 4px 0 0;background:transparent;color:#52666e;padding:12px 17px 11px;font:inherit;font-weight:650;cursor:pointer;white-space:nowrap}.transaction-tabs button:hover{background:#edf4f3;color:#174f4c}.transaction-tabs button[aria-selected="true"]{border-bottom-color:#1f736d;color:#165c59;background:#edf4f3}.transaction-tabs button:focus-visible{outline:2px solid #307a75;outline-offset:-2px}.transaction-tabs~[role="tabpanel"]{min-width:0}
 .access-key-output{margin-top:16px}.access-key-output code{display:block;margin-top:9px;overflow-wrap:anywhere;user-select:all}
+.customer-loan-catalog #operation-catalog-toggle{display:none}
 .language-picker{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-size:12px;color:#536b70;font-weight:600}
 .language-picker select{min-width:90px;max-width:130px;padding:6px 8px;border:1px solid #cbd9da;border-radius:5px;background:#fff;color:#173b43}
 .login-language{position:absolute;top:24px;right:26px;z-index:2}
 .login-language .language-picker{color:#f5faf9}
 @media(max-width:760px){.language-picker{font-size:11px}.language-picker select{min-width:75px;max-width:92px}.topbar .identity{flex-wrap:wrap;justify-content:flex-end}.login-language{position:static;align-self:flex-end;margin:0 0 14px}}
+.nominee-entry{border:1px solid var(--border);border-radius:8px;padding:16px;margin:12px 0}
+.nominee-entry>[data-remove-nominee]{margin-top:12px}

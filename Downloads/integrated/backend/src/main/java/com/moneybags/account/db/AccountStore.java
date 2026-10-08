@@ -123,8 +123,16 @@ public class AccountStore {
     }
     /** Returns account-owned rows from a fixed allowlist, preventing SQL identifier injection. */
     public List<Map<String, Object>> children(long accountId, String kind) {
+        if ("parties".equals(kind)) {
+            return db.sql("SELECT ap.*, (SELECT n.FULL_NAME FROM M02_CIF_CUSTOMER c " +
+                    "JOIN M02_CIF_NAME n ON n.PARTY_ID=c.PARTY_ID " +
+                    "WHERE c.CIF_ID=ap.CIF_ID AND n.NAME_TYPE='LEGAL' AND n.VALID_TO IS NULL " +
+                    "ORDER BY n.VALID_FROM DESC FETCH FIRST 1 ROW ONLY) AS PARTY_NAME " +
+                    "FROM M04_ACCOUNT_PARTY ap WHERE ap.ACCOUNT_ID=:a " +
+                    "ORDER BY ap.ACCOUNT_PARTY_ID DESC FETCH FIRST 200 ROWS ONLY")
+                    .param("a", accountId).query().listOfRows();
+        }
         String table = switch (kind) {
-            case "parties" -> "M04_ACCOUNT_PARTY";
             case "nominees" -> "M04_ACCOUNT_NOMINEE";
             case "restrictions" -> "M04_ACCOUNT_RESTRICTION";
             case "limits" -> "M04_ACCOUNT_LIMIT";
@@ -178,11 +186,15 @@ public class AccountStore {
         var p=positions.isEmpty()?java.util.Map.<String,Object>of():positions.get(0);
         return new AccountView(rs.getLong("ACCOUNT_ID"), rs.getString("ACCOUNT_NUMBER"),
                 rs.getString("PRIMARY_CIF_ID"), rs.getLong("PRODUCT_ID"), rs.getLong("PRODUCT_VERSION_ID"),
-                rs.getString("BRANCH_CODE"), rs.getString("LIFECYCLE_STATUS"), rs.getString("ACCOUNT_STATUS"),
+                rs.getString("BRANCH_CODE"), rs.getString("CURRENCY_CODE"),
+                rs.getString("LIFECYCLE_STATUS"), rs.getString("ACCOUNT_STATUS"),
                 rs.getString("ACCOUNT_OPERATION_MODE"), rs.getString("MAJORITY_REVIEW_STATUS"),
                 (BigDecimal)p.getOrDefault("POSTED_BALANCE",BigDecimal.ZERO), (BigDecimal)p.getOrDefault("BLOCKED",BigDecimal.ZERO),
                 (BigDecimal)p.getOrDefault("ACTIVE_LIEN_AMOUNT",BigDecimal.ZERO), (BigDecimal)p.getOrDefault("OVERDRAFT_LIMIT",BigDecimal.ZERO),
-                (BigDecimal)p.getOrDefault("SPENDABLE_BALANCE",BigDecimal.ZERO), ((Number)p.getOrDefault("POSITION_VERSION",0)).longValue(),
+                (BigDecimal)p.getOrDefault("SPENDABLE_BALANCE",BigDecimal.ZERO),
+                rs.getBigDecimal("INTEREST_ACCRUED"), rs.getObject("LAST_INTEREST_CALCULATION_AT", OffsetDateTime.class),
+                rs.getObject("LAST_INTEREST_POSTING_AT", OffsetDateTime.class),
+                ((Number)p.getOrDefault("POSITION_VERSION",0)).longValue(),
                 rs.getLong("FINANCIAL_CONTROL_VERSION"), rs.getLong("ROW_VERSION"),
                 rs.getObject("OPENED_AT", OffsetDateTime.class),
                 rs.getObject("ACTIVATED_AT", OffsetDateTime.class),
