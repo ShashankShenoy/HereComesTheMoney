@@ -1478,31 +1478,7 @@ public class ProductService implements ProductDefinitionsPort {
     BigDecimal v = decimal(
       ((Map<?, ?>) definition.get("version")).get("PRODUCT_VERSION_ID")
     );
-    List<String> failures = new ArrayList<>();
-    if (!facts.status().equals("ACTIVE")) failures.add("CUSTOMER_NOT_ACTIVE");
-    if (!facts.kycStatus().equals("VERIFIED")) failures.add("KYC_NOT_VERIFIED");
-    Map<String, Object> attrs = map(
-      "AGE",
-      facts.dateOfBirth() == null
-        ? null
-        : Period.between(facts.dateOfBirth(), at.toLocalDate()).getYears(),
-      "KYC_STATUS",
-      facts.kycStatus(),
-      "SEGMENT",
-      facts.segment(),
-      "PARTY_TYPE",
-      facts.partyType(),
-      "COUNTRY",
-      facts.countryCode(),
-      "RISK_LEVEL",
-      facts.risk(),
-      "INCORPORATED_ON",
-      facts.incorporatedOn()
-    );
-    for (var rule : rules(v, family("eligibility")))
-      if (
-        !satisfies(attrs.get(str(rule, "ATTRIBUTE_CODE")), rule)
-      ) failures.add(str(rule, "FAILURE_REASON_CODE"));
+    List<String> failures = new ArrayList<>(customerEligibilityFailures(facts, v, at));
     for (var rule : rules(v, family("account")))
       if (
         in.openingAmount() == null ||
@@ -1535,6 +1511,71 @@ public class ProductService implements ProductDefinitionsPort {
       at,
       "validUntil",
       at.plusMinutes(5)
+    );
+  }
+
+  private Map<String, Object> customerAttributes(
+    CustomerFactsPort.Facts facts,
+    OffsetDateTime at
+  ) {
+    return map(
+      "AGE",
+      facts.dateOfBirth() == null
+        ? null
+        : Period.between(facts.dateOfBirth(), at.toLocalDate()).getYears(),
+      "KYC_STATUS",
+      facts.kycStatus(),
+      "SEGMENT",
+      facts.segment(),
+      "PARTY_TYPE",
+      facts.partyType(),
+      "COUNTRY",
+      facts.countryCode(),
+      "RISK_LEVEL",
+      facts.risk(),
+      "INCORPORATED_ON",
+      facts.incorporatedOn()
+    );
+  }
+
+  private List<String> customerEligibilityFailures(
+    CustomerFactsPort.Facts facts,
+    BigDecimal versionId,
+    OffsetDateTime at
+  ) {
+    List<String> failures = new ArrayList<>();
+    if (!facts.status().equals("ACTIVE")) failures.add("CUSTOMER_NOT_ACTIVE");
+    if (!facts.kycStatus().equals("VERIFIED")) failures.add("KYC_NOT_VERIFIED");
+    var attrs = customerAttributes(facts, at);
+    for (var rule : rules(versionId, family("eligibility")))
+      if (
+        !satisfies(attrs.get(str(rule, "ATTRIBUTE_CODE")), rule)
+      ) failures.add(str(rule, "FAILURE_REASON_CODE"));
+    return failures.stream().distinct().toList();
+  }
+
+  @Override
+  public void requireCustomerEligible(
+    BigDecimal productId,
+    BigDecimal versionId,
+    String cifId,
+    OffsetDateTime at
+  ) {
+    var version = versionRow(versionId, false);
+    conflict(
+      decimal(version.get("PRODUCT_ID")).compareTo(productId) != 0,
+      "VERSION_PRODUCT_MISMATCH",
+      "Version belongs to another product"
+    );
+    var failures = customerEligibilityFailures(
+      customers.facts(cifId),
+      versionId,
+      at == null ? now() : at
+    );
+    conflict(
+      !failures.isEmpty(),
+      "CUSTOMER_NOT_ELIGIBLE",
+      String.join(", ", failures)
     );
   }
 
@@ -1619,6 +1660,7 @@ public class ProductService implements ProductDefinitionsPort {
   ) {
     var facts = customers.facts(cifId);
     access.require(u, "CIF_READ", facts.branch(), cifId, null, null, null);
+    var evaluatedAt = now();
     List<Map<String, Object>> result = new ArrayList<>();
     for (var p : db.rows(
       "SELECT * FROM M03_PM_PRODUCT WHERE STATUS='ACTIVE' AND CURRENCY_CODE=? ORDER BY PRODUCT_CODE",
@@ -1634,7 +1676,7 @@ public class ProductService implements ProductDefinitionsPort {
           currency
         ) ||
         !inside(
-          now(),
+          evaluatedAt,
           (OffsetDateTime) p.get("SALES_START_AT"),
           (OffsetDateTime) p.get("SALES_END_AT")
         )
@@ -1650,8 +1692,12 @@ public class ProductService implements ProductDefinitionsPort {
             facts.segment(),
             channel,
             currency,
-            now()
-          )
+            evaluatedAt
+          ) && customerEligibilityFailures(
+            facts,
+            decimal(v.get("PRODUCT_VERSION_ID")),
+            evaluatedAt
+          ).isEmpty()
         ) result.add(
           map(
             "product",

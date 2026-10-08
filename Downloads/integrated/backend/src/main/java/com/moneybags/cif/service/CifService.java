@@ -883,6 +883,35 @@ public class CifService implements CustomerFactsPort {
         "OPEN_ACCOUNTS",
         "Close customer accounts before CIF closure"
       );
+      bad(
+        db.count("SELECT COUNT(*) FROM MBX_TERM_DEPOSIT WHERE PRIMARY_CIF_ID=? AND STATUS='ACTIVE'", cif) > 0,
+        "OPEN_TERM_DEPOSITS",
+        "Mature active term deposits before CIF closure"
+      );
+      bad(
+        db.count(
+            "SELECT COUNT(*) FROM M08_LOAN_APPLICATION A WHERE (A.PRIMARY_CIF_ID=? OR EXISTS (SELECT 1 FROM M08_LOAN_APPLICATION_PARTY P WHERE P.APPLICATION_ID=A.APPLICATION_ID AND P.CIF_ID=? AND P.REMOVED_AT IS NULL)) AND A.STATUS NOT IN ('REJECTED','WITHDRAWN','EXPIRED','CONVERTED','CANCELLED')",
+            cif,
+            cif
+          ) > 0 ||
+          db.count(
+            "SELECT COUNT(*) FROM M08_LOAN_FACILITY WHERE PRIMARY_CIF_ID=? AND STATUS NOT IN ('CLOSED','WRITTEN_OFF','CANCELLED')",
+            cif
+          ) > 0,
+        "OPEN_LOANS",
+        "Complete or cancel customer loan applications and facilities before CIF closure"
+      );
+      db.jdbc().update(
+        "UPDATE M02_KYC_CASE SET STATUS='EXPIRED',DECIDED_AT=COALESCE(DECIDED_AT,?),ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=? AND STATUS NOT IN ('APPROVED','REJECTED','EXPIRED')",
+        now(),
+        cif
+      );
+      rejectPending(str(c, "PARTY_ID"));
+      db.jdbc().update(
+        "UPDATE M02_CIF_CONSENT SET STATUS='WITHDRAWN',WITHDRAWN_AT=? WHERE CIF_ID=? AND STATUS='GRANTED'",
+        now(),
+        cif
+      );
     }
     db
       .jdbc()
@@ -947,6 +976,15 @@ public class CifService implements CustomerFactsPort {
   public void consent(UserPrincipal user, String cif, ConsentInput in) {
     var c = customer(cif, true);
     permit(user, "CIF_UPDATE", c, null);
+    bad(
+      db.count(
+          "SELECT COUNT(*) FROM M02_CIF_CONSENT WHERE CIF_ID=? AND PURPOSE_CODE=? AND STATUS='GRANTED'",
+          cif,
+          in.purposeCode()
+        ) > 0,
+      "CONSENT_ALREADY_ACTIVE",
+      "Withdraw the active consent before granting it again"
+    );
     db.insert(
       SchemaTable.M02_CIF_CONSENT,
       map(

@@ -360,7 +360,11 @@ public class CreditCardService {
         var result=new LinkedHashMap<>(c);var p=product(str(c,"PRODUCT_ID"),false);
         for(String key:List.of("ISSUED_DATE","EXPIRY_DATE","NEXT_STATEMENT_DATE","LAST_ACCRUAL_DATE"))result.put(key,localDate(c.get(key)));
         LocalDate asOf=today().isBefore(localDate(c.get("NEXT_STATEMENT_DATE")))?today():localDate(c.get("NEXT_STATEMENT_DATE"));
-        BigDecimal accrued=money(c,"ACCRUED_INTEREST").add(interest(money(c,"PRINCIPAL_BALANCE"),money(p,"ANNUAL_RATE_PCT"),localDate(c.get("LAST_ACCRUAL_DATE")),asOf));
+        LocalDate accrualFrom=localDate(c.get("LAST_ACCRUAL_DATE"));
+        BigDecimal projected=asOf.isAfter(accrualFrom)
+            ? interest(money(c,"PRINCIPAL_BALANCE"),money(p,"ANNUAL_RATE_PCT"),accrualFrom,asOf)
+            : ZERO;
+        BigDecimal accrued=money(c,"ACCRUED_INTEREST").add(projected);
         result.put("PRODUCT_NAME",p.get("PRODUCT_NAME"));result.put("CURRENCY_CODE","INR");result.put("ANNUAL_RATE_PCT",p.get("ANNUAL_RATE_PCT"));
         result.put("OUTSTANDING_BALANCE",balance(c));result.put("UNBILLED_INTEREST",cents(accrued).max(ZERO));
         result.put("PAYOFF_AMOUNT",balance(c).add(cents(accrued).max(ZERO)));

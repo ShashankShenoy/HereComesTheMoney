@@ -15,4 +15,12 @@ public interface ProductDefinitionsPort {
     OffsetDateTime at
   );
   Map<String, Object> historical(BigDecimal versionId);
+
+  /** Rechecks authoritative CIF facts against the approved version before adoption. */
+  void requireCustomerEligible(
+    BigDecimal productId,
+    BigDecimal versionId,
+    String cifId,
+    OffsetDateTime at
+  );
 }

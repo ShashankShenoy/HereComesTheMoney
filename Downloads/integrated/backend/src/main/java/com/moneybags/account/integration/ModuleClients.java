@@ -39,9 +39,11 @@ public class ModuleClients {
  @SuppressWarnings("unchecked")
  public ProductDecision product(long product,long version,String branch,String cif){
   String segment=(String)db.one("SELECT SEGMENT_CODE FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",cif).get("SEGMENT_CODE");
-  var definition=products.resolve(BigDecimal.valueOf(product),branch,segment,"BRANCH","INR",OffsetDateTime.now());
+  OffsetDateTime evaluatedAt=OffsetDateTime.now();
+  var definition=products.resolve(BigDecimal.valueOf(product),branch,segment,"BRANCH","INR",evaluatedAt);
   var p=(Map<String,Object>)definition.get("product");var v=(Map<String,Object>)definition.get("version");
   if(((Number)v.get("PRODUCT_VERSION_ID")).longValue()!=version) throw new ApiException(HttpStatus.CONFLICT,"VERSION_MISMATCH","Selected version is not effective");
+  products.requireCustomerEligible(BigDecimal.valueOf(product),BigDecimal.valueOf(version),cif,evaluatedAt);
   var rule=db.one("SELECT MIN_OPENING_BALANCE FROM M03_PM_ACCOUNT_RULE WHERE PRODUCT_VERSION_ID=?",version);
   return new ProductDecision(ref(),(String)p.get("PRODUCT_TYPE"),(String)p.get("CURRENCY_CODE"),(String)v.get("VERSION_STATE"),(String)v.get("RULE_SET_HASH"),(BigDecimal)rule.get("MIN_OPENING_BALANCE"));
  }
