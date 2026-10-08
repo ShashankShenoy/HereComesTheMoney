@@ -8,6 +8,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.math.BigDecimal;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -37,6 +38,22 @@ class IntegratedContextTest {
   for(String permission:List.of("ACCOUNT_READ","TXN_READ"))db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",role,permission);
   db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,STATUS,VALID_FROM) VALUES (?,?,?,'GLOBAL','ACTIVE',SYSTIMESTAMP)",UUID.randomUUID().toString(),user,role);
   return login(name);
+ }
+ @Test @Order(99) @Transactional void branchScopedAccountDirectoryScansPastOtherBranches()throws Exception{
+  String role=UUID.randomUUID().toString(),user=UUID.randomUUID().toString(),name="branch_viewer_"+UUID.randomUUID().toString().substring(0,8);
+  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,?,'Branch account viewer','ACTIVE','N')",role,"BRANCH_VIEWER_"+name);
+  db.update("INSERT INTO M01_IAM_USER(USER_ID,USERNAME,USER_TYPE,STATUS,EMPLOYEE_REF) VALUES (?,?,'EMPLOYEE','ACTIVE','TEST')",user,name);
+  db.update("INSERT INTO M01_IAM_CREDENTIAL(CREDENTIAL_ID,USER_ID,PASSWORD_HASH,HASH_SCHEME,STATUS) VALUES (?,?,?,'BCRYPT','ACTIVE')",UUID.randomUUID().toString(),user,passwords.encode("LocalBanking!2026"));
+  db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE='ACCOUNT_READ'",role);
+  db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,SCOPE_REF,STATUS,VALID_FROM) VALUES (?,?,?,'BRANCH','TEST001','ACTIVE',SYSTIMESTAMP)",UUID.randomUUID().toString(),user,role);
+  for(int i=0;i<200;i++)db.update("INSERT INTO M04_BANK_ACCOUNT(ACCOUNT_NUMBER,PRIMARY_CIF_ID,PRODUCT_ID,PRODUCT_VERSION_ID,BRANCH_CODE,OPEN_REQUEST_ID,CREATED_BY_USER_ID) VALUES (?,?,1,1,'MUM001',?,?)",
+      "TEST"+UUID.randomUUID().toString().substring(0,12),"demo-cif-1",UUID.randomUUID().toString(),user);
+  db.update("INSERT INTO M04_BANK_ACCOUNT(ACCOUNT_NUMBER,PRIMARY_CIF_ID,PRODUCT_ID,PRODUCT_VERSION_ID,BRANCH_CODE,OPEN_REQUEST_ID,CREATED_BY_USER_ID) VALUES (?,?,1,1,'TEST001',?,?)",
+      "TEST"+UUID.randomUUID().toString().substring(0,12),"demo-cif-1",UUID.randomUUID().toString(),user);
+  String token=login(name);
+  var accounts=value(mvc.perform(get("/api/v1/banking/accounts").header("Authorization","Bearer "+token)).andExpect(status().isOk()));
+  assertEquals(1,accounts.size());
+  assertEquals("TEST001",accounts.get(0).path("BRANCH_CODE").asText());
  }
  @Test @Order(1) void unifiedRoutesAndAuthentication()throws Exception{
   mvc.perform(get("/actuator/health")).andExpect(status().isOk());

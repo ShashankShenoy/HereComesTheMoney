@@ -16,10 +16,22 @@ public class BankingController {
  }
  @GetMapping("/accounts") public List<Map<String,Object>> accounts(){
   var actor=CurrentActor.get();
-  var rows="CUSTOMER".equals(actor.userType())
-   ?db.rows("SELECT DISTINCT A.ACCOUNT_ID,A.ACCOUNT_NUMBER,A.PRIMARY_CIF_ID,A.BRANCH_CODE,A.PRODUCT_VERSION_ID,A.ACCOUNT_STATUS,A.ACCOUNT_OPERATION_MODE,A.CURRENCY_CODE,A.CREATED_BY_USER_ID,R.PRODUCT_TYPE,R.PRODUCT_NAME FROM M04_BANK_ACCOUNT A JOIN M03_PM_PRODUCT R ON R.PRODUCT_ID=A.PRODUCT_ID JOIN M04_ACCOUNT_PARTY P ON P.ACCOUNT_ID=A.ACCOUNT_ID JOIN M01_IAM_CUSTOMER_LINK L ON L.CIF_ID=P.CIF_ID WHERE L.USER_ID=? AND L.STATUS='ACTIVE' AND L.VALID_FROM<=SYSTIMESTAMP AND (L.VALID_TO IS NULL OR L.VALID_TO>SYSTIMESTAMP) AND P.IS_ACTIVE='Y' AND P.PARTY_ROLE IN ('PRIMARY_HOLDER','JOINT_HOLDER','AUTHORIZED_SIGNATORY','GUARDIAN') AND P.EFFECTIVE_FROM<=SYSDATE AND (P.EFFECTIVE_TO IS NULL OR P.EFFECTIVE_TO>SYSDATE) ORDER BY A.ACCOUNT_ID FETCH FIRST 200 ROWS ONLY",actor.userId())
-   :db.rows("SELECT A.ACCOUNT_ID,A.ACCOUNT_NUMBER,A.PRIMARY_CIF_ID,A.BRANCH_CODE,A.PRODUCT_VERSION_ID,A.ACCOUNT_STATUS,A.CURRENCY_CODE,R.PRODUCT_TYPE,R.PRODUCT_NAME FROM M04_BANK_ACCOUNT A JOIN M03_PM_PRODUCT R ON R.PRODUCT_ID=A.PRODUCT_ID ORDER BY A.ACCOUNT_ID FETCH FIRST 200 ROWS ONLY");
-  return rows.stream().filter(r->{try{access.account("ACCOUNT_READ",((Number)r.get("ACCOUNT_ID")).longValue());return true;}catch(com.moneybags.common.api.BusinessException e){return false;}}).toList();
+  boolean customer="CUSTOMER".equals(actor.userType());
+  String sql=customer
+   ?"SELECT DISTINCT A.ACCOUNT_ID,A.ACCOUNT_NUMBER,A.PRIMARY_CIF_ID,A.BRANCH_CODE,A.PRODUCT_VERSION_ID,A.ACCOUNT_STATUS,A.ACCOUNT_OPERATION_MODE,A.CURRENCY_CODE,A.CREATED_BY_USER_ID,R.PRODUCT_TYPE,R.PRODUCT_NAME FROM M04_BANK_ACCOUNT A JOIN M03_PM_PRODUCT R ON R.PRODUCT_ID=A.PRODUCT_ID JOIN M04_ACCOUNT_PARTY P ON P.ACCOUNT_ID=A.ACCOUNT_ID JOIN M01_IAM_CUSTOMER_LINK L ON L.CIF_ID=P.CIF_ID WHERE L.USER_ID=? AND L.STATUS='ACTIVE' AND L.VALID_FROM<=SYSTIMESTAMP AND (L.VALID_TO IS NULL OR L.VALID_TO>SYSTIMESTAMP) AND P.IS_ACTIVE='Y' AND P.PARTY_ROLE IN ('PRIMARY_HOLDER','JOINT_HOLDER','AUTHORIZED_SIGNATORY','GUARDIAN') AND P.EFFECTIVE_FROM<=SYSDATE AND (P.EFFECTIVE_TO IS NULL OR P.EFFECTIVE_TO>SYSDATE) AND A.ACCOUNT_ID>? ORDER BY A.ACCOUNT_ID FETCH FIRST 200 ROWS ONLY"
+   :"SELECT A.ACCOUNT_ID,A.ACCOUNT_NUMBER,A.PRIMARY_CIF_ID,A.BRANCH_CODE,A.PRODUCT_VERSION_ID,A.ACCOUNT_STATUS,A.CURRENCY_CODE,R.PRODUCT_TYPE,R.PRODUCT_NAME FROM M04_BANK_ACCOUNT A JOIN M03_PM_PRODUCT R ON R.PRODUCT_ID=A.PRODUCT_ID WHERE A.ACCOUNT_ID>? ORDER BY A.ACCOUNT_ID FETCH FIRST 200 ROWS ONLY";
+  var authorized=new ArrayList<Map<String,Object>>();long afterId=0;
+  while(authorized.size()<200){
+   var rows=customer?db.rows(sql,actor.userId(),afterId):db.rows(sql,afterId);
+   if(rows.isEmpty())break;
+   for(var row:rows){
+    long id=((Number)row.get("ACCOUNT_ID")).longValue();afterId=id;
+    try{access.account("ACCOUNT_READ",id);authorized.add(row);}catch(com.moneybags.common.api.BusinessException denied){/* continue to the next scoped account */}
+    if(authorized.size()==200)break;
+   }
+   if(rows.size()<200)break;
+  }
+  return authorized;
  }
  @GetMapping("/my-dashboard") public Map<String,Object> myDashboard(){
   var actor=CurrentActor.get();
@@ -162,5 +174,18 @@ public class BankingController {
   return Map.of("journal",journal,"control",control,"lines",lines);
  }
  @GetMapping("/audit") public List<Map<String,Object>> audit(){access.global("IAM_AUDIT_READ");return db.rows("SELECT * FROM MBX_AUDIT ORDER BY OCCURRED_AT DESC FETCH FIRST 100 ROWS ONLY");}
- @GetMapping("/facilities") public List<Map<String,Object>> facilities(){return db.rows("SELECT FACILITY_ID,FACILITY_NUMBER,PRIMARY_CIF_ID,BRANCH_CODE,STATUS FROM M08_LOAN_FACILITY ORDER BY FACILITY_ID DESC FETCH FIRST 100 ROWS ONLY").stream().filter(f->{try{access.facility("LOAN_READ",((Number)f.get("FACILITY_ID")).longValue());return true;}catch(com.moneybags.common.api.BusinessException e){return false;}}).toList();}
+ @GetMapping("/facilities") public List<Map<String,Object>> facilities(){
+  var authorized=new ArrayList<Map<String,Object>>();long beforeId=Long.MAX_VALUE;
+  while(authorized.size()<100){
+   var rows=db.rows("SELECT FACILITY_ID,FACILITY_NUMBER,PRIMARY_CIF_ID,BRANCH_CODE,STATUS FROM M08_LOAN_FACILITY WHERE FACILITY_ID<? ORDER BY FACILITY_ID DESC FETCH FIRST 100 ROWS ONLY",beforeId);
+   if(rows.isEmpty())break;
+   for(var row:rows){
+    long id=((Number)row.get("FACILITY_ID")).longValue();beforeId=id;
+    try{access.facility("LOAN_READ",id);authorized.add(row);}catch(com.moneybags.common.api.BusinessException denied){/* continue to the next scoped facility */}
+    if(authorized.size()==100)break;
+   }
+   if(rows.size()<100)break;
+  }
+  return authorized;
+ }
 }

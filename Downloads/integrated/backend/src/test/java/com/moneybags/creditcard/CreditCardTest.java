@@ -77,6 +77,16 @@ class CreditCardTest {
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
     }
 
+    @Test void customerDirectoriesRespectCurrentCifAndExecutePagedQueries()throws Exception{
+        for(String token:List.of(customer,other)){
+            var applications=value(mvc.perform(get("/api/v1/credit-cards/applications").header("Authorization","Bearer "+token)).andExpect(status().isOk()));
+            var cards=value(mvc.perform(get("/api/v1/credit-cards").header("Authorization","Bearer "+token)).andExpect(status().isOk()));
+            String cif=token.equals(customer)?"demo-cif-1":"demo-cif-2";
+            for(var application:applications)assertEquals(cif,application.path("CIF_ID").asText());
+            for(var card:cards)assertEquals(cif,card.path("CIF_ID").asText());
+        }
+    }
+
     @Test void productTermsApprovalAndApplicationGuards()throws Exception{
         mvc.perform(get("/api/v1/credit-cards/products")).andExpect(status().isUnauthorized());
         var r=product("24");send("/products",customer,r).andExpect(status().isForbidden());
