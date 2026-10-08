@@ -24,6 +24,19 @@ public class LoanController {
         return ApiResponse.of(loans.applications(actor,branch,status,limit));
     }
 
+    /** Lists only applications belonging to an authenticated customer's active CIF links. */
+    @GetMapping("/my/applications")
+    public ApiResponse<List<Application>> myApplications(@AuthenticationPrincipal UserPrincipal actor){
+        return ApiResponse.of(loans.myApplications(actor));
+    }
+
+    /** Submits a customer application without accepting client-supplied branch or channel. */
+    @PostMapping("/my/applications")
+    public ApiResponse<Application> apply(@AuthenticationPrincipal UserPrincipal actor,
+        @RequestHeader("Idempotency-Key") String key,@Valid @RequestBody SelfApplication body){
+        return ApiResponse.of(loans.apply(actor,body,key));
+    }
+
     /** Starts a draft with an idempotency key. */
     @PostMapping("/applications")
     public ApiResponse<Application> create(@AuthenticationPrincipal UserPrincipal actor,

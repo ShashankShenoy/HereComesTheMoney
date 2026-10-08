@@ -12,6 +12,11 @@ public final class LoanDtos {
         @NotBlank @Size(max=80) String branchCode,@NotBlank @Size(max=20) String channelCode,
         @NotNull @DecimalMin("0.01") BigDecimal amount,@NotNull @Min(1) @Max(9999) Integer tenureMonths,
         @NotBlank @Size(max=40) String purposeCode) {}
+    /** Customer input excludes branch and channel; the service derives both from the linked CIF. */
+    public record SelfApplication(@NotBlank @Size(max=36) String cifId,
+        @NotNull @Positive Long productId,@NotNull @Positive Long productVersionId,
+        @NotNull @DecimalMin("0.01") BigDecimal amount,@NotNull @Min(1) @Max(9999) Integer tenureMonths,
+        @NotBlank @Size(max=40) String purposeCode) {}
     public record Application(long id,String number,String cifId,long productId,long productVersionId,
         BigDecimal amount,int tenureMonths,String purposeCode,String branchCode,String status,
         Long revisionId,String assignedTo,OffsetDateTime createdAt) {}

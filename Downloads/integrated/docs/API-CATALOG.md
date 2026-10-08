@@ -29,6 +29,12 @@ Generated from the running assembled backend on 2026-10-05. All API paths below 
 | POST | `/api/v1/accounts/{id}/restrictions` | Request a restriction; effective only after Module 5 acknowledgement |
 | POST | `/api/v1/accounts/{id}/restrictions/{restrictionId}/release` | Request release of an active restriction |
 | GET | `/api/v1/accounts/{id}/{collection}` | List parties, nominees, restrictions, limits, history, or workflow records |
+| GET | `/api/v1/deposit-interest/accounts/{id}` | View credited monthly savings interest with account access checks |
+| POST | `/api/v1/deposit-interest/runs?period=YYYY-MM` | Admin posts or retries a completed savings interest month |
+| GET | `/api/v1/term-deposits/my` | Customer lists their fixed deposit contracts |
+| GET | `/api/v1/term-deposits/{id}` | Customer views an owned fixed deposit; admin may inspect it |
+| POST | `/api/v1/term-deposits` | Customer funds a fixed deposit from an active owned account |
+| POST | `/api/v1/term-deposits/{id}/mature` | Admin retries a due fixed deposit payout |
 | GET | `/api/v1/approvals` | List approval tasks |
 | POST | `/api/v1/approvals` | Request maker-checker approval |
 | POST | `/api/v1/approvals/{id}/decision` | Decide approval |

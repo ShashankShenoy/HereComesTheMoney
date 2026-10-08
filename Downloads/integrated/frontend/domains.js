@@ -525,7 +525,7 @@ async function versionView() {
   return organizePanels(html, "version", [
     ["overview", "Version", ["Version governance", "Approval history"]],
     ["pricing", "Pricing rules", ["Interest", "Tiers", "Fees", "Penalties", "Allocation"]],
-    ["controls", "Eligibility and controls", ["Eligibility", "Account", "Loan", "Transactions", "Overrides", "Balance", "Limits", "Availability"]],
+    ["controls", "Eligibility and controls", ["Eligibility", "Account", "Loan", "Term", "Transactions", "Overrides", "Balance", "Limits", "Availability"]],
   ]);
 }
 
@@ -607,6 +607,7 @@ function ruleHelp(code) {
       account:
         "Flags Y/N. Minor allowance needs a daily limit. Non-joint products need exactly one holder.",
       loan: "Enter the permitted loan category, repayment frequency, amortization method and disbursement terms.",
+      term: "Set the minimum and maximum principal and tenure for fixed deposits. The fixed interest rule must pay at maturity.",
       transactions: "Direction DEBIT/CREDIT/BOTH; action ALLOW/BLOCK.",
       overrides:
         "Rule family uses the catalogue family code, such as interest. Reference an existing rule code and numeric field.",

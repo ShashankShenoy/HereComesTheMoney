@@ -22,7 +22,7 @@ public class CustomerSignupService {
     private static final List<String> CUSTOMER_PERMISSIONS=List.of(
         "ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE",
         "STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW",
-        "FX_READ","LOAN_READ","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY");
+        "FX_READ","LOAN_READ","LOAN_APPLY","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY");
     private final JdbcTemplate jdbc;
     private final SchemaRepository schema;
     private final PasswordEncoder passwords;
@@ -87,23 +87,41 @@ public class CustomerSignupService {
             String role=(String)roles.get(0).get("ROLE_ID");
             var granted=jdbc.queryForList("SELECT P.PERMISSION_CODE FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE RP.ROLE_ID=?",String.class,role);
             if(!CUSTOMER_PERMISSIONS.containsAll(granted))
-                throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Customer role needs review before public signup");
-            for(String permission:CUSTOMER_PERMISSIONS){
-                if(granted.contains(permission))continue;
-                var ids=jdbc.queryForList("SELECT PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",String.class,permission);
-                if(ids.isEmpty())throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Customer permissions are not installed");
-                schema.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",role,"PERMISSION_ID",ids.get(0)));
-            }
+                return dedicatedSignupRole();
+            grantMissingCustomerPermissions(role,granted);
             return role;
         }
+        return createCustomerRole("RETAIL_CUSTOMER");
+    }
+
+    /** Keep public signup scoped when staff have added wider grants to the retail role. */
+    private String dedicatedSignupRole(){
+        var roles=jdbc.queryForList("SELECT ROLE_ID,STATUS FROM M01_IAM_ROLE WHERE ROLE_CODE='RETAIL_CUSTOMER_SIGNUP'");
+        if(roles.isEmpty())return createCustomerRole("RETAIL_CUSTOMER_SIGNUP");
+        if(!"ACTIVE".equals(roles.get(0).get("STATUS")))
+            throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Signup role is unavailable");
+        String role=(String)roles.get(0).get("ROLE_ID");
+        var granted=jdbc.queryForList("SELECT P.PERMISSION_CODE FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE RP.ROLE_ID=?",String.class,role);
+        if(!CUSTOMER_PERMISSIONS.containsAll(granted))
+            throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Signup role needs review");
+        grantMissingCustomerPermissions(role,granted);
+        return role;
+    }
+
+    private String createCustomerRole(String code){
         String role=UUID.randomUUID().toString();
-        schema.insert(SchemaTable.M01_IAM_ROLE,map("ROLE_ID",role,"ROLE_CODE","RETAIL_CUSTOMER",
+        schema.insert(SchemaTable.M01_IAM_ROLE,map("ROLE_ID",role,"ROLE_CODE",code,
             "DISPLAY_NAME","Retail customer","STATUS","ACTIVE","SENSITIVE_FLAG","N"));
+        grantMissingCustomerPermissions(role,List.of());
+        return role;
+    }
+
+    private void grantMissingCustomerPermissions(String role,List<String> granted){
         for(String permission:CUSTOMER_PERMISSIONS){
+            if(granted.contains(permission))continue;
             var ids=jdbc.queryForList("SELECT PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",String.class,permission);
             if(ids.isEmpty())throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Customer permissions are not installed");
             schema.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",role,"PERMISSION_ID",ids.get(0)));
         }
-        return role;
     }
 }
