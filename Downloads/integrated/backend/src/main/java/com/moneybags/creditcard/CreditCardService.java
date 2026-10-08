@@ -97,8 +97,14 @@ public class CreditCardService {
 
     public List<Map<String,Object>> applications() {
         CurrentActor.require("CC_READ");
-        return db.rows("SELECT A.*,P.PRODUCT_NAME FROM M11_CC_APPLICATION A JOIN M11_CC_PRODUCT P ON P.PRODUCT_ID=A.PRODUCT_ID ORDER BY A.CREATED_AT DESC FETCH FIRST 500 ROWS ONLY")
-            .stream().filter(a->allowed(a,"CC_READ")).limit(100).toList();
+        var visible=new ArrayList<Map<String,Object>>();int offset=0;
+        while(visible.size()<100){
+            var rows=db.rows("SELECT A.*,P.PRODUCT_NAME FROM M11_CC_APPLICATION A JOIN M11_CC_PRODUCT P ON P.PRODUCT_ID=A.PRODUCT_ID ORDER BY A.CREATED_AT DESC,A.APPLICATION_ID DESC OFFSET ? ROWS FETCH NEXT 500 ROWS ONLY",offset);
+            for(var row:rows)if(allowed(row,"CC_READ")){visible.add(row);if(visible.size()==100)break;}
+            if(rows.size()<500)break;
+            offset+=rows.size();
+        }
+        return visible;
     }
 
     @Transactional
@@ -156,8 +162,14 @@ public class CreditCardService {
 
     public List<Map<String,Object>> cards() {
         CurrentActor.require("CC_READ");
-        return db.rows("SELECT C.*,P.PRODUCT_NAME FROM M11_CC_CARD C JOIN M11_CC_PRODUCT P ON P.PRODUCT_ID=C.PRODUCT_ID ORDER BY C.ISSUED_DATE DESC,C.CARD_ID FETCH FIRST 500 ROWS ONLY")
-            .stream().filter(c->allowed(c,"CC_READ")).limit(100).map(this::cardView).toList();
+        var visible=new ArrayList<Map<String,Object>>();int offset=0;
+        while(visible.size()<100){
+            var rows=db.rows("SELECT C.*,P.PRODUCT_NAME FROM M11_CC_CARD C JOIN M11_CC_PRODUCT P ON P.PRODUCT_ID=C.PRODUCT_ID ORDER BY C.ISSUED_DATE DESC,C.CARD_ID OFFSET ? ROWS FETCH NEXT 500 ROWS ONLY",offset);
+            for(var row:rows)if(allowed(row,"CC_READ")){visible.add(cardView(row));if(visible.size()==100)break;}
+            if(rows.size()<500)break;
+            offset+=rows.size();
+        }
+        return visible;
     }
 
     public Map<String,Object> card(String id) {
