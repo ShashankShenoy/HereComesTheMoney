@@ -6,6 +6,7 @@ import com.moneybags.iam.dto.IamDtos.AuthorizationInput;
 import com.moneybags.iam.security.UserPrincipal;
 import com.moneybags.iam.service.AccessDecisionService;
 import com.moneybags.loan.LoanDtos.*;
+import com.moneybags.product.service.ProductDefinitionsPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -25,9 +26,11 @@ public class LoanService {
     private final AccessDecisionService access;
     private final JsonMapper json;
     private final Clock clock;
+    private final ProductDefinitionsPort products;
 
-    public LoanService(JdbcTemplate db, AccessDecisionService access, JsonMapper json, Clock clock) {
-        this.db=db; this.access=access; this.json=json; this.clock=clock;
+    public LoanService(JdbcTemplate db, AccessDecisionService access, JsonMapper json, Clock clock,
+                       ProductDefinitionsPort products) {
+        this.db=db; this.access=access; this.json=json; this.clock=clock; this.products=products;
     }
 
     /** Returns a bounded, branch-scoped operations queue. */
@@ -169,6 +172,8 @@ public class LoanService {
               AND A.OFFER_FROM_AT<=SYSTIMESTAMP AND (A.OFFER_TO_AT IS NULL OR A.OFFER_TO_AT>SYSTIMESTAMP)
             """,Long.class,input.cifId(),input.productVersionId(),input.branchCode(),input.channelCode());
         if(offered==null||offered==0)throw conflict("PRODUCT_NOT_OFFERED","Product is not offered for this customer, branch and channel");
+        products.requireCustomerEligible(BigDecimal.valueOf(input.productId()),BigDecimal.valueOf(input.productVersionId()),
+            input.cifId(),OffsetDateTime.now(clock));
         Map<String,Object> rule=rules.get(0);
         if(rule.get("RULE_SET_HASH")==null)throw conflict("PRODUCT_RULE_HASH_MISSING","Product version lacks an approved rule hash");
         if(input.amount().compareTo((BigDecimal)rule.get("MIN_LOAN_AMOUNT"))<0||input.amount().compareTo((BigDecimal)rule.get("MAX_LOAN_AMOUNT"))>0

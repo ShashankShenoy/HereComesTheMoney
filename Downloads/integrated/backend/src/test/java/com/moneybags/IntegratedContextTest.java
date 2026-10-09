@@ -801,4 +801,70 @@ class IntegratedContextTest {
     .andExpect(status().isForbidden());
  }
 
+ @Test @Order(30) @Transactional void approvedProductEligibilityIsEnforcedAtEveryAdoptionBoundary() throws Exception {
+  String customer=login("customer");
+  for(long version:List.of(1L,2L,3L))db.update(
+    "INSERT INTO M03_PM_ELIGIBILITY_RULE(PRODUCT_VERSION_ID,RULE_CODE,ATTRIBUTE_CODE,OPERATOR_CODE,VALUE_TYPE,VALUE_NUMBER,FAILURE_REASON_CODE,SEQUENCE_NO) VALUES (?,'AGE_120','AGE','GE','NUMBER',120,'CUSTOMER_AGE_NOT_ELIGIBLE',1)",version);
+  var offers=value(mvc.perform(get("/api/v1/products/customer-offers?cifId=demo-cif-1&channel=WEB&currency=INR")
+    .header("Authorization","Bearer "+customer)).andExpect(status().isOk())).path("data");
+  for(JsonNode offer:offers)assertNotEquals(1,offer.path("product").path("PRODUCT_ID").asInt());
+  int accounts=db.queryForObject("SELECT COUNT(*) FROM M04_BANK_ACCOUNT",Integer.class);
+  send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),"cifId","demo-cif-1",
+    "productId",1,"productVersionId",1)).andExpect(status().isConflict());
+  assertEquals(accounts,db.queryForObject("SELECT COUNT(*) FROM M04_BANK_ACCOUNT",Integer.class));
+  int loans=db.queryForObject("SELECT COUNT(*) FROM M08_LOAN_APPLICATION",Integer.class);
+  send("/loans/my/applications",customer,Map.of("cifId","demo-cif-1","productId",2,
+    "productVersionId",2,"amount","12000","tenureMonths",12,"purposeCode","PERSONAL"))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CUSTOMER_NOT_ELIGIBLE"));
+  assertEquals(loans,db.queryForObject("SELECT COUNT(*) FROM M08_LOAN_APPLICATION",Integer.class));
+  int deposits=db.queryForObject("SELECT COUNT(*) FROM MBX_TERM_DEPOSIT",Integer.class);
+  send("/term-deposits",customer,Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,
+    "amount","1000.00","tenureMonths",12,"requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CUSTOMER_NOT_ELIGIBLE"));
+  assertEquals(deposits,db.queryForObject("SELECT COUNT(*) FROM MBX_TERM_DEPOSIT",Integer.class));
+ }
+
+ @Test @Order(31) @Transactional void cifClosureCleansOpenReviewStateAndRejectsOutstandingLoans() throws Exception {
+  String admin=login("admin");
+  JsonNode created=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Closure Test",
+    "dateOfBirth","1990-01-01","homeBranchRef","MUM001","segmentCode","RETAIL")).andExpect(status().isOk())).path("data");
+  String cif=created.path("customer").path("CIF_ID").asText();
+  long rowVersion=created.path("customer").path("ROW_VERSION").asLong();
+  var consent=Map.of("purposeCode","MARKETING","captureChannel","BRANCH","evidenceRef","TEST-CONSENT");
+  send("/cif/customers/"+cif+"/consents",admin,consent).andExpect(status().isOk());
+  send("/cif/customers/"+cif+"/consents",admin,consent).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("CONSENT_ALREADY_ACTIVE"));
+  mvc.perform(patch("/api/v1/cif/customers/"+cif+"/status").header("Authorization","Bearer "+admin)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",rowVersion,
+      "status","CLOSED","reason","Customer requested closure"))))
+    .andExpect(status().isOk());
+  assertEquals("EXPIRED",db.queryForObject("SELECT STATUS FROM M02_KYC_CASE WHERE CIF_ID=?",String.class,cif));
+  assertEquals("WITHDRAWN",db.queryForObject("SELECT STATUS FROM M02_CIF_CONSENT WHERE CIF_ID=?",String.class,cif));
+  assertEquals("REJECTED",db.queryForObject("SELECT VERIFICATION_STATUS FROM M02_CIF_NAME N JOIN M02_CIF_CUSTOMER C ON C.PARTY_ID=N.PARTY_ID WHERE C.CIF_ID=?",String.class,cif));
+
+  JsonNode depositCustomer=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Deposit Closure Test",
+    "dateOfBirth","1990-01-01","homeBranchRef","MUM001","segmentCode","RETAIL")).andExpect(status().isOk())).path("data");
+  String depositCif=depositCustomer.path("customer").path("CIF_ID").asText();
+  long depositVersion=depositCustomer.path("customer").path("ROW_VERSION").asLong();
+  db.update("INSERT INTO MBX_TERM_DEPOSIT(REQUEST_KEY,PRIMARY_CIF_ID,FUNDING_ACCOUNT_ID,PRODUCT_ID,PRODUCT_VERSION_ID,PRINCIPAL,TENURE_MONTHS,ANNUAL_RATE_PCT,DAY_COUNT_BASIS,ROUNDING_MODE,START_DATE,MATURITY_DATE,MATURITY_INTEREST,FUNDING_JOURNAL_ID) VALUES (?,?,1,3,3,1000,12,6.5,'ACT_365','HALF_EVEN',DATE '2026-01-01',DATE '2027-01-01',65,1)",
+    UUID.randomUUID().toString(),depositCif);
+  mvc.perform(patch("/api/v1/cif/customers/"+depositCif+"/status").header("Authorization","Bearer "+admin)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",depositVersion,
+      "status","CLOSED","reason","Attempted closure"))))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("OPEN_TERM_DEPOSITS"));
+
+  String party=UUID.randomUUID().toString(),loanCif=UUID.randomUUID().toString();
+  String adminId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  db.update("INSERT INTO M02_CIF_PARTY(PARTY_ID,PARTY_TYPE,DATE_OF_BIRTH) VALUES (?,'INDIVIDUAL',DATE '1990-01-01')",party);
+  db.update("INSERT INTO M02_CIF_CUSTOMER(CIF_ID,CIF_NUMBER,PARTY_ID,STATUS,HOME_BRANCH_REF,KYC_STATUS,RISK_LEVEL) VALUES (?,?,?,'ACTIVE','MUM001','VERIFIED','LOW')",
+    loanCif,"TEST-"+UUID.randomUUID().toString().substring(0,20),party);
+  db.update("INSERT INTO M08_LOAN_APPLICATION(APPLICATION_NUMBER,PRIMARY_CIF_ID,PRODUCT_ID,PRODUCT_VERSION_ID,PRODUCT_RULE_SET_HASH,BRANCH_CODE,CHANNEL_CODE,REQUESTED_AMOUNT,REQUESTED_TENURE_MONTHS,LOAN_PURPOSE_CODE,CREATED_BY_USER_ID,CORRELATION_ID) VALUES (?,?,2,2,?,'MUM001','BRANCH',12000,12,'PERSONAL',?,?)",
+    "TEST-"+UUID.randomUUID().toString().substring(0,20),loanCif,"c".repeat(64),adminId,UUID.randomUUID().toString());
+  mvc.perform(patch("/api/v1/cif/customers/"+loanCif+"/status").header("Authorization","Bearer "+admin)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",1,
+      "status","CLOSED","reason","Attempted closure"))))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("OPEN_LOANS"));
+  assertEquals("ACTIVE",db.queryForObject("SELECT STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,loanCif));
+ }
+
 }

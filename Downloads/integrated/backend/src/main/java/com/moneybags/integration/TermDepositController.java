@@ -120,6 +120,8 @@ public class TermDepositController {
         if(!"DEPOSIT".equals(product.get("PRODUCT_TYPE")) ||
            BusinessRepository.number(version,"PRODUCT_VERSION_ID")!=request.productVersionId())
             throw fail("Choose an active fixed deposit product and version");
+        products.requireCustomerEligible(BigDecimal.valueOf(request.productId()),
+                BigDecimal.valueOf(request.productVersionId()),cif,OffsetDateTime.now());
         var term=db.one("SELECT * FROM M03_PM_TERM_DEPOSIT_RULE WHERE PRODUCT_VERSION_ID=?",request.productVersionId());
         if(request.amount().compareTo((BigDecimal)term.get("MIN_DEPOSIT_AMOUNT"))<0 ||
            request.amount().compareTo((BigDecimal)term.get("MAX_DEPOSIT_AMOUNT"))>0 ||
