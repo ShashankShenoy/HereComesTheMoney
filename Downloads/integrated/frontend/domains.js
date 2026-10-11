@@ -79,7 +79,7 @@ const details = (row) => {
   const render = ([key, value]) => {
     const kind = fieldKind(key);
     const formatted = kind === "amount" ? formatAmount(value, rowCurrency(row, key)) : kind === "date" ? formatDate(value) : value ?? "—";
-    return `<div><dt>${esc(label(key))}</dt><dd>${kind === "status" && value != null ? badge(value) : esc(formatted)}</dd></div>`;
+    return `<div><dt>${esc(label(key))}</dt><dd${kind === "amount" ? ' class="amount-value"' : ''}>${kind === "status" && value != null ? badge(value) : esc(formatted)}</dd></div>`;
   };
   return `<dl class="details">${primary.map(render).join("")}</dl>` +
     (remaining.length ? `<details class="record-metadata"><summary>Additional record fields</summary><dl class="details">${remaining.map(render).join("")}</dl></details>` : "");

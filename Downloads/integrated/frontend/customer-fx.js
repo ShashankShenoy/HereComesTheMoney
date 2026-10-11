@@ -1,6 +1,6 @@
 import {api,getSession} from './api.js';
 import {esc,field,select,errorText} from './ui.js';
-import {formatAmount,formatDate} from './presentation.js';
+import {formatAmount,formatDecimal,formatDate} from './presentation.js';
 
 let currencies=[],rates=[],actorId;
 
@@ -35,7 +35,7 @@ export function bindCustomerFx(){
     button.disabled=true;
     try{
       const value=await api('/fx/quote?'+new URLSearchParams({base,quote,amount}));
-      result.innerHTML=`<div class="notice"><strong>${esc(formatAmount(amount,base))} ≈ ${esc(formatAmount(value.amount,quote))}</strong><br>Reference rate: ${esc(value.rate)}${value.reciprocal?' (calculated from the approved reverse rate)':''} · Source: ${esc(value.source)} · Valid until: ${esc(formatDate(value.validUntil))}<br>This amount is indicative. You cannot accept or transfer this quote.</div>`;
+      result.innerHTML=`<div class="notice"><strong class="amount-value">${esc(formatAmount(amount,base))} ≈ ${esc(formatAmount(value.amount,quote))}</strong><br>Reference rate: <span class="numeric-value">${esc(formatDecimal(value.rate))}</span>${value.reciprocal?' (calculated from the approved reverse rate)':''} · Source: ${esc(value.source)} · Valid until: ${esc(formatDate(value.validUntil))}<br>This amount is indicative. You cannot accept or transfer this quote.</div>`;
     }catch(e){error.textContent=errorText(e);}finally{button.disabled=false;}
   };
 }

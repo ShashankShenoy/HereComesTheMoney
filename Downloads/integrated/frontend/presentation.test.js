@@ -15,5 +15,8 @@ test('keeps dates and financial fields distinct from identifiers',()=>{
   assert.equal(fieldKind('MAX_AMOUNT'),'amount');
   assert.equal(fieldKind('CREATED_AT'),'date');
   assert.equal(fieldKind('ACCOUNT_ID'),'text');
+  assert.equal(fieldKind('DEBIT_TOTAL'),'amount');
+  assert.equal(fieldKind('LEDGER_RECEIVABLE'),'amount');
+  assert.equal(fieldKind('VALUE_DATE'),'date');
   assert.equal(rowCurrency({CURRENCY_CODE:'USD'},'AMOUNT'),'USD');
 });

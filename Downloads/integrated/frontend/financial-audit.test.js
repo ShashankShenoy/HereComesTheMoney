@@ -11,11 +11,12 @@ const auditFunctions=app.slice(app.indexOf('async function audit(){'),app.indexO
 const helpers=[
  ui.slice(ui.indexOf('export const esc='),ui.indexOf('export const date=')),
  ui.slice(ui.indexOf('export const badge='),ui.indexOf('export const field=')),
+ ui.slice(ui.indexOf('const numericColumn='),ui.indexOf('export function table(')),
  ui.slice(ui.indexOf('export function table('),ui.indexOf('export const action=')),
  ui.slice(ui.indexOf('export const field='),ui.indexOf('export const select='))
 ].map(source=>source.replace('export ','')).join('\n');
-const load=api=>vm.runInNewContext(helpers+'\n'+auditFunctions+'\n({audit,financialAuditTable,financialAuditQuery})',{
- api,formatAmount,URLSearchParams,date:formatDate,userName:id=>id,errorText:error=>error.message,
+const load=api=>vm.runInNewContext(helpers+'\n'+auditFunctions+'\n({audit,financialAuditTable,financialAuditQuery,table})',{
+ api,formatAmount,URLSearchParams,date:formatDate,t:value=>value,userName:id=>id,errorText:error=>error.message,
  head:title=>`<h1>${title}</h1>`,panel:(title,body)=>`<section><h2>${title}</h2>${body}</section>`
 });
 const event={transactionId:123,type:'INTERNAL_TRANSFER',sourceAccountId:3,sourceAccountEnding:'0001',
@@ -27,8 +28,18 @@ test('financial audit displays source, destination and amount for every audit re
  assert.ok(html.includes('From account')&&html.includes('To account'));
  assert.ok(html.indexOf('Account #3')<html.indexOf('Account #4'));
  assert.ok(html.includes('Ending 0001')&&html.includes('Ending 0002')&&html.includes('INR 125.50'));
+ assert.match(html,/<th class="numeric">Amount<\/th>/);
+ assert.match(html,/<td class="numeric">INR 125\.50<\/td>/);
+ assert.ok(!html.includes('<th class="numeric">From account</th>'));
  assert.ok(!html.includes('Protected'));
  assert.ok(html.includes('&lt;script&gt;')&&!html.includes('<script>'));
+});
+
+test('money and rate columns align without treating dates or account numbers as amounts',()=>{
+ const html=load().table(['Account number','Value date','Value','Debit','Credit','Outstanding','Unpaid minimum','APR'],[['00001234','11-Oct-2026','ACTIVE','INR 1,000.00','—','INR 50.00','INR 10.00','12.5%']],'No records',{mobileCards:true});
+ for(const header of ['Debit','Credit','Outstanding','Unpaid minimum','APR'])assert.ok(html.includes(`<th class="numeric">${header}</th>`));
+ assert.ok(html.includes('<td class="numeric" data-label="Debit">INR 1,000.00</td>'));
+ assert.ok(html.includes('<th>Account number</th>')&&html.includes('<th>Value date</th>')&&html.includes('<th>Value</th>'));
 });
 
 test('financial audit displays reversal references, exact authorized amounts and empty/one-sided states',()=>{

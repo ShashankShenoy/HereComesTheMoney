@@ -37,7 +37,7 @@ export function formatDate(value){
 export function fieldKind(key){
   const normalized=String(key).replace(/[_\s-]/g,'').toLowerCase();
   if(/(?:date|time|at|from|to|until|expires|expiry|maturity)$/.test(normalized)&&!/(?:status|rate|format|data)$/.test(normalized))return 'date';
-  if(/(?:amount|balance|posted|spendable|principal|interestdue|feeamount|limit|availablefunds|debit|credit)$/.test(normalized)&&!/(?:id|code|currency)$/.test(normalized))return 'amount';
+  if(/(?:amount|balance|posted|spendable|principal|interestdue|feeamount|limit|availablefunds|debit|credit|total|receivable|minimumdue|unbilledinterest|payoff|refund|repayment)$/.test(normalized)&&!/(?:id|code|currency)$/.test(normalized))return 'amount';
   if(/(?:rate|ratepct|percentage|percent|ratio)$/.test(normalized))return 'rate';
   if(/(?:status|state|result)$/.test(normalized))return 'status';
   return 'text';

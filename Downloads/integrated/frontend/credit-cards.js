@@ -1,6 +1,6 @@
 import {api,getSession} from './api.js';
 import {esc,field,select,table,badge,dialog,reason,toast,errorText} from './ui.js';
-import {formatAmount,formatDate} from './presentation.js';
+import {formatAmount,formatDecimal,formatDate} from './presentation.js';
 
 let products=[],cards=[],applications=[],selectedId='',renderApp,actorId;
 const can=permission=>getSession()?.user?.permissions?.includes(permission);
@@ -8,7 +8,7 @@ const customer=()=>getSession()?.user?.userType==='CUSTOMER';
 const money=value=>esc(formatAmount(value,'INR'));
 const button=(label,action,id='',primary=false)=>`<button type="button" class="btn ${primary?'primary':'small'}" data-cc-action="${esc(action)}" data-cc-id="${esc(id)}">${esc(label)}</button>`;
 const panel=(title,body,actions='')=>`<section class="panel"><div class="panel-heading"><h3>${esc(title)}</h3>${actions}</div><div class="panel-body">${body}</div></section>`;
-const productTerms=p=>`<p>${esc(p.DESCRIPTION)}</p><dl class="cc-terms"><div><dt>Credit limit range</dt><dd>${money(p.MINIMUM_LIMIT)} – ${money(p.MAXIMUM_LIMIT)}</dd></div><div><dt>Annual interest</dt><dd>${esc(p.ANNUAL_RATE_PCT)}%</dd></div><div><dt>Billing date</dt><dd>Day ${esc(p.BILLING_DAY)} every month</dd></div><div><dt>Payment due</dt><dd>${esc(p.PAYMENT_DUE_DAYS)} days after billing</dd></div><div><dt>Minimum payment</dt><dd>${esc(p.MIN_PAYMENT_PCT)}% or ${money(p.MIN_PAYMENT_FLOOR)}, capped at the balance</dd></div></dl><div class="notice">${esc(p.INTEREST_POLICY)}</div>`;
+const productTerms=p=>`<p>${esc(p.DESCRIPTION)}</p><dl class="cc-terms"><div><dt>Credit limit range</dt><dd>${money(p.MINIMUM_LIMIT)} – ${money(p.MAXIMUM_LIMIT)}</dd></div><div><dt>Annual interest</dt><dd class="numeric-value">${esc(formatDecimal(p.ANNUAL_RATE_PCT))}%</dd></div><div><dt>Billing date</dt><dd>Day ${esc(p.BILLING_DAY)} every month</dd></div><div><dt>Payment due</dt><dd>${esc(p.PAYMENT_DUE_DAYS)} days after billing</dd></div><div><dt>Minimum payment</dt><dd>${esc(formatDecimal(p.MIN_PAYMENT_PCT))}% or ${money(p.MIN_PAYMENT_FLOOR)}, capped at the balance</dd></div></dl><div class="notice">${esc(p.INTEREST_POLICY)}</div>`;
 
 export async function creditCardsScreen(render) {
     renderApp=render;
@@ -20,7 +20,7 @@ export async function creditCardsScreen(render) {
     if(!cards.some(c=>c.CARD_ID===selectedId))selectedId=cards[0]?.CARD_ID||'';
     const current=cards.find(c=>c.CARD_ID===selectedId);
     const productRows=products.map(p=>[
-        `<strong>${esc(p.PRODUCT_NAME)}</strong><br><small>${esc(p.PRODUCT_CODE)} · Version ${esc(p.VERSION_NO)}</small>`,badge(p.STATUS),money(p.MINIMUM_LIMIT)+' – '+money(p.MAXIMUM_LIMIT),esc(p.ANNUAL_RATE_PCT)+'%',
+        `<strong>${esc(p.PRODUCT_NAME)}</strong><br><small>${esc(p.PRODUCT_CODE)} · Version ${esc(p.VERSION_NO)}</small>`,badge(p.STATUS),money(p.MINIMUM_LIMIT)+' – '+money(p.MAXIMUM_LIMIT),esc(formatDecimal(p.ANNUAL_RATE_PCT))+'%',
         button('View terms','terms',p.PRODUCT_ID)+(p.STATUS==='APPROVED'&&can('CC_APPLY')?button('Apply','apply',p.PRODUCT_ID):'')+
         (p.STATUS==='PENDING'&&can('CC_PRODUCT_APPROVE')&&p.MAKER_ID!==actorId?button('Review','product-decision',p.PRODUCT_ID):'')+
         (p.STATUS==='APPROVED'&&can('CC_PRODUCT_MANAGE')?button('Retire','retire',p.PRODUCT_ID):'')]);

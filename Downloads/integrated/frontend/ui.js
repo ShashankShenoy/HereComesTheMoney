@@ -7,9 +7,14 @@ export const badge=value=>`<span class="badge ${esc(['ACTIVE','APPROVED','SUCCES
 export const field=(label,name,type='text',options={})=>`<label class="field">${esc(label)}<input name="${esc(name)}" type="${esc(type)}" ${options.required===false?'':'required'} ${options.value!=null?`value="${esc(options.value)}"`:''} ${options.min!=null?`min="${esc(options.min)}"`:''} ${options.maxlength?`maxlength="${esc(options.maxlength)}"`:''} ${options.minlength?`minlength="${esc(options.minlength)}"`:''} ${options.step?`step="${esc(options.step)}"`:''} ${options.placeholder?`placeholder="${esc(options.placeholder)}"`:''} ${type==='password'?'autocomplete="new-password"':''}></label>`;
 export const select=(label,name,items,value='',required=true)=>`<label class="field">${esc(label)}<select name="${esc(name)}" ${required?'required':''}>${items.map(i=>{const v=typeof i==='string'?i:i.value,l=typeof i==='string'?i:i.label;return `<option value="${esc(v)}" ${v===value?'selected':''}>${esc(l)}</option>`;}).join('')}</select></label>`;
 export const reason=()=>'<label class="field span2">Reason<textarea name="reason" required maxlength="500" rows="3" placeholder="Why is this change needed?"></textarea></label>';
+const numericColumn=header=>{
+  const name=String(header).trim().toLowerCase();
+  if(/\b(date|time|id|number|reference)\b/.test(name)||/\bcredit cards?\b/.test(name))return false;
+  return /\b(amount|balance|limit|rate|apr|total|count|debit|credit|principal|interest|purchases?|repayments?|refunds?|due|receivable|funds|outstanding|minimum|available|term|tenure)\b/.test(name);
+};
 export function table(headers,rows,empty='No records yet.',{mobileCards=false}={}){
   if(!rows.length)return `<div class="empty"><h3>${esc(empty)}</h3><p>Records will appear here when available.</p></div>`;
-  const numeric=headers.map(h=>/\b(amount|balance|limit|rate|total|count|value)\b/i.test(h));
+  const numeric=headers.map(numericColumn);
   return `<div class="table-wrap${mobileCards?' customer-account-table':''}"><table><thead><tr>${headers.map((h,i)=>`<th${numeric[i]?' class="numeric"':''}>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td${/^actions?$/i.test(headers[i])?' class="table-actions"':numeric[i]?' class="numeric"':''}${mobileCards?' data-label="'+esc(t(headers[i]))+'"':''}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 export const action=(label,action,id='',cls='btn small')=>`<button class="${esc(cls)}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
