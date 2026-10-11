@@ -20,6 +20,18 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IntegratedContextTest {
  @Autowired MockMvc mvc;@Autowired ObjectMapper json;@Autowired JdbcTemplate db;@Autowired com.moneybags.txn.core.LedgerService ledger;
+ @Autowired com.moneybags.cif.service.CifService cifService;
+ @Autowired com.moneybags.payments.core.IntegrationChecks paymentChecks;
+ @Autowired com.moneybags.payments.core.PaymentService paymentService;
+ @Autowired com.moneybags.payments.core.DispatchService paymentDispatch;
+ @Autowired com.moneybags.integration.PaymentWorkflowController paymentWorkflow;
+ @Autowired com.moneybags.account.integration.ModuleClients accountClients;
+ @Autowired com.moneybags.account.db.AccountStore accountStore;
+ @Autowired com.moneybags.account.domain.AccountService accountService;
+ @Autowired com.moneybags.txn.core.OperationsService operationsService;
+ @Autowired com.moneybags.privacy.hold.LegalHoldRepository legalHolds;
+ @Autowired com.moneybags.privacy.audit.AuditController privacyAudit;
+ @Autowired com.moneybags.privacy.casework.CaseRepository privacyCases;
  @Autowired org.springframework.security.crypto.password.PasswordEncoder passwords;
  static final String HASH=("customer-demo-hash-"+"x".repeat(43)).substring(0,43);
  String login(String user)throws Exception{
@@ -153,6 +165,8 @@ class IntegratedContextTest {
   BigDecimal vaultBefore=db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class);
   JsonNode opening=value(send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isOk()));
   String till=opening.path("tillId").asText();
+  send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("TILL_ALREADY_EXISTS"));
   assertEquals(0,new BigDecimal("5000").compareTo(new BigDecimal(opening.path("openingCash").asText())));
   assertEquals(0,vaultBefore.subtract(new BigDecimal("5000")).compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class)));
   assertEquals(0,new BigDecimal("5000").compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
@@ -181,6 +195,8 @@ class IntegratedContextTest {
   assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",BigDecimal.class,replenished.path("journalId").asLong()).compareTo(BigDecimal.ZERO));
   send("/teller/tills/"+till+"/close",admin,Map.of("countedCash","4000","reason","Close till")).andExpect(status().isConflict());
   send("/teller/tills/"+till+"/close",checker,Map.of("countedCash","4000","reason","Independent close")).andExpect(status().isOk());
+  send("/teller/tills",admin,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("TILL_ALREADY_EXISTS"));
   assertEquals(0,vaultBefore.subtract(new BigDecimal("1400")).compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class)));
   assertEquals(0,BigDecimal.ZERO.compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM MBX_TILL_CASH_RETURN WHERE TILL_ID=?",Integer.class,till));
@@ -217,10 +233,17 @@ class IntegratedContextTest {
   assertEquals("PENDING",db.queryForObject("SELECT STATUS FROM MBX_RBI_CASH_DELIVERY WHERE DELIVERY_ID=?",String.class,oversized));
  }
  @Test @Order(6) void rateApprovalRejectsSelfApproval()throws Exception{
-  String admin=login("admin"),checker=login("checker");var now=java.time.OffsetDateTime.now();
+  String admin=login("admin"),checker=login("checker"),customer=login("customer");var now=java.time.OffsetDateTime.now();
   String id=value(send("/fx/rates",admin,Map.of("baseCurrency","EUR","quoteCurrency","INR","buyRate","89","midRate","90","sellRate","91","sourceCode","TEST","observedAt",now.toString(),"validUntil",now.plusHours(1).toString(),"reason","Test quote")).andExpect(status().isOk())).path("rateId").asText();
+  assertFalse(value(mvc.perform(get("/api/v1/fx/rates").header("Authorization","Bearer "+customer)).andExpect(status().isOk())).toString().contains(id));
   send("/fx/rates/"+id+"/decision",admin,Map.of("decision","APPROVED")).andExpect(status().isConflict());
   send("/fx/rates/"+id+"/decision",checker,Map.of("decision","APPROVED")).andExpect(status().isOk());
+  assertTrue(value(mvc.perform(get("/api/v1/fx/rates").header("Authorization","Bearer "+customer)).andExpect(status().isOk())).toString().contains(id));
+  mvc.perform(get("/api/v1/fx/quote?base=EUR&quote=INR&amount=10.00").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.rateId").value(id)).andExpect(jsonPath("$.indicative").value(true)).andExpect(jsonPath("$.reciprocal").value(false)).andExpect(jsonPath("$.validUntil").exists());
+  mvc.perform(get("/api/v1/fx/quote?base=INR&quote=EUR&amount=180.00").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.rateId").value(id)).andExpect(jsonPath("$.reciprocal").value(true)).andExpect(jsonPath("$.amount").value(2.0));
+  mvc.perform(get("/api/v1/fx/quote?base=EUR&quote=EUR&amount=10.00").header("Authorization","Bearer "+admin)).andExpect(status().isConflict());
  }
  @Test @Order(7) void newCustomerHashIsReturnedOnceAndStoredAsDigest()throws Exception{
   String admin=login("admin");
@@ -237,6 +260,10 @@ class IntegratedContextTest {
   String request=value(send("/reporting/statement-requests",customer,body).andExpect(status().isCreated())).path("requestId").asText();
   var issued=value(mvc.perform(post("/api/v1/reporting/statement-requests/"+request+"/process").header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
   assertEquals("COMPLETED",issued.path("status").asText());String id=issued.path("statementId").asText();
+  var listed=value(mvc.perform(get("/api/v1/reporting/statement-requests?accountId=1").header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
+  var listedRequest=new ArrayList<JsonNode>();listed.forEach(r->{if(r.path("requestId").asText().equals(request))listedRequest.add(r);});
+  assertEquals(1,listedRequest.size());assertEquals(id,listedRequest.get(0).path("statementId").asText());
+
   var statement=value(mvc.perform(get("/api/v1/reporting/statements/"+id).header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
   assertEquals(0,statement.path("closingBalance").decimalValue().compareTo(balance(1)));
   mvc.perform(get("/api/v1/reporting/statements/"+id+"/download").header("Authorization","Bearer "+login("customer2"))).andExpect(status().isForbidden());
@@ -245,18 +272,45 @@ class IntegratedContextTest {
   java.nio.file.Files.write(java.nio.file.Path.of("target/test-statement.pdf"),pdf);
  }
  @Test @Order(9) void simulatedPaymentSettlesCustomerSuspenseAndReserve()throws Exception{
-  String customer=login("customer"),checker=login("checker");
+  String customer=login("customer"),other=login("customer2"),checker=login("checker");
   BigDecimal reserveBefore=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
   String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Test recipient","accountToken","test-recipient-token","bankCode","TEST0123456")).andExpect(status().isOk())).path("beneficiaryId").asText();
   send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
   BigDecimal before=balance(1);
   long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","500","requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("paymentId").asLong();
+  assertTrue(value(mvc.perform(get("/api/v1/payments").header("Authorization","Bearer "+customer)).andExpect(status().isOk())).toString().contains("\"paymentId\":"+payment));
+  assertFalse(value(mvc.perform(get("/api/v1/payments").header("Authorization","Bearer "+other)).andExpect(status().isOk())).toString().contains("\"paymentId\":"+payment));
+  for(String path:List.of("/payments/"+payment,"/payments/"+payment+"/history","/payments/"+payment+"/rail-evidence"))
+   mvc.perform(get("/api/v1"+path).header("Authorization","Bearer "+other)).andExpect(status().isNotFound());
+  String ownHistory=value(mvc.perform(get("/api/v1/payments/"+payment+"/history").header("Authorization","Bearer "+customer)).andExpect(status().isOk())).toString();
+  assertTrue(ownHistory.contains("TO_STATUS"));
+  assertFalse(ownHistory.contains("ACTOR_ID")||ownHistory.contains("EVIDENCE_ID"));
+  String invalidKey=UUID.randomUUID().toString();
+  send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","RTGS","amount","100","requestKey",invalidKey)).andExpect(status().isConflict());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE REQUEST_KEY=?",Integer.class,invalidKey));
+  String originator=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer'",String.class);
+  String token=db.queryForObject("SELECT ACCOUNT_TOKEN FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=?",String.class,beneficiary);
+  send("/payments",customer,Map.ofEntries(Map.entry("originatorId",originator),Map.entry("channelCode","WEB"),Map.entry("requestKey",invalidKey),
+    Map.entry("correlationId","payment:"+invalidKey),Map.entry("endToEndId","MB-"+invalidKey),Map.entry("direction","OUTBOUND"),
+    Map.entry("kind","PAYMENT"),Map.entry("sourceAccountId",1),Map.entry("sourceCifId","demo-cif-1"),
+    Map.entry("beneficiaryTokenRef",token),Map.entry("beneficiaryBankCode","TEST0123456"),Map.entry("railCode","RTGS"),
+    Map.entry("amount","100"),Map.entry("requestedExecutionDate",java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).toString()))).andExpect(status().isConflict());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE REQUEST_KEY=?",Integer.class,invalidKey));
   send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
   assertEquals(0,before.subtract(new BigDecimal("500")).compareTo(balance(1)));
   String operator=login("admin");
   send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
   send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
   send("/payments/"+payment+"/simulate-outcome",operator,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+  long provisional=db.queryForObject("SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='PAYMENT_PROVISIONAL'",Long.class,payment);
+  long settlement=db.queryForObject("SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='SETTLEMENT'",Long.class,payment);
+  long railEvidence=db.queryForObject("SELECT EVIDENCE_ID FROM M06_RAIL_STATUS_EVIDENCE WHERE PAYMENT_ID=? AND RAIL_STATUS='SETTLED'",Long.class,payment);
+  var movement=db.queryForMap("SELECT TREASURY_ENTRY_ID,EXTERNAL_SETTLEMENT_REF FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",payment);
+  send("/payments/"+payment+"/reconciliations",operator,Map.of("customerJournalId",provisional,
+    "settlementJournalId",settlement,"railEvidenceId",railEvidence,"treasuryEntryId",movement.get("TREASURY_ENTRY_ID"),
+    "externalSettlementRef",movement.get("EXTERNAL_SETTLEMENT_REF"),"reconciledAmount","500.00"))
+    .andExpect(status().isOk());
+  assertEquals("MATCHED",db.queryForObject("SELECT RECONCILIATION_STATUS FROM M06_PAYMENT_RECONCILIATION WHERE PAYMENT_ID=?",String.class,payment));
   assertEquals("SETTLED",db.queryForObject("SELECT STATUS FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",String.class,payment));
   assertEquals(0,reserveBefore.subtract(new BigDecimal("500")).compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
@@ -867,4 +921,1255 @@ class IntegratedContextTest {
   assertEquals("ACTIVE",db.queryForObject("SELECT STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,loanCif));
  }
 
+ @Test @Order(32) @Transactional void cifProposalRequiresIndependentApprovalAndRejectDoesNotChangeSegment() throws Exception {
+  String admin=login("admin"),checker=login("checker");
+  JsonNode created=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Case Example",
+    "dateOfBirth","1990-01-01","homeBranchRef","MUM001","segmentCode","RETAIL")).andExpect(status().isOk())).path("data");
+  String cif=created.path("customer").path("CIF_ID").asText();
+  String firstCase=created.path("cases").get(0).path("CASE_ID").asText();
+  proposeProfile(admin,cif,"Case Example Approved","PREMIUM");
+  assertEquals("RETAIL",db.queryForObject("SELECT SEGMENT_CODE FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+  send("/cif/customers/"+cif+"/contacts",admin,Map.of("contactType","EMAIL","value","case@example.test")).andExpect(status().isOk());
+  send("/cif/customers/"+cif+"/identifiers",admin,Map.of("identifierType","TEST_ID","value",UUID.randomUUID().toString())).andExpect(status().isOk());
+  send("/cif/customers/"+cif+"/addresses",admin,Map.of("addressType","RESIDENTIAL","line1","Test Road",
+    "city","Mumbai","countryCode","IN")).andExpect(status().isOk());
+  prepareKycEvidence(admin,checker,firstCase);
+  send("/cif/cases/"+firstCase+"/review",checker,Map.of("rowVersion",caseVersion(firstCase),"outcome","APPROVE",
+    "riskLevel","LOW","reviewDueAt",java.time.OffsetDateTime.now().plusDays(90).toString(),
+    "reasonCode","CHECKED","comments","Evidence checked")).andExpect(status().isOk());
+  assertEquals("PREMIUM",db.queryForObject("SELECT SEGMENT_CODE FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+  assertEquals("ACTIVE",db.queryForObject("SELECT STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+
+  String secondCase=value(send("/cif/customers/"+cif+"/cases",admin,Map.of("caseType","PERIODIC"))
+    .andExpect(status().isOk())).path("data").path("CASE_ID").asText();
+  proposeProfile(admin,cif,"Case Example Rejected","PRIVATE");
+  db.update("UPDATE M02_CIF_IDENTIFIER SET EXPIRES_ON=DATEADD('DAY',-1,CURRENT_DATE) WHERE PARTY_ID=? AND VERIFICATION_STATUS='VERIFIED'",
+    created.path("customer").path("PARTY_ID").asText());
+  send("/cif/customers/"+cif+"/identifiers",admin,Map.of("identifierType","TEST_ID","value",UUID.randomUUID().toString()))
+    .andExpect(status().isOk());
+  assertEquals("PREMIUM",db.queryForObject("SELECT SEGMENT_CODE FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+  prepareKycEvidence(admin,checker,secondCase);
+  assertFalse(cifService.completeness(cif,secondCase,true).contains("EXPIRED_IDENTIFIER"));
+  send("/cif/cases/"+secondCase+"/review",checker,Map.of("rowVersion",caseVersion(secondCase),"outcome","REJECT",
+    "reasonCode","UNSUPPORTED","comments","New profile was not supported")).andExpect(status().isOk());
+  assertEquals("PREMIUM",db.queryForObject("SELECT SEGMENT_CODE FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+  assertEquals("RESTRICTED",db.queryForObject("SELECT STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
+ }
+
+ private long caseVersion(String caseId) {
+  return db.queryForObject("SELECT ROW_VERSION FROM M02_KYC_CASE WHERE CASE_ID=?",Long.class,caseId);
+ }
+ private void proposeProfile(String token,String cif,String name,String segment) throws Exception {
+  long version=db.queryForObject("SELECT ROW_VERSION FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",Long.class,cif);
+  mvc.perform(put("/api/v1/cif/customers/"+cif+"/profile").header("Authorization","Bearer "+token)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",version,
+      "legalName",name,"segmentCode",segment,"reason","Case review")))).andExpect(status().isOk());
+ }
+ private void prepareKycEvidence(String maker,String reviewer,String caseId) throws Exception {
+  for(String type:List.of("IDENTITY","ADDRESS")) {
+   var file=new org.springframework.mock.web.MockMultipartFile("file",type.toLowerCase()+".pdf","application/pdf",
+     ("%PDF-1.4\n"+type).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+   mvc.perform(multipart("/api/v1/cif/cases/"+caseId+"/documents").file(file).param("documentType",type)
+     .header("Authorization","Bearer "+maker)).andExpect(status().isOk());
+  }
+  String firstDocument=db.queryForObject("SELECT DOCUMENT_ID FROM M02_KYC_DOCUMENT WHERE CASE_ID=? AND DOCUMENT_TYPE='IDENTITY'",String.class,caseId);
+  mvc.perform(get("/api/v1/cif/documents/"+firstDocument+"/content").header("Authorization","Bearer "+reviewer))
+    .andExpect(status().isForbidden());
+  send("/cif/cases/"+caseId+"/submit",maker,Map.of("rowVersion",caseVersion(caseId),"reason","Ready for review"))
+    .andExpect(status().isOk());
+  mvc.perform(get("/api/v1/cif/documents/"+firstDocument+"/content").header("Authorization","Bearer "+maker))
+    .andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/cif/documents/"+firstDocument+"/content").header("Authorization","Bearer "+reviewer))
+    .andExpect(status().isOk());
+  for(String documentId:db.queryForList("SELECT DOCUMENT_ID FROM M02_KYC_DOCUMENT WHERE CASE_ID=?",String.class,caseId))
+   send("/cif/documents/"+documentId+"/review",reviewer,Map.of("scanStatus","CLEAN",
+     "verificationStatus","VERIFIED","reason","Scanned and checked")).andExpect(status().isOk());
+ }
+
+ @Test @Order(33) @Transactional void dueKycBlocksNewProductsBeforeManualExpirySweep() throws Exception {
+  String admin=login("admin"),customer=login("customer");
+  db.update("UPDATE M02_CIF_CUSTOMER SET NEXT_REVIEW_DUE_AT=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE CIF_ID='demo-cif-1'");
+  mvc.perform(get("/api/v1/cif/customers/demo-cif-1/eligibility-facts").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data.kycStatus").value("EXPIRED"));
+  mvc.perform(get("/api/v1/cif/customers/demo-cif-1").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data.customer.EFFECTIVE_KYC_STATUS").value("EXPIRED"));
+  send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),"cifId","demo-cif-1",
+    "productId",1,"productVersionId",1)).andExpect(status().isConflict());
+  send("/loans/my/applications",customer,Map.of("cifId","demo-cif-1","productId",2,
+    "productVersionId",2,"amount","12000","tenureMonths",12,"purposeCode","PERSONAL"))
+    .andExpect(status().isConflict());
+  var payment=new com.moneybags.payments.api.Contracts.Payment(1,"test","OUTBOUND","TEST","TEST",
+    new BigDecimal("1.00"),"PENDING",1,null,null,null,null,null,null,null,null);
+  assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(payment,"WEB",1L,"demo-cif-1"));
+  db.update("UPDATE M02_CIF_CUSTOMER SET NEXT_REVIEW_DUE_AT=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE CIF_ID='demo-cif-2'");
+  assertEquals("EXPIRED",accountClients.party("demo-cif-2","MUM001").kycStatus());
+  long version=db.queryForObject("SELECT ROW_VERSION FROM M02_CIF_CUSTOMER WHERE CIF_ID='demo-cif-1'",Long.class);
+  mvc.perform(patch("/api/v1/cif/customers/demo-cif-1/status").header("Authorization","Bearer "+admin)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",version,
+      "status","ACTIVE","reason","Try bypass")))).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("KYC_REQUIRED"));
+  send("/cif/reviews/expire-due",admin,Map.of()).andExpect(status().isOk());
+  assertEquals("EXPIRED",db.queryForObject("SELECT KYC_STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID='demo-cif-1'",String.class));
+ }
+
+ @Test @Order(35) @Transactional void expiredIdentifierAppearsInDirectoryAndCanBeSwept() throws Exception {
+  String admin=login("admin");
+  String party=db.queryForObject("SELECT PARTY_ID FROM M02_CIF_CUSTOMER WHERE CIF_ID='demo-cif-2'",String.class);
+  db.update("INSERT INTO M02_CIF_IDENTIFIER(IDENTIFIER_ID,PARTY_ID,IDENTIFIER_TYPE,VALUE_CIPHERTEXT,DISPLAY_HINT,LOOKUP_HMAC,EXPIRES_ON,VERIFICATION_STATUS,VALID_FROM) VALUES (?,?,?,?,'****',?,DATEADD('DAY',-1,CURRENT_DATE),'VERIFIED',CURRENT_TIMESTAMP)",
+    UUID.randomUUID().toString(),party,"TEST_ID",new byte[]{1,2,3},UUID.randomUUID().toString());
+  mvc.perform(get("/api/v1/cif/customers").param("search","MB-CIF-0002").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].EFFECTIVE_KYC_STATUS").value("EXPIRED"));
+  send("/cif/reviews/expire-due",admin,Map.of()).andExpect(status().isOk());
+  assertEquals("EXPIRED",db.queryForObject("SELECT KYC_STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID='demo-cif-2'",String.class));
+  assertEquals("RESTRICTED",db.queryForObject("SELECT STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID='demo-cif-2'",String.class));
+ }
+
+ @Test @Order(36) @Transactional void productEligibilityMatchesOpeningLoanAndDepositTerms() throws Exception {
+  String admin=login("admin");
+  var savings=value(send("/products/1/eligibility",admin,Map.of("cifId","demo-cif-1","channel","BRANCH")).andExpect(status().isOk())).path("data");
+  assertTrue(savings.path("eligible").asBoolean(),"A zero minimum account needs no opening amount");
+  var missingDeposit=value(send("/products/3/eligibility",admin,Map.of("cifId","demo-cif-1","channel","WEB")).andExpect(status().isOk())).path("data");
+  assertFalse(missingDeposit.path("eligible").asBoolean());
+  assertTrue(missingDeposit.path("reasonCodes").toString().contains("DEPOSIT_AMOUNT_OUTSIDE_RANGE"));
+  assertTrue(missingDeposit.path("reasonCodes").toString().contains("DEPOSIT_TENURE_OUTSIDE_RANGE"));
+  var validDeposit=value(send("/products/3/eligibility",admin,Map.of("cifId","demo-cif-1","channel","WEB","depositAmount","1000","tenureMonths",1)).andExpect(status().isOk())).path("data");
+  assertTrue(validDeposit.path("eligible").asBoolean());
+  var longDeposit=value(send("/products/3/eligibility",admin,Map.of("cifId","demo-cif-1","channel","WEB","depositAmount","1000","tenureMonths",61)).andExpect(status().isOk())).path("data");
+  assertTrue(longDeposit.path("reasonCodes").toString().contains("DEPOSIT_TENURE_OUTSIDE_RANGE"));
+ }
+
+ @Test @Order(37) @Transactional void paymentRulesMatchDebitCreditAndBothDirections() {
+  db.update("INSERT INTO M03_PM_TRANSACTION_RULE(PRODUCT_VERSION_ID,RULE_CODE,OPERATION_CODE,DIRECTION_CODE,ACTION_CODE,PRIORITY_NO) VALUES (1,'TEST_PAYMENT','PAYMENT','DEBIT','BLOCK',2)");
+  var outbound=new com.moneybags.payments.api.Contracts.Payment(1,"test","OUTBOUND","TEST","TEST",
+    new BigDecimal("1.00"),"PENDING",1,null,null,null,null,null,null,null,null);
+  var inbound=new com.moneybags.payments.api.Contracts.Payment(2,"test","INBOUND","TEST","TEST",
+    new BigDecimal("1.00"),"PENDING",1,null,null,null,null,null,null,null,null);
+  var denied=assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(outbound,"WEB",1L,"demo-cif-1"));
+  assertEquals("POLICY_DENIED",denied.code());
+  db.update("UPDATE M03_PM_TRANSACTION_RULE SET DIRECTION_CODE='BOTH' WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='TEST_PAYMENT'");
+  denied=assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(inbound,"WEB",1L,"demo-cif-1"));
+  assertEquals("POLICY_DENIED",denied.code());
+  db.update("UPDATE M03_PM_TRANSACTION_RULE SET COUNTERPARTY_CODE='SPECIAL' WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='TEST_PAYMENT'");
+  var conditional=assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(outbound,"WEB",1L,"demo-cif-1"));
+  assertEquals("POLICY_ADAPTER_REQUIRED",conditional.code());
+  var invalid=new com.moneybags.payments.api.Contracts.Payment(3,"test","SIDEWAYS","TEST","TEST",
+    new BigDecimal("1.00"),"PENDING",1,null,null,null,null,null,null,null,null);
+  assertEquals("INVALID_PAYMENT_DIRECTION",assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(invalid,"WEB",1L,"demo-cif-1")).code());
+ }
+
+ @Test @Order(38) @Transactional void loanApplicationStopsWhenProductSalesEnd() throws Exception {
+  db.update("UPDATE M03_PM_PRODUCT SET SALES_END_AT=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE PRODUCT_ID=2");
+  String customer=login("customer");
+  send("/loans/my/applications",customer,Map.of("cifId","demo-cif-1","productId",2,
+    "productVersionId",2,"amount","12000","tenureMonths",12,"purposeCode","PERSONAL"))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PRODUCT_NOT_ACTIVE"));
+ }
+
+ @Test @Order(39) @Transactional void replacementVersionCanBeApprovedBeforeOldVersionRetires() throws Exception {
+  String maker=login("admin"),checker=login("checker");
+  String activatorId=UUID.randomUUID().toString(),activatorName="product_activator_"+UUID.randomUUID().toString().substring(0,8);
+  String adminRole=db.queryForObject("SELECT ROLE_ID FROM M01_IAM_ROLE WHERE ROLE_CODE='BANK_ADMIN'",String.class);
+  db.update("INSERT INTO M01_IAM_USER(USER_ID,USERNAME,USER_TYPE,STATUS,EMPLOYEE_REF) VALUES (?,?,'EMPLOYEE','ACTIVE','TEST')",activatorId,activatorName);
+  db.update("INSERT INTO M01_IAM_CREDENTIAL(CREDENTIAL_ID,USER_ID,PASSWORD_HASH,HASH_SCHEME,STATUS) VALUES (?,?,?,'BCRYPT','ACTIVE')",
+    UUID.randomUUID().toString(),activatorId,passwords.encode("LocalBanking!2026"));
+  db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,STATUS,VALID_FROM) VALUES (?,?,?,'GLOBAL','ACTIVE',SYSTIMESTAMP)",
+    UUID.randomUUID().toString(),activatorId,adminRole);
+  String activator=login(activatorName);
+  String start=java.time.OffsetDateTime.now().minusMinutes(1).toString();
+  JsonNode draft=value(send("/products/3/versions",maker,Map.of("sourceVersionId",3,
+    "effectiveFromAt",start,"defaultTxnAction","ALLOW","changeReason","Replacement terms"))
+    .andExpect(status().isOk())).path("data");
+  long versionId=draft.path("version").path("PRODUCT_VERSION_ID").asLong();
+  long rowVersion=draft.path("version").path("ROW_VERSION").asLong();
+  JsonNode request=value(send("/products/versions/"+versionId+"/submit",maker,Map.of("rowVersion",rowVersion,
+    "reason","Prepare replacement terms")) .andExpect(status().isOk())).path("data");
+  long approvalId=request.path("APPROVAL_ID").asLong();
+  send("/products/approvals/"+approvalId+"/decision",checker,Map.of("rowVersion",request.path("ROW_VERSION").asLong(),
+    "decision","APPROVED","comment","Terms checked")) .andExpect(status().isOk());
+  rowVersion=db.queryForObject("SELECT ROW_VERSION FROM M03_PM_PRODUCT_VERSION WHERE PRODUCT_VERSION_ID=?",Long.class,versionId);
+  send("/products/versions/"+versionId+"/activate",activator,Map.of("rowVersion",rowVersion,
+    "reason","Try overlapping sale")) .andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("VERSION_OVERLAP"));
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='RETIRED' WHERE PRODUCT_VERSION_ID=3");
+  send("/products/versions/"+versionId+"/activate",activator,Map.of("rowVersion",rowVersion,
+    "reason","Old version retired")) .andExpect(status().isOk());
+ }
+
+ @Test @Order(40) @Transactional void retiredVersionKeepsHistoricalPaymentPolicyForExistingAccount() {
+  var payment=new com.moneybags.payments.api.Contracts.Payment(1,"test","OUTBOUND","TEST","TEST",
+    new BigDecimal("1.00"),"PENDING",1,null,null,null,null,null,null,null,null);
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='RETIRED',EFFECTIVE_TO_AT=DATEADD('DAY',-1,CURRENT_TIMESTAMP) WHERE PRODUCT_VERSION_ID=1");
+  assertDoesNotThrow(()->paymentChecks.authorize(payment,"WEB",1L,"demo-cif-1"));
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='SUSPENDED' WHERE PRODUCT_VERSION_ID=1");
+  assertEquals("ACCOUNT_NOT_ELIGIBLE",assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(payment,"WEB",1L,"demo-cif-1")).code());
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='RETIRED' WHERE PRODUCT_VERSION_ID=1");
+  db.update("UPDATE M03_PM_PRODUCT SET STATUS='SUSPENDED' WHERE PRODUCT_ID=1");
+  assertEquals("ACCOUNT_NOT_ELIGIBLE",assertThrows(com.moneybags.payments.api.ApiException.class,
+    ()->paymentChecks.authorize(payment,"WEB",1L,"demo-cif-1")).code());
+  db.update("UPDATE M03_PM_PRODUCT SET STATUS='RETIRED' WHERE PRODUCT_ID=1");
+  assertDoesNotThrow(()->paymentChecks.authorize(payment,"WEB",1L,"demo-cif-1"));
+ }
+
+ @Test @Order(41) @Transactional void customerOffersExposeTermsWithoutInternalProductControls() throws Exception {
+  String customer=login("customer");
+  JsonNode offers=value(mvc.perform(get("/api/v1/products/customer-offers")
+    .param("cifId","demo-cif-1").param("channel","WEB").param("currency","INR")
+    .header("Authorization","Bearer "+customer)).andExpect(status().isOk())).path("data");
+  boolean sawLoan=false,sawDeposit=false;
+  for(JsonNode offer:offers) {
+    JsonNode rules=offer.path("rules");
+    assertTrue(rules.path("overrides").isMissingNode());
+    assertTrue(rules.path("transactions").isMissingNode());
+    assertTrue(rules.path("allocation").isMissingNode());
+    String type=offer.path("product").path("PRODUCT_TYPE").asText();
+    if(type.equals("LOAN")) { sawLoan=true; assertTrue(rules.path("loan").isArray()); }
+    if(type.equals("DEPOSIT")) { sawDeposit=true; assertTrue(rules.path("term").isArray()); }
+  }
+  assertTrue(sawLoan && sawDeposit);
+ }
+
+ @Test @Order(42) @Transactional void transferUsesProductRulesForEachSideAndHonorsProductSuspension() throws Exception {
+  var catalog=new com.moneybags.txn.core.AccountCatalog(db);
+  db.update("UPDATE M03_PM_TRANSACTION_RULE SET DIRECTION_CODE='DEBIT',ACTION_CODE='ALLOW' WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='TRANSFER'");
+  db.update("INSERT INTO M03_PM_TRANSACTION_RULE(PRODUCT_VERSION_ID,RULE_CODE,OPERATION_CODE,DIRECTION_CODE,ACTION_CODE,PRIORITY_NO) VALUES (1,'TEST_CREDIT','INTERNAL_TRANSFER','CREDIT','BLOCK',2)");
+  assertDoesNotThrow(()->catalog.requireTransferAllowed(1,"BRANCH","DEBIT"));
+  assertEquals("PRODUCT_RULE_DENIED",assertThrows(com.moneybags.txn.api.ApiException.class,
+    ()->catalog.requireTransferAllowed(1,"BRANCH","CREDIT")).code());
+  String customer=login("customer");
+  send("/transactions/transfers",customer,transfer(1,2,"1.00",UUID.randomUUID().toString()))
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PRODUCT_RULE_DENIED"));
+  db.update("UPDATE M03_PM_TRANSACTION_RULE SET ACTION_CODE='ALLOW',COUNTERPARTY_CODE='SPECIAL' WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='TEST_CREDIT'");
+  assertEquals("POLICY_ADAPTER_REQUIRED",assertThrows(com.moneybags.txn.api.ApiException.class,
+    ()->catalog.requireTransferAllowed(1,"BRANCH","CREDIT")).code());
+  db.update("UPDATE M03_PM_TRANSACTION_RULE SET COUNTERPARTY_CODE=NULL WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='TEST_CREDIT'");
+  db.update("UPDATE M03_PM_PRODUCT SET STATUS='SUSPENDED' WHERE PRODUCT_ID=1");
+  assertEquals("ACCOUNT_NOT_ACTIVE",assertThrows(com.moneybags.txn.api.ApiException.class,
+    ()->catalog.requireActive(1)).code());
+  db.update("UPDATE M03_PM_PRODUCT SET STATUS='RETIRED' WHERE PRODUCT_ID=1");
+  assertDoesNotThrow(()->catalog.requireActive(1));
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='SUSPENDED' WHERE PRODUCT_VERSION_ID=1");
+  assertEquals("ACCOUNT_NOT_ACTIVE",assertThrows(com.moneybags.txn.api.ApiException.class,
+    ()->catalog.requireActive(1)).code());
+ }
+
+ @Test @Order(43) @Transactional void accountOpeningHonorsHolderAndNomineeProductTerms() throws Exception {
+  String admin=login("admin");
+  var joint=Map.of("cifId","demo-cif-2","role","JOINT_HOLDER","operatingInstruction","JOINTLY");
+  send("/accounts",admin,Map.of("requestId",UUID.randomUUID().toString(),"primaryCifId","demo-cif-1",
+    "productId",1,"productVersionId",1,"branchCode","MUM001","operationMode","JOINTLY",
+    "additionalParties",List.of(joint))).andExpect(status().isConflict());
+  send("/accounts/1/parties",admin,joint).andExpect(status().isConflict());
+  db.update("UPDATE M03_PM_ACCOUNT_RULE SET NOMINEE_REQUIRED='Y' WHERE PRODUCT_VERSION_ID=1");
+  String customer=login("customer");
+  long accountId=value(send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated())).path("id").asLong();
+  send("/accounts/self/"+accountId+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString()))
+    .andExpect(status().isConflict());
+  mvc.perform(put("/api/v1/accounts/self/"+accountId+"/nominees")
+    .header("Authorization","Bearer "+customer).contentType(MediaType.APPLICATION_JSON)
+    .content(json.writeValueAsString(Map.of("requestId",UUID.randomUUID().toString(),"nominees",
+      List.of(Map.of("name","Account Nominee","relationship","FAMILY","sharePercentage","100.00"))))))
+    .andExpect(status().isNoContent());
+  String activationRequest=UUID.randomUUID().toString();
+  send("/accounts/self/"+accountId+"/activate",customer,Map.of("requestId",activationRequest))
+    .andExpect(status().isAccepted());
+  send("/accounts/self/"+accountId+"/activate",customer,Map.of("requestId",activationRequest))
+    .andExpect(status().isAccepted());
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_CONTROL_SYNC WHERE ACCOUNT_ID=? AND REQUEST_ID=?",Integer.class,
+    accountId,activationRequest));
+ }
+
+ @Test @Order(44) @Transactional void nomineesAreReadableAcrossAllLinkedPrimaryCifs() throws Exception {
+  String userId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer'",String.class);
+  db.update("INSERT INTO M01_IAM_CUSTOMER_LINK(LINK_ID,USER_ID,CIF_ID,RELATIONSHIP_TYPE,STATUS,VALID_FROM) VALUES (?,?,?,'SELF','ACTIVE',SYSTIMESTAMP)",
+    UUID.randomUUID().toString(),userId,"demo-cif-2");
+  String customer=login("customer");
+  mvc.perform(get("/api/v1/accounts/2/nominees").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk());
+ }
+
+ @Test @Order(45) @Transactional void optionalNomineesCanBeRemovedButRequiredNomineesCannot() throws Exception {
+  String customer=login("customer");
+  var nominee=Map.of("name","Temporary Nominee","relationship","FAMILY","sharePercentage","100.00");
+  mvc.perform(put("/api/v1/accounts/self/1/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+      "requestId",UUID.randomUUID().toString(),"nominees",List.of(nominee)))))
+    .andExpect(status().isNoContent());
+  var empty=Map.of("requestId",UUID.randomUUID().toString(),"nominees",List.of());
+  mvc.perform(put("/api/v1/accounts/self/1/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(empty)))
+    .andExpect(status().isNoContent());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_NOMINEE WHERE ACCOUNT_ID=1 AND IS_ACTIVE='Y'",Integer.class));
+  db.update("UPDATE M03_PM_ACCOUNT_RULE SET NOMINEE_REQUIRED='Y' WHERE PRODUCT_VERSION_ID=1");
+  mvc.perform(put("/api/v1/accounts/self/1/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+      "requestId",UUID.randomUUID().toString(),"nominees",List.of()))))
+    .andExpect(status().isConflict());
+  mvc.perform(put("/api/v1/accounts/self/1/nominees").header("Authorization","Bearer "+customer)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of(
+      "requestId",UUID.randomUUID().toString(),"nominees",List.of(Map.of(
+        "name","Invalid date","relationship","FAMILY","sharePercentage","100.00","dateOfBirth","not-a-date"))))))
+    .andExpect(status().isBadRequest());
+ }
+
+ @Test @Order(46) @Transactional void accountLimitRespectsProductMinimum() throws Exception {
+  db.update("UPDATE M03_PM_LIMIT_RULE SET MIN_AMOUNT=1000 WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='DAY_TRANSFER'");
+  Long rule=db.queryForObject("SELECT LIMIT_RULE_ID FROM M03_PM_LIMIT_RULE WHERE PRODUCT_VERSION_ID=1 AND RULE_CODE='DAY_TRANSFER'",Long.class);
+  String admin=login("admin");
+  send("/accounts/1/limits",admin,Map.of("requestId",UUID.randomUUID().toString(),
+    "limitType","ACCOUNT","operationCode","INTERNAL_TRANSFER","periodCode","DAY",
+    "resetRuleCode","CALENDAR","timeZoneId","Asia/Kolkata","amount","500.00",
+    "productLimitRuleId",rule,"effectiveFrom",java.time.LocalDate.now().toString()))
+    .andExpect(status().isConflict());
+  send("/accounts/1/limits",admin,Map.of("requestId",UUID.randomUUID().toString(),
+    "limitType","ACCOUNT","operationCode","INTERNAL_TRANSFER","periodCode","DAY",
+    "resetRuleCode","CALENDAR","timeZoneId","Asia/Kolkata","amount","1500.00",
+    "productLimitRuleId",rule,"effectiveFrom","not-a-date"))
+    .andExpect(status().isBadRequest());
+ }
+
+ @Test @Order(47) @Transactional void financialProjectionUsesModuleFourSequenceRatherThanLiveLedger() {
+  db.update("UPDATE M04_BANK_ACCOUNT SET LEDGER_BALANCE=10,BLOCKED_BALANCE=0,LIEN_BALANCE=0,OVERDRAFT_LIMIT=0,BALANCE_SOURCE_VERSION=4 WHERE ACCOUNT_ID=1");
+  var snapshot=accountStore.projectionSnapshot(1);
+  assertEquals(4,snapshot.version());
+  assertNotEquals(0,snapshot.ledgerBalance().compareTo(balance(1)));
+  var event=new com.moneybags.account.api.Models.ProjectionEvent(UUID.randomUUID().toString(),1L,
+    "LEDGER_POSTED",5L,null,null,null,null,new BigDecimal("5.00"),BigDecimal.ZERO,
+    BigDecimal.ZERO,BigDecimal.ZERO,new BigDecimal("15.00"),BigDecimal.ZERO,BigDecimal.ZERO,
+    BigDecimal.ZERO,java.time.OffsetDateTime.now(),null);
+  assertDoesNotThrow(()->com.moneybags.account.domain.ProjectionPolicy.validate(snapshot,event));
+ }
+
+ @Test @Order(48) @Transactional void versionAdoptionChecksExistingAccountAgainstTargetTerms() throws Exception {
+  String customer=login("customer"),admin=login("admin");
+  long accountId=value(send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated())).path("id").asLong();
+  send("/accounts/self/"+accountId+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString()))
+    .andExpect(status().isAccepted());
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String checker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
+  long target=1001,approval=1001,treatment=1001;
+  db.update("UPDATE M03_PM_PRODUCT_VERSION SET VERSION_STATE='RETIRED' WHERE PRODUCT_VERSION_ID=1");
+  db.update("INSERT INTO M03_PM_PRODUCT_VERSION(PRODUCT_VERSION_ID,PRODUCT_ID,VERSION_NO,VERSION_STATE,EFFECTIVE_FROM_AT,DEFAULT_TXN_ACTION,CHANGE_REASON,RULE_SET_HASH,CREATED_BY_USER_ID) VALUES (?,1,2,'ACTIVE',?,'ALLOW','Nominee required',?,?)",
+    target,java.time.OffsetDateTime.now().minusDays(1),"a".repeat(64),maker);
+  db.update("INSERT INTO M03_PM_ACCOUNT_RULE(PRODUCT_VERSION_ID,MIN_OPENING_BALANCE,MINOR_ALLOWED,JOINT_ALLOWED,MAX_HOLDERS,NOMINEE_REQUIRED) VALUES (?,0,'N','N',1,'Y')",target);
+  db.update("INSERT INTO M03_PM_AVAILABILITY(PRODUCT_VERSION_ID,CURRENCY_CODE,OFFER_FROM_AT) VALUES (?,'INR',?)",
+    target,java.time.OffsetDateTime.now().minusDays(1));
+  db.update("INSERT INTO M03_PM_APPROVAL(APPROVAL_ID,PRODUCT_ID,PRODUCT_VERSION_ID,ACTION_CODE,REQUEST_STATUS,MAKER_USER_ID,MAKER_SESSION_ID,CHECKER_USER_ID,CHECKER_SESSION_ID,CONTENT_HASH,REASON,CORRELATION_ID,DECIDED_AT) VALUES (?,1,?,'TREATMENT','APPROVED',?,? ,?,? ,?,'Terms reviewed',?,SYSTIMESTAMP)",
+    approval,target,maker,UUID.randomUUID().toString(),checker,UUID.randomUUID().toString(),"a".repeat(64),UUID.randomUUID().toString());
+  db.update("INSERT INTO M03_PM_VERSION_TREATMENT(VERSION_TREATMENT_ID,PRODUCT_ID,SOURCE_VERSION_ID,TARGET_VERSION_ID,TREATMENT_CODE,CONSENT_REQUIRED,APPROVAL_ID) VALUES (?,1,1,?,'GRANDFATHER','N',?)",
+    treatment,target,approval);
+  var adoption=Map.of("requestId",UUID.randomUUID().toString(),"targetVersionId",target,
+    "treatmentId",treatment,"treatmentEventId",UUID.randomUUID().toString(),"reasonCode","TERMS_CHANGED");
+  send("/accounts/"+accountId+"/product-version-adoptions",admin,adoption)
+    .andExpect(status().isConflict()).andExpect(jsonPath("$.detail").value("Add a nominee before adopting this product version"));
+  mvc.perform(put("/api/v1/accounts/self/"+accountId+"/nominees")
+    .header("Authorization","Bearer "+customer).contentType(MediaType.APPLICATION_JSON)
+    .content(json.writeValueAsString(Map.of("requestId",UUID.randomUUID().toString(),"nominees",
+      List.of(Map.of("name","Version Nominee","relationship","FAMILY","sharePercentage","100.00"))))))
+    .andExpect(status().isNoContent());
+  send("/accounts/"+accountId+"/product-version-adoptions",admin,adoption)
+    .andExpect(status().isCreated());
+ }
+
+ @Test @Order(49) @Transactional void disablingNewCustomerOpeningKeepsExistingAccountActionsAvailable() throws Exception {
+  String customer=login("customer");
+  long accountId=value(send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+    "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isCreated())).path("id").asLong();
+  org.springframework.test.util.ReflectionTestUtils.setField(accountService,"demoCustomerOpening",false);
+  try {
+   send("/accounts/self",customer,Map.of("requestId",UUID.randomUUID().toString(),
+     "cifId","demo-cif-1","productId",1,"productVersionId",1)).andExpect(status().isForbidden());
+   send("/accounts/self/"+accountId+"/activate",customer,Map.of("requestId",UUID.randomUUID().toString()))
+     .andExpect(status().isAccepted());
+   mvc.perform(put("/api/v1/accounts/self/"+accountId+"/nominees")
+     .header("Authorization","Bearer "+customer).contentType(MediaType.APPLICATION_JSON)
+     .content(json.writeValueAsString(Map.of("requestId",UUID.randomUUID().toString(),"nominees",
+       List.of(Map.of("name","Existing Account Nominee","relationship","FAMILY","sharePercentage","100.00"))))))
+     .andExpect(status().isNoContent());
+   send("/accounts/self/"+accountId+"/closures",customer,
+     Map.of("requestId",UUID.randomUUID().toString(),"reasonCode","CUSTOMER_REQUEST"))
+     .andExpect(status().isAccepted());
+  } finally {
+   org.springframework.test.util.ReflectionTestUtils.setField(accountService,"demoCustomerOpening",true);
+  }
+ }
+
+ @Test @Order(50) @Transactional void ledgerAdministrationRejectsInvalidDatesMappingsAndCloseReplays() {
+  var today=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
+  var futureJournal=new com.moneybags.txn.api.Contracts.JournalRequest(UUID.randomUUID().toString(),
+    "ADJUSTMENT",3L,null,null,null,null,null,today.plusDays(1),"Future posting",
+    List.of(new com.moneybags.txn.api.Contracts.JournalLine(2L,null,null,null,"DR",BigDecimal.ONE,"Cash"),
+      new com.moneybags.txn.api.Contracts.JournalLine(7L,null,null,null,"CR",BigDecimal.ONE,"Equity")));
+  var future=assertThrows(com.moneybags.txn.api.ApiException.class,()->ledger.postJournal(futureJournal,"test"));
+  assertEquals("FUTURE_VALUE_DATE",future.code());
+  var mapping=assertThrows(com.moneybags.txn.api.ApiException.class,()->operationsService.createMapping(
+    new com.moneybags.txn.api.OperationsContracts.MappingRequest(1L,"FEE","FEE_INCOME",1L,today,null),"test"));
+  assertEquals("GL_CLASS",mapping.code());
+  var missing=assertThrows(com.moneybags.txn.api.ApiException.class,()->operationsService.assessFee(
+    new com.moneybags.txn.api.OperationsContracts.FeeRequest(UUID.randomUUID().toString(),999999L,null,901L,new BigDecimal("25.00"),today)));
+  assertEquals("FEE_OWNER_NOT_FOUND",missing.code());
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String key=UUID.randomUUID().toString();
+  var close=new com.moneybags.txn.api.OperationsContracts.CloseRequest(key,today.minusDays(1),"Month-end review");
+  var first=operationsService.requestClose(close,maker);
+  assertEquals(first,operationsService.requestClose(close,maker));
+  var conflict=assertThrows(com.moneybags.txn.api.ApiException.class,()->operationsService.requestClose(
+    new com.moneybags.txn.api.OperationsContracts.CloseRequest(key,today.minusDays(1),"Changed reason"),maker));
+  assertEquals("CLOSE_KEY_CONFLICT",conflict.code());
+  var futureClose=assertThrows(com.moneybags.txn.api.ApiException.class,()->operationsService.requestClose(
+    new com.moneybags.txn.api.OperationsContracts.CloseRequest(UUID.randomUUID().toString(),today.plusDays(1),"Future close"),maker));
+  assertEquals("FUTURE_CLOSE_DATE",futureClose.code());
+  String checker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
+  long closeId=((Number)first.get("closeId")).longValue();
+  var rejection=new com.moneybags.txn.api.OperationsContracts.CloseDecision("REJECTED");
+  assertEquals(operationsService.decideClose(closeId,rejection,checker),operationsService.decideClose(closeId,rejection,checker));
+ }
+
+ @Test @Order(51) void concurrentControlDeliveryReturnsOneAppliedSnapshot() throws Exception {
+  var position=ledger.position(1);
+  var fence=db.queryForMap("SELECT DEBIT_STATUS,CREDIT_STATUS FROM M05_POSTING_FENCE WHERE BANK_ACCOUNT_ID=1");
+  var event=new com.moneybags.txn.api.Contracts.ControlRequest(UUID.randomUUID(),position.controlVersion()+1,
+    (String)fence.get("DEBIT_STATUS"),(String)fence.get("CREDIT_STATUS"),position.liens(),position.blocks(),position.overdraft(),"RETRY_TEST");
+  var start=new java.util.concurrent.CountDownLatch(1);
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+  try {
+   var first=pool.submit(()->{start.await();return ledger.applyControl(1,event,"test");});
+   var second=pool.submit(()->{start.await();return ledger.applyControl(1,event,"test");});
+   start.countDown();
+   assertEquals(event.controlVersion(),first.get(20,java.util.concurrent.TimeUnit.SECONDS).controlVersion());
+   assertEquals(event.controlVersion(),second.get(20,java.util.concurrent.TimeUnit.SECONDS).controlVersion());
+   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_POSTING_FENCE_HISTORY WHERE BANK_ACCOUNT_ID=1 AND CONTROL_VERSION=?",Integer.class,event.controlVersion()));
+  } finally {pool.shutdownNow();}
+ }
+
+ @Test @Order(52) void concurrentPaymentHoldDeliveryCreatesOnlyOneReservation() throws Exception {
+  String key=UUID.randomUUID().toString();
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  db.update("INSERT INTO M06_PAYMENT_INSTRUCTION(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,END_TO_END_ID,PAYMENT_DIRECTION,PAYMENT_KIND,SOURCE_ACCOUNT_ID,SOURCE_CIF_ID,BENEFICIARY_TOKEN_REF,BENEFICIARY_BANK_CODE,RAIL_CODE,AMOUNT,REQUESTED_EXECUTION_DATE,STATUS) VALUES (?,'WEB',?,?,?,?,?,'PAYMENT',1,'demo-cif-1','TEST_BENEFICIARY','TEST_BANK','NEFT',1.50,?,'AUTHORIZED')",
+    maker,key,new byte[32],key,"hold-"+key,"OUTBOUND",java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));
+  long paymentId=db.queryForObject("SELECT PAYMENT_ID FROM M06_PAYMENT_INSTRUCTION WHERE REQUEST_KEY=?",Long.class,key);
+  var request=new com.moneybags.txn.api.Contracts.HoldRequest(1L,paymentId,new BigDecimal("1.50"),"hold-"+key,
+    java.time.OffsetDateTime.now().plusHours(1));
+  var start=new java.util.concurrent.CountDownLatch(1);
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+  try {
+   var first=pool.submit(()->{start.await();return ledger.placeHold(request,maker);});
+   var second=pool.submit(()->{start.await();return ledger.placeHold(request,maker);});
+   start.countDown();
+   assertEquals(first.get(20,java.util.concurrent.TimeUnit.SECONDS).holdId(),second.get(20,java.util.concurrent.TimeUnit.SECONDS).holdId());
+   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_FUNDS_HOLD WHERE PAYMENT_ID=?",Integer.class,paymentId));
+   var duplicate=assertThrows(com.moneybags.txn.api.ApiException.class,()->ledger.placeHold(
+     new com.moneybags.txn.api.Contracts.HoldRequest(1L,paymentId,new BigDecimal("1.50"),"other-"+key,request.expiresAt()),maker));
+   assertEquals("PAYMENT_HOLD_EXISTS",duplicate.code());
+  } finally {pool.shutdownNow();}
+ }
+
+ @Test @Order(53) void concurrentJournalReplayPostsOneBalancedJournal() throws Exception {
+  String key="race-journal:"+UUID.randomUUID();
+  var request=new com.moneybags.txn.api.Contracts.JournalRequest(key,"ADJUSTMENT",3L,null,null,null,null,null,
+    java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")),"Concurrent replay",
+    List.of(new com.moneybags.txn.api.Contracts.JournalLine(2L,null,null,null,"DR",BigDecimal.ONE,"Cash"),
+      new com.moneybags.txn.api.Contracts.JournalLine(7L,null,null,null,"CR",BigDecimal.ONE,"Equity")));
+  var start=new java.util.concurrent.CountDownLatch(1);
+  var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+  try {
+   var first=pool.submit(()->{start.await();return ledger.postJournal(request,"test");});
+   var second=pool.submit(()->{start.await();return ledger.postJournal(request,"test");});
+   start.countDown();
+   assertEquals(first.get(20,java.util.concurrent.TimeUnit.SECONDS).journalId(),second.get(20,java.util.concurrent.TimeUnit.SECONDS).journalId());
+   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE POSTING_KEY=?",Integer.class,key));
+   assertEquals("Y",ledger.journalControl(first.get().journalId()).get("IS_BALANCED"));
+  } finally {pool.shutdownNow();}
+ }
+
+ @Test @Order(54) @Transactional void paymentSettlementClearsTheOriginalSuspenseAfterAccountVersionChange() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Rollover recipient",
+    "accountToken","rollover-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","10.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  long originalSuspense=db.queryForObject("SELECT P.GL_ACCOUNT_ID FROM M05_GL_JOURNAL J JOIN M05_GL_POSTING P ON P.JOURNAL_ID=J.JOURNAL_ID WHERE J.PAYMENT_ID=? AND J.JOURNAL_TYPE='PAYMENT_PROVISIONAL' AND P.BANK_ACCOUNT_ID IS NULL",Long.class,payment);
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  long version=2002;
+  db.update("INSERT INTO M03_PM_PRODUCT_VERSION(PRODUCT_VERSION_ID,PRODUCT_ID,VERSION_NO,VERSION_STATE,EFFECTIVE_FROM_AT,DEFAULT_TXN_ACTION,CHANGE_REASON,RULE_SET_HASH,CREATED_BY_USER_ID) VALUES (?,1,99,'ACTIVE',?,'ALLOW','Payment rollover test',?,?)",
+    version,java.time.OffsetDateTime.now().minusDays(1),"a".repeat(64),maker);
+  String glCode="ALT_SUSP_"+UUID.randomUUID().toString().substring(0,8);
+  db.update("INSERT INTO M05_GL_ACCOUNT(GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE) VALUES (?,'New payment suspense','LIABILITY','CR')",glCode);
+  long alternateSuspense=db.queryForObject("SELECT GL_ACCOUNT_ID FROM M05_GL_ACCOUNT WHERE GL_CODE=?",Long.class,glCode);
+  var effective=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1);
+  db.update("INSERT INTO M05_GL_PRODUCT_MAPPING(PRODUCT_VERSION_ID,POSTING_TYPE,GL_ROLE_CODE,GL_ACCOUNT_ID,EFFECTIVE_FROM,CREATED_BY) VALUES (?,'PAYMENT','CUSTOMER_LIABILITY',1,?,?)",version,effective,maker);
+  db.update("INSERT INTO M05_GL_PRODUCT_MAPPING(PRODUCT_VERSION_ID,POSTING_TYPE,GL_ROLE_CODE,GL_ACCOUNT_ID,EFFECTIVE_FROM,CREATED_BY) VALUES (?,'PAYMENT','SETTLEMENT_SUSPENSE',?,?,?)",version,alternateSuspense,effective,maker);
+  db.update("UPDATE M04_BANK_ACCOUNT SET PRODUCT_VERSION_ID=? WHERE ACCOUNT_ID=1",version);
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+  long settledSuspense=db.queryForObject("SELECT P.GL_ACCOUNT_ID FROM M05_GL_JOURNAL J JOIN M05_GL_POSTING P ON P.JOURNAL_ID=J.JOURNAL_ID WHERE J.PAYMENT_ID=? AND J.JOURNAL_TYPE='SETTLEMENT' AND P.ENTRY_SIDE='DR'",Long.class,payment);
+  assertNotEquals(alternateSuspense,originalSuspense);
+  assertEquals(originalSuspense,settledSuspense);
+ }
+
+ @Test @Order(55) @Transactional void reversalDecisionReplayDoesNotPostTwice() {
+  var today=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String checker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
+  var transfer=new com.moneybags.txn.api.Contracts.TransferRequest(1L,2L,BigDecimal.ONE,"BRANCH",
+    UUID.randomUUID().toString(),UUID.randomUUID().toString(),today);
+  long original=ledger.transfer(transfer,maker).transactionId();
+  var reversal=new com.moneybags.txn.api.Contracts.ReversalRequest(UUID.randomUUID().toString(),
+    "Customer transfer correction",UUID.randomUUID().toString(),today);
+  long id=ledger.requestReversal(original,reversal,maker).transactionId();
+  var approve=new com.moneybags.txn.api.Contracts.ApprovalDecision("APPROVED","Reviewed");
+  assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
+  assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE TXN_ID=? AND REVERSAL_OF_JOURNAL_ID IS NOT NULL",Integer.class,id));
+  var opposite=assertThrows(com.moneybags.txn.api.ApiException.class,()->ledger.decideReversal(id,
+    new com.moneybags.txn.api.Contracts.ApprovalDecision("REJECTED","Changed"),checker));
+  assertEquals("APPROVAL_CLOSED",opposite.code());
+ }
+
+ @Test @Order(34) @Transactional void futureDatedRelationshipsCanEndEarlyAndClosureEndsBothDirections() throws Exception {
+  String admin=login("admin");
+  JsonNode a=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Source Example",
+    "dateOfBirth","1990-01-01","homeBranchRef","MUM001")).andExpect(status().isOk())).path("data");
+  JsonNode b=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Target Example",
+    "dateOfBirth","1991-01-01","homeBranchRef","MUM001")).andExpect(status().isOk())).path("data");
+  String source=a.path("customer").path("CIF_ID").asText(),target=b.path("customer").path("CIF_ID").asText();
+  var relation=Map.of("targetCifId",target,"relationshipType","GUARDIAN","operatingAuthority","NONE",
+    "validTo",java.time.OffsetDateTime.now().plusDays(10).toString());
+  send("/cif/customers/"+source+"/relationships",admin,relation).andExpect(status().isOk());
+  send("/cif/customers/"+source+"/relationships",admin,relation).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("RELATIONSHIP_EXISTS"));
+  String rel=db.queryForObject("SELECT RELATIONSHIP_ID FROM M02_CIF_RELATIONSHIP WHERE SOURCE_PARTY_ID=?",
+    String.class,a.path("customer").path("PARTY_ID").asText());
+  mvc.perform(delete("/api/v1/cif/customers/"+source+"/relationships/"+rel).header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M02_CIF_RELATIONSHIP WHERE RELATIONSHIP_ID=? AND VALID_TO>CURRENT_TIMESTAMP",Integer.class,rel));
+  send("/cif/customers/"+source+"/relationships",admin,relation).andExpect(status().isOk());
+  long version=db.queryForObject("SELECT ROW_VERSION FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",Long.class,target);
+  // This fixture tests ending future validity, independently of same-tick date precision.
+  db.update("UPDATE M02_CIF_RELATIONSHIP SET VALID_FROM=VALID_FROM-INTERVAL '1' SECOND WHERE SOURCE_PARTY_ID=?",
+    a.path("customer").path("PARTY_ID").asText());
+  mvc.perform(patch("/api/v1/cif/customers/"+target+"/status").header("Authorization","Bearer "+admin)
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("rowVersion",version,
+      "status","CLOSED","reason","Customer request")))).andExpect(status().isOk());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M02_CIF_RELATIONSHIP R JOIN M02_CIF_CUSTOMER C ON C.PARTY_ID=R.TARGET_PARTY_ID WHERE C.CIF_ID=? AND R.VALID_TO>CURRENT_TIMESTAMP",Integer.class,target));
+  send("/cif/customers/"+source+"/relationships",admin,relation).andExpect(status().isConflict())
+    .andExpect(jsonPath("$.code").value("CUSTOMER_CLOSED"));
+ }
+
+ @Test @Order(56) @Transactional void profileReplacementWorksWithinOneClockTick() throws Exception {
+  String admin=login("admin");
+  java.time.Clock original=(java.time.Clock)org.springframework.test.util.ReflectionTestUtils.getField(cifService,"clock");
+  var instant=java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+  org.springframework.test.util.ReflectionTestUtils.setField(cifService,"clock",java.time.Clock.fixed(instant,java.time.ZoneOffset.UTC));
+  try {
+   JsonNode created=value(send("/cif/customers",admin,Map.of("partyType","INDIVIDUAL","legalName","Rapid Profile",
+     "dateOfBirth","1990-01-01","homeBranchRef","MUM001")).andExpect(status().isOk())).path("data");
+   String cif=created.path("customer").path("CIF_ID").asText();
+   String party=created.path("customer").path("PARTY_ID").asText();
+   proposeProfile(admin,cif,"Rapid Profile Updated","PREMIUM");
+   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M02_CIF_NAME WHERE PARTY_ID=? AND VALID_TO>VALID_FROM",Integer.class,party));
+   assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM M02_CIF_NAME WHERE PARTY_ID=?",Integer.class,party));
+  } finally {
+   org.springframework.test.util.ReflectionTestUtils.setField(cifService,"clock",original);
+  }
+ }
+
+ @Test @Order(57) @Transactional void paymentDispatchVisibilityReconciliationAndRefundStayConsistent() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin"),other=login("customer2");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Refund recipient",
+    "accountToken","refund-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  BigDecimal customerBefore=balance(1);
+  BigDecimal reserveBefore=db.queryForObject("SELECT ACTIVE_HOLD_AMOUNT FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","3.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  String approvalKey=UUID.randomUUID().toString();
+  var approvalBody=Map.of("approvalKey",approvalKey,"paymentId",payment,"actionCode","MANUAL_RETURN","reasonText","Review test");
+  long approval=value(send("/approvals",admin,approvalBody).andExpect(status().isOk())).path("APPROVAL_ID").asLong();
+  assertEquals(approval,value(send("/approvals",admin,approvalBody).andExpect(status().isOk())).path("APPROVAL_ID").asLong());
+  send("/approvals/"+approval+"/decision",checker,Map.of("decision","APPROVED")).andExpect(status().isOk());
+  send("/approvals/"+approval+"/decision",checker,Map.of("decision","APPROVED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/payments/"+payment).header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.amount").isNumber());
+  mvc.perform(get("/api/v1/payments/"+payment).header("Authorization","Bearer "+other))
+    .andExpect(status().isNotFound());
+  long dispatchId=db.queryForObject("SELECT DISPATCH_ID FROM M06_RAIL_DISPATCH WHERE PAYMENT_ID=?",Long.class,payment);
+  var invalid=assertThrows(com.moneybags.payments.api.ApiException.class,()->paymentDispatch.attempt(dispatchId,
+    new com.moneybags.payments.api.Contracts.DispatchAttempt("INQUIRY","STARTED",null,null)));
+  assertEquals("INVALID_INQUIRY_OUTCOME",invalid.code());
+  send("/payments/"+payment+"/reconciliations",admin,Map.of("reconciledAmount","3.00"))
+    .andExpect(status().isOk());
+  assertNotEquals("MATCHED",db.queryForObject("SELECT RECONCILIATION_STATUS FROM M06_PAYMENT_RECONCILIATION WHERE PAYMENT_ID=?",String.class,payment));
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","REJECTED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","REFUNDED")).andExpect(status().isOk());
+  assertEquals(0,customerBefore.compareTo(balance(1)));
+  assertEquals(0,reserveBefore.compareTo(db.queryForObject("SELECT ACTIVE_HOLD_AMOUNT FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals("RELEASED",db.queryForObject("SELECT STATUS FROM M07_TREASURY_LIQUIDITY_HOLD WHERE PAYMENT_ID=?",String.class,payment));
+ }
+
+ @Test @Order(58) @Transactional void clearingBatchRetriesAndCycleItemsMatchExactly() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Clearing recipient",
+    "accountToken","clearing-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","4.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+  var batchRequest=Map.of("railCode","UPI","batchReference",UUID.randomUUID().toString(),"direction","OUTBOUND");
+  long batch=value(send("/clearing-batches",admin,batchRequest).andExpect(status().isOk())).path("CLEARING_BATCH_ID").asLong();
+  assertEquals(batch,value(send("/clearing-batches",admin,batchRequest).andExpect(status().isOk())).path("CLEARING_BATCH_ID").asLong());
+  var itemRequest=Map.of("paymentId",payment,"externalItemRef",UUID.randomUUID().toString());
+  send("/clearing-batches/"+batch+"/items",admin,itemRequest).andExpect(status().isOk());
+  send("/clearing-batches/"+batch+"/items",admin,itemRequest).andExpect(status().isOk());
+  assertEquals(1,db.queryForObject("SELECT ITEM_COUNT FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",Integer.class,batch));
+  send("/clearing-batches/"+batch+"/close",admin,Map.of()).andExpect(status().isOk());
+  String reference=UUID.randomUUID().toString();
+  db.update("INSERT INTO M07_SETTLEMENT_CYCLE(RAIL_CODE,RESERVE_ACCOUNT_ID,CYCLE_REFERENCE,CLEARING_BATCH_ID,CYCLE_DIRECTION,GROSS_OUT_AMOUNT,NET_AMOUNT,NET_MOVEMENT_SIDE,STATUS,CLOSED_AT) VALUES ('UPI',1,?,?,'OUTBOUND',4,4,'OUT','CLOSED',SYSTIMESTAMP)",reference,batch);
+  long cycle=db.queryForObject("SELECT SETTLEMENT_CYCLE_ID FROM M07_SETTLEMENT_CYCLE WHERE CYCLE_REFERENCE=?",Long.class,reference);
+  send("/clearing-batches/"+batch+"/settlement",admin,Map.of("settlementCycleId",cycle)).andExpect(status().isConflict());
+  db.update("INSERT INTO M07_SETTLEMENT_CYCLE_ITEM(SETTLEMENT_CYCLE_ID,PAYMENT_ID,DIRECTION,AMOUNT) VALUES (?,?,'OUT',4)",cycle,payment);
+  send("/clearing-batches/"+batch+"/settlement",admin,Map.of("settlementCycleId",cycle)).andExpect(status().isOk());
+  assertEquals("SETTLEMENT_PENDING",db.queryForObject("SELECT BATCH_STATUS FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",String.class,batch));
+ }
+
+ @Test @Order(59) @Transactional void paymentRetryUsesOriginalInstructionAfterBeneficiaryDisabled() throws Exception {
+  String customer=login("customer"),checker=login("checker");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Retry recipient",
+    "accountToken","retry-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  String key=UUID.randomUUID().toString();
+  var request=Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","7.00","requestKey",key);
+  long payment=value(send("/payments/initiate",customer,request).andExpect(status().isOk())).path("paymentId").asLong();
+  String oldKey=UUID.randomUUID().toString();
+  String originator=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer'",String.class);
+  String token=db.queryForObject("SELECT ACCOUNT_TOKEN FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=?",String.class,beneficiary);
+  long oldPayment=value(send("/payments",customer,Map.ofEntries(
+    Map.entry("originatorId",originator),Map.entry("channelCode","WEB"),Map.entry("requestKey",oldKey),
+    Map.entry("correlationId","payment:"+oldKey),Map.entry("endToEndId","MB-"+oldKey),
+    Map.entry("direction","OUTBOUND"),Map.entry("kind","PAYMENT"),Map.entry("sourceAccountId",1),
+    Map.entry("sourceCifId","demo-cif-1"),Map.entry("beneficiaryTokenRef",token),
+    Map.entry("beneficiaryBankCode","TEST0123456"),Map.entry("railCode","UPI"),Map.entry("amount","9.00"),
+    Map.entry("requestedExecutionDate",java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1).toString())))
+    .andExpect(status().isCreated())).path("paymentId").asLong();
+  db.update("UPDATE MBX_BENEFICIARY SET STATUS='DISABLED' WHERE BENEFICIARY_ID=?",beneficiary);
+  assertEquals(payment,value(send("/payments/initiate",customer,request).andExpect(status().isOk())).path("paymentId").asLong());
+  assertEquals(oldPayment,value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","9.00","requestKey",oldKey)).andExpect(status().isOk())).path("paymentId").asLong());
+  send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","8.00","requestKey",key))
+    .andExpect(status().isConflict());
+  send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","7.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isNotFound());
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE ORIGINATOR_ID=(SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer') AND REQUEST_KEY=?",Integer.class,key));
+  send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","UPI","amount","7.00","requestKey","x".repeat(93)))
+    .andExpect(status().isBadRequest());
+ }
+
+ @Test @Order(60) @Transactional void treasuryRejectsWrongGlCycleAndSettlementJournal() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  send("/treasury/reserve-accounts",admin,Map.of("code","BAD-"+UUID.randomUUID(),"accountType","RBI_CURRENT",
+    "externalAccountRef","TEST-"+UUID.randomUUID(),"glAccountId",3,"safetyBuffer","0.00","warningThreshold","0.00"))
+    .andExpect(status().isUnprocessableEntity());
+  long cycle=value(send("/treasury/settlement-cycles",admin,Map.of("railCode","UPI","reserveAccountId",1,
+    "cycleReference",UUID.randomUUID().toString(),"direction","OUTBOUND")).andExpect(status().isCreated())).path("id").asLong();
+  send("/treasury/settlement-cycles/"+cycle+"/close",admin,Map.of()).andExpect(status().isUnprocessableEntity());
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Treasury recipient",
+    "accountToken","treasury-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","5.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  var evidence=new HashMap<String,Object>();
+  evidence.put("reserveAccountId",1); evidence.put("paymentId",payment); evidence.put("railCode","UPI");
+  evidence.put("evidenceType","RAIL_CONFIRMATION"); evidence.put("evidenceStatus","VERIFIED");
+  evidence.put("movementSide","OUT"); evidence.put("amount","6.00");
+  evidence.put("externalSettlementRef","BAD-"+UUID.randomUUID()); evidence.put("evidencePayload","bad payment amount");
+  evidence.put("occurredAt",java.time.OffsetDateTime.now().toString());
+  send("/treasury/settlement-evidence",admin,evidence).andExpect(status().isConflict());
+  evidence.put("amount","5.00"); evidence.put("externalSettlementRef","GOOD-"+UUID.randomUUID());
+  evidence.put("evidencePayload","payment " + payment);
+  long evidenceId=value(send("/treasury/settlement-evidence",admin,evidence).andExpect(status().isCreated())).path("id").asLong();
+  assertEquals(evidenceId,value(send("/treasury/settlement-evidence",admin,evidence).andExpect(status().isCreated())).path("id").asLong());
+  evidence.put("evidenceRef","different evidence location");
+  send("/treasury/settlement-evidence",admin,evidence).andExpect(status().isConflict());
+  mvc.perform(get("/api/v1/treasury/settlement-evidence/"+evidenceId).header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(evidenceId));
+  mvc.perform(get("/api/v1/treasury/settlement-cycles/"+cycle).header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(cycle));
+  long unrelatedJournal=db.queryForObject("SELECT MIN(JOURNAL_ID) FROM M05_GL_JOURNAL WHERE JOURNAL_TYPE<>'SETTLEMENT'",Long.class);
+  BigDecimal before=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
+  send("/treasury/reserve-movements/confirm",admin,Map.of("evidenceId",evidenceId,"glJournalId",unrelatedJournal))
+    .andExpect(status().isConflict());
+  assertEquals(0,before.compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE EVIDENCE_ID=?",Integer.class,evidenceId));
+ }
+
+ @Test @Order(61) @Transactional void cycleMovementSettlesPaymentOnceAndBatchAfterFinality() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Cycle recipient",
+    "accountToken","cycle-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","5.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+  long batch=value(send("/clearing-batches",admin,Map.of("railCode","UPI","batchReference",UUID.randomUUID().toString(),
+    "direction","OUTBOUND")).andExpect(status().isOk())).path("CLEARING_BATCH_ID").asLong();
+  send("/clearing-batches/"+batch+"/items",admin,Map.of("paymentId",payment,"externalItemRef",UUID.randomUUID().toString()))
+    .andExpect(status().isOk());
+  send("/clearing-batches/"+batch+"/close",admin,Map.of()).andExpect(status().isOk());
+  long cycle=value(send("/treasury/settlement-cycles",admin,Map.of("railCode","UPI","reserveAccountId",1,
+    "cycleReference",UUID.randomUUID().toString(),"clearingBatchId",batch,"direction","OUTBOUND"))
+    .andExpect(status().isCreated())).path("id").asLong();
+  send("/treasury/settlement-cycles/"+cycle+"/items",admin,Map.of("items",List.of(Map.of("paymentId",payment,
+    "direction","OUT","amount","5.00")))).andExpect(status().isOk());
+  send("/treasury/settlement-cycles/"+cycle+"/close",admin,Map.of()).andExpect(status().isOk());
+  long evidence=value(send("/treasury/settlement-evidence",admin,Map.of("reserveAccountId",1,
+    "settlementCycleId",cycle,"railCode","UPI","evidenceType","CLEARING_CONFIRMATION",
+    "evidenceStatus","VERIFIED","movementSide","OUT","amount","5.00",
+    "externalSettlementRef","CYCLE-"+UUID.randomUUID(),"evidencePayload","verified cycle " + cycle,
+    "occurredAt",java.time.OffsetDateTime.now().toString())).andExpect(status().isCreated())).path("id").asLong();
+  var journal=ledger.postJournal(new com.moneybags.txn.api.Contracts.JournalRequest("cycle-settle:"+cycle,
+    "SETTLEMENT",null,null,cycle,null,null,null,java.time.LocalDate.now(),"Cycle settlement",List.of(
+      new com.moneybags.txn.api.Contracts.JournalLine(3L,null,null,null,"DR",new BigDecimal("5.00"),"Clear suspense"),
+      new com.moneybags.txn.api.Contracts.JournalLine(6L,null,null,null,"CR",new BigDecimal("5.00"),"Reserve settlement"))),"admin");
+  BigDecimal reserveBefore=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
+  long entry=value(send("/treasury/reserve-movements/confirm",admin,Map.of("evidenceId",evidence,"glJournalId",journal.journalId()))
+    .andExpect(status().isOk())).path("id").asLong();
+  assertEquals(0,reserveBefore.subtract(new BigDecimal("5.00")).compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  assertEquals("CONSUMED",db.queryForObject("SELECT STATUS FROM M07_TREASURY_LIQUIDITY_HOLD WHERE PAYMENT_ID=?",String.class,payment));
+  assertEquals(entry,value(send("/treasury/reserve-movements/confirm",admin,Map.of("evidenceId",evidence,"glJournalId",journal.journalId()))
+    .andExpect(status().isOk())).path("id").asLong());
+  send("/clearing-batches/"+batch+"/settlement",admin,Map.of("settlementCycleId",cycle)).andExpect(status().isOk());
+  assertEquals("SETTLEMENT_PENDING",db.queryForObject("SELECT BATCH_STATUS FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",String.class,batch));
+  long railEvidence=paymentService.evidence(payment,new com.moneybags.payments.api.Contracts.RailEvidence(
+    "SIM-"+payment,"SETTLED-CYCLE-"+cycle,"SETTLEMENT","SETTLED",null,"simulation://cycle/"+cycle,
+    java.util.HexFormat.of().formatHex(com.moneybags.integration.CustomerHashService.digest("cycle-"+cycle)),
+    java.time.OffsetDateTime.now()));
+  var current=paymentService.get(payment);
+  paymentService.transition(payment,new com.moneybags.payments.api.Contracts.Transition("SETTLED",current.version(),
+    railEvidence,journal.journalId(),entry,null,null,"SIMULATED"));
+  assertEquals("SETTLED",db.queryForObject("SELECT BATCH_STATUS FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",String.class,batch));
+  send("/clearing-batches/"+batch+"/settlement",admin,Map.of("settlementCycleId",cycle)).andExpect(status().isOk());
+  assertEquals("SETTLED",db.queryForObject("SELECT BATCH_STATUS FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",String.class,batch));
+ }
+
+ @Test @Order(62) @Transactional void individuallySettledPaymentFinalizesCycleWithoutAnotherReserveMovement() throws Exception {
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Individual settlement recipient",
+    "accountToken","individual-"+UUID.randomUUID(),"bankCode","TEST0123456"))
+    .andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","6.00","requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+  long batch=value(send("/clearing-batches",admin,Map.of("railCode","UPI","batchReference",UUID.randomUUID().toString(),
+    "direction","OUTBOUND")).andExpect(status().isOk())).path("CLEARING_BATCH_ID").asLong();
+  send("/clearing-batches/"+batch+"/items",admin,Map.of("paymentId",payment,"externalItemRef",UUID.randomUUID().toString()))
+    .andExpect(status().isOk());
+  send("/clearing-batches/"+batch+"/close",admin,Map.of()).andExpect(status().isOk());
+  long cycle=value(send("/treasury/settlement-cycles",admin,Map.of("railCode","UPI","reserveAccountId",1,
+    "cycleReference",UUID.randomUUID().toString(),"clearingBatchId",batch,"direction","OUTBOUND"))
+    .andExpect(status().isCreated())).path("id").asLong();
+  send("/treasury/settlement-cycles/"+cycle+"/items",admin,Map.of("items",List.of(Map.of("paymentId",payment,
+    "direction","OUT","amount","6.00")))).andExpect(status().isOk());
+  send("/treasury/settlement-cycles/"+cycle+"/close",admin,Map.of()).andExpect(status().isOk());
+  send("/treasury/settlement-cycles/"+cycle+"/finalize",admin,Map.of()).andExpect(status().isConflict());
+  BigDecimal before=db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+  int movements=db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",Integer.class,payment);
+  send("/treasury/settlement-cycles/"+cycle+"/finalize",admin,Map.of()).andExpect(status().isOk())
+    .andExpect(jsonPath("$.status").value("SETTLED"));
+  send("/treasury/settlement-cycles/"+cycle+"/finalize",admin,Map.of()).andExpect(status().isOk());
+  assertEquals(movements,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",Integer.class,payment));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE SETTLEMENT_CYCLE_ID=?",Integer.class,cycle));
+  assertEquals(0,before.subtract(new BigDecimal("6.00")).compareTo(db.queryForObject("SELECT CONFIRMED_BALANCE FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class)));
+  send("/clearing-batches/"+batch+"/settlement",admin,Map.of("settlementCycleId",cycle)).andExpect(status().isOk());
+  assertEquals("SETTLED",db.queryForObject("SELECT BATCH_STATUS FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=?",String.class,batch));
+ }
+
+ @Test @Order(63) @Transactional void loanOfferAccountsEvidenceAndServicingRespectCurrentState() throws Exception {
+  String admin=login("admin"),checker=login("checker"),customer=login("customer");
+  var request=Map.of("cifId","demo-cif-1","productId",2,"productVersionId",2,"branchCode","MUM001",
+    "channelCode","BRANCH","amount","12000.001","tenureMonths",12,"purposeCode","PERSONAL");
+  send("/loans/applications",admin,request).andExpect(status().isBadRequest());
+  var valid=new HashMap<String,Object>(request);valid.put("amount","12000.00");
+  db.update("UPDATE M03_PM_LOAN_RULE SET REPAYMENT_FREQUENCY='WEEKLY' WHERE PRODUCT_VERSION_ID=2");
+  send("/loans/applications",admin,valid).andExpect(status().isConflict());
+  db.update("UPDATE M03_PM_LOAN_RULE SET REPAYMENT_FREQUENCY='MONTHLY' WHERE PRODUCT_VERSION_ID=2");
+  db.update("UPDATE M03_PM_INTEREST_RULE SET INTEREST_METHOD='REDUCING_BALANCE' WHERE PRODUCT_VERSION_ID=2 AND INTEREST_TYPE='FIXED'");
+  long app=value(send("/loans/applications",admin,valid).andExpect(status().isOk())).path("data").path("id").asLong();
+  send("/loans/applications/"+app+"/submit",admin,Map.of()).andExpect(status().isOk());
+  send("/loans/applications/"+app+"/assessments",admin,Map.of("monthlyIncome","50000","monthlyObligations","5000",
+    "recommendation","APPROVE","reasonCodes","AFFORDABLE")).andExpect(status().isOk());
+  send("/loans/applications/"+app+"/decisions",checker,Map.of("code","APPROVE","reasonCodes","APPROVED",
+    "sanctionedAmount","12000","sanctionedTenureMonths",12,"annualRatePct","12",
+    "authorityCode","LOAN_SANCTION","authorityEvidenceRef","TEST-AUTHORITY")).andExpect(status().isOk());
+  long staleDoc=value(send("/loans/applications/"+app+"/documents",admin,Map.of("type","SIGNED_OFFER",
+    "storageReference","test://old-document","sha256Hex","a".repeat(64))).andExpect(status().isOk()))
+    .path("data").path("documentRefId").asLong();
+  long offer=value(send("/loans/applications/"+app+"/offers",admin,Map.of("documentRef","test://offer",
+    "expiresAt",java.time.OffsetDateTime.now().plusDays(7).toString())).andExpect(status().isOk()))
+    .path("data").path("offerId").asLong();
+  var selected=Map.of("disbursementAccountId",1,"repaymentAccountId",1);
+  db.update("UPDATE M04_BANK_ACCOUNT SET ACCOUNT_STATUS='FROZEN' WHERE ACCOUNT_ID=1");
+  send("/loans/offers/"+offer+"/accept",customer,selected).andExpect(status().isConflict());
+  db.update("UPDATE M04_BANK_ACCOUNT SET ACCOUNT_STATUS='ACTIVE' WHERE ACCOUNT_ID=1");
+  send("/loans/offers/"+offer+"/accept",customer,selected).andExpect(status().isOk());
+  send("/loans/offers/"+offer+"/accept",customer,selected).andExpect(status().isOk());
+  String adminId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String accountNumber="LNTEST"+UUID.randomUUID().toString().substring(0,12);
+  db.update("INSERT INTO M04_BANK_ACCOUNT(ACCOUNT_NUMBER,PRIMARY_CIF_ID,PRODUCT_ID,PRODUCT_VERSION_ID,BRANCH_CODE,CURRENCY_CODE,LIFECYCLE_STATUS,ACCOUNT_STATUS,ACCOUNT_OPERATION_MODE,MAJORITY_REVIEW_STATUS,OPEN_REQUEST_ID,CREATED_BY_USER_ID,ACTIVATED_AT) VALUES (?,'demo-cif-1',1,1,'MUM001','INR','ACTIVE','ACTIVE','SELF_OPERATED','NOT_APPLICABLE',?,?,SYSTIMESTAMP)",
+    accountNumber,UUID.randomUUID().toString(),adminId);
+  long alternate=db.queryForObject("SELECT ACCOUNT_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_NUMBER=?",Long.class,accountNumber);
+  db.update("INSERT INTO M04_ACCOUNT_PARTY(ACCOUNT_ID,CIF_ID,PARTY_ROLE,OPERATING_INSTRUCTION,IS_ACTIVE,EFFECTIVE_FROM,CREATED_BY_USER_ID) VALUES (?,'demo-cif-1','PRIMARY_HOLDER','SELF','Y',SYSDATE,?)",alternate,adminId);
+  send("/loans/offers/"+offer+"/accept",customer,Map.of("disbursementAccountId",alternate,"repaymentAccountId",1))
+    .andExpect(status().isOk());
+  assertEquals(alternate,db.queryForObject("SELECT DISBURSEMENT_ACCOUNT_ID FROM M08_LOAN_OFFER WHERE OFFER_ID=?",Long.class,offer));
+  send("/loans/offers/"+offer+"/accept",customer,selected).andExpect(status().isOk());
+  send("/loans/applications/"+app+"/documents/"+staleDoc+"/verify",checker,Map.of()).andExpect(status().isOk());
+  send("/loans/applications/"+app+"/convert",admin,Map.of()).andExpect(status().isConflict());
+  long signed=value(send("/loans/applications/"+app+"/documents",admin,Map.of("type","SIGNED_OFFER",
+    "storageReference","test://current-document","sha256Hex","b".repeat(64))).andExpect(status().isOk()))
+    .path("data").path("documentRefId").asLong();
+  send("/loans/applications/"+app+"/documents/"+signed+"/verify",checker,Map.of()).andExpect(status().isOk());
+  send("/loans/offers/"+offer+"/accept",customer,Map.of("disbursementAccountId",alternate,"repaymentAccountId",1))
+    .andExpect(status().isOk());
+  send("/loans/offers/"+offer+"/accept",customer,selected).andExpect(status().isOk());
+  send("/loans/applications/"+app+"/convert",admin,Map.of()).andExpect(status().isConflict());
+  long correctedSigned=value(send("/loans/applications/"+app+"/documents",admin,Map.of("type","SIGNED_OFFER",
+    "storageReference","test://corrected-document","sha256Hex","c".repeat(64))).andExpect(status().isOk()))
+    .path("data").path("documentRefId").asLong();
+  send("/loans/applications/"+app+"/documents/"+correctedSigned+"/verify",checker,Map.of()).andExpect(status().isOk());
+  // Make the chronology fixture explicit: fast H2 requests can share a timestamp.
+  java.sql.Timestamp currentEvidenceTime=db.queryForObject(
+    "SELECT MAX(OCCURRED_AT) FROM M08_SECURITY_AUDIT_EVENT WHERE ACTION_CODE='OFFER_ACCOUNTS_UPDATED' AND RESOURCE_TYPE='OFFER' AND RESOURCE_ID=?",
+    java.sql.Timestamp.class,String.valueOf(offer));
+  java.sql.Timestamp afterAccountChange=java.sql.Timestamp.from(currentEvidenceTime.toInstant().plusSeconds(1));
+  db.update("UPDATE M08_LOAN_DOCUMENT_REF SET CREATED_AT=?,VERIFIED_AT=? WHERE DOCUMENT_REF_ID=?",
+    afterAccountChange,afterAccountChange,correctedSigned);
+  long pendingDoc=value(send("/loans/applications/"+app+"/documents",admin,Map.of("type","INCOME_PROOF",
+    "storageReference","test://unverified","sha256Hex","e".repeat(64))).andExpect(status().isOk()))
+    .path("data").path("documentRefId").asLong();
+  db.update("UPDATE M04_BANK_ACCOUNT SET ACCOUNT_STATUS='FROZEN' WHERE ACCOUNT_ID=1");
+  send("/loans/applications/"+app+"/convert",admin,Map.of()).andExpect(status().isConflict());
+  db.update("UPDATE M04_BANK_ACCOUNT SET ACCOUNT_STATUS='ACTIVE' WHERE ACCOUNT_ID=1");
+  long facility=value(send("/loans/applications/"+app+"/convert",admin,Map.of()).andExpect(status().isOk()))
+    .path("data").path("facilityId").asLong();
+  send("/loans/applications/"+app+"/documents",admin,Map.of("type","SIGNED_OFFER",
+    "storageReference","test://too-late","sha256Hex","d".repeat(64))).andExpect(status().isConflict());
+  send("/loans/applications/"+app+"/documents/"+pendingDoc+"/verify",checker,Map.of()).andExpect(status().isConflict());
+  String key=UUID.randomUUID().toString();
+  long disbursement=value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",key))
+    .andExpect(status().isOk())).path("disbursementId").asLong();
+  assertEquals(disbursement,value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",key))
+    .andExpect(status().isOk())).path("disbursementId").asLong());
+  send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isConflict());
+  send("/loans/facilities/"+facility+"/repayments",admin,Map.of("requestKey",UUID.randomUUID().toString(),"amount","1"))
+    .andExpect(status().isConflict());
+  send("/loans/disbursements/"+disbursement+"/approve",checker,Map.of("authorityCode","LOAN_SANCTION"))
+    .andExpect(status().isOk());
+  db.update("UPDATE M08_LOAN_SCHEDULE_ITEM SET DUE_DATE=? WHERE FACILITY_ID=? AND INSTALLMENT_NO=1",
+    java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")),facility);
+  var currentCollections=value(mvc.perform(get("/api/v1/loans/collections").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()));
+  assertFalse(java.util.stream.StreamSupport.stream(currentCollections.spliterator(),false)
+    .anyMatch(row->row.path("FACILITY_ID").asLong()==facility));
+  db.update("UPDATE M08_LOAN_SCHEDULE_ITEM SET DUE_DATE=? WHERE FACILITY_ID=? AND INSTALLMENT_NO=1",
+    java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1),facility);
+  var overdue=value(mvc.perform(get("/api/v1/loans/collections").header("Authorization","Bearer "+admin))
+    .andExpect(status().isOk()));
+  assertTrue(java.util.stream.StreamSupport.stream(overdue.spliterator(),false)
+    .anyMatch(row->row.path("FACILITY_ID").asLong()==facility));
+  String role=UUID.randomUUID().toString(),user=UUID.randomUUID().toString();
+  String username="loan_collector_"+UUID.randomUUID().toString().substring(0,8);
+  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,?,'Loan collector','ACTIVE','N')",
+    role,"LOAN_COLLECTOR_"+username);
+  db.update("INSERT INTO M01_IAM_USER(USER_ID,USERNAME,USER_TYPE,STATUS,EMPLOYEE_REF) VALUES (?,?,'EMPLOYEE','ACTIVE','TEST')",user,username);
+  db.update("INSERT INTO M01_IAM_CREDENTIAL(CREDENTIAL_ID,USER_ID,PASSWORD_HASH,HASH_SCHEME,STATUS) VALUES (?,?,?,'BCRYPT','ACTIVE')",
+    UUID.randomUUID().toString(),user,passwords.encode("LocalBanking!2026"));
+  db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE='LOAN_SERVICE'",role);
+  db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,SCOPE_REF,STATUS,VALID_FROM) VALUES (?,?,?,'BRANCH','MUM001','ACTIVE',SYSTIMESTAMP)",
+    UUID.randomUUID().toString(),user,role);
+  String collector=login(username);
+  var visible=value(mvc.perform(get("/api/v1/loans/collections").header("Authorization","Bearer "+collector))
+    .andExpect(status().isOk()));
+  assertTrue(java.util.stream.StreamSupport.stream(visible.spliterator(),false)
+    .anyMatch(row->row.path("FACILITY_ID").asLong()==facility));
+  db.update("UPDATE M08_LOAN_FACILITY SET BRANCH_CODE='TEST001' WHERE FACILITY_ID=?",facility);
+  var hidden=value(mvc.perform(get("/api/v1/loans/collections").header("Authorization","Bearer "+collector))
+    .andExpect(status().isOk()));
+  assertFalse(java.util.stream.StreamSupport.stream(hidden.spliterator(),false)
+    .anyMatch(row->row.path("FACILITY_ID").asLong()==facility));
+  db.update("UPDATE M08_LOAN_FACILITY SET BRANCH_CODE='MUM001' WHERE FACILITY_ID=?",facility);
+  send("/loans/facilities/"+facility+"/accruals",admin,Map.of()).andExpect(status().isOk());
+  db.update("UPDATE M04_BANK_ACCOUNT SET ACCOUNT_STATUS='FROZEN' WHERE ACCOUNT_ID=1");
+  send("/loans/facilities/"+facility+"/repayments",admin,Map.of("requestKey",UUID.randomUUID().toString(),"amount","1"))
+    .andExpect(status().isConflict());
+  long second=value(send("/loans/applications",admin,valid).andExpect(status().isOk())).path("data").path("id").asLong();
+  send("/loans/applications/"+second+"/submit",admin,Map.of()).andExpect(status().isOk());
+  send("/loans/applications/"+second+"/assessments",admin,Map.of("monthlyIncome","50000","monthlyObligations","5000",
+    "recommendation","APPROVE","reasonCodes","AFFORDABLE")).andExpect(status().isOk());
+  send("/loans/applications/"+second+"/decisions",checker,Map.of("code","APPROVE","reasonCodes","APPROVED",
+    "sanctionedAmount","12000","sanctionedTenureMonths",12,"annualRatePct","12",
+    "authorityCode","LOAN_SANCTION","authorityEvidenceRef","TEST-AUTHORITY")).andExpect(status().isOk());
+  long expiring=value(send("/loans/applications/"+second+"/offers",admin,Map.of("documentRef","test://expiring-offer",
+    "expiresAt",java.time.OffsetDateTime.now().plusDays(7).toString())).andExpect(status().isOk()))
+    .path("data").path("offerId").asLong();
+  send("/loans/offers/"+expiring+"/expire",admin,Map.of()).andExpect(status().isConflict());
+  db.update("UPDATE M08_LOAN_OFFER SET ISSUED_AT=?,EXPIRES_AT=? WHERE OFFER_ID=?",
+    java.time.OffsetDateTime.now().minusDays(3),java.time.OffsetDateTime.now().minusDays(1),expiring);
+  send("/loans/offers/"+expiring+"/expire",admin,Map.of()).andExpect(status().isOk());
+  send("/loans/offers/"+expiring+"/expire",admin,Map.of()).andExpect(status().isOk());
+  assertEquals("EXPIRED",db.queryForObject("SELECT STATUS FROM M08_LOAN_APPLICATION WHERE APPLICATION_ID=?",String.class,second));
+  send("/loans/offers/"+expiring+"/accept",customer,selected).andExpect(status().isConflict());
+ }
+
+ @Test @Order(64) @Transactional void privacyHoldCategoryRespectsTargetService() {
+  String id=UUID.randomUUID().toString();
+  db.update("""
+    INSERT INTO M09_PRIVACY_LEGAL_HOLD
+      (LEGAL_HOLD_ID,HOLD_REFERENCE,HOLD_STATUS,AUTHORITY_REFERENCE,REASON,
+       TARGET_SERVICE,RECORD_CATEGORY,STARTED_AT,REVIEW_DUE_AT,CREATED_BY,APPROVED_BY,IDEMPOTENCY_KEY)
+    VALUES (?,?,'ACTIVE','court','Preserve records','LOANS','ACCOUNT_RECORD',
+            SYSTIMESTAMP,SYSTIMESTAMP,'maker','checker',?)
+    """,id,"HOLD-"+id,"hold-"+id);
+  assertTrue(legalHolds.hasActiveMatch(new com.moneybags.privacy.hold.LegalHoldRepository.HoldTarget(
+    null,null,"LOANS","FACILITY","123","ACCOUNT_RECORD",null)));
+  assertFalse(legalHolds.hasActiveMatch(new com.moneybags.privacy.hold.LegalHoldRepository.HoldTarget(
+    null,null,"ACCOUNTS","ACCOUNT","123","ACCOUNT_RECORD",null)));
+ }
+ @Test @Order(65) void statementRejectsFutureCutAndAuditsActualDownload() throws Exception {
+  String customer=login("customer");
+  String future=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).plusDays(1).toString();
+  var invalid=Map.of("accountId",1,"customerCifId","demo-cif-1","statementType","CURRENT",
+    "periodStart",future,"periodEnd",future,"format","PDF","channel","WEB");
+  send("/reporting/statement-requests",customer,invalid).andExpect(status().isBadRequest())
+    .andExpect(jsonPath("$.code").value("FUTURE_PERIOD"));
+  String historical=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(2).toString();
+  var valid=Map.of("accountId",1,"customerCifId","demo-cif-1","statementType","CURRENT",
+    "periodStart",historical,"periodEnd",historical,"format","PDF","channel","WEB");
+  String requestId=value(send("/reporting/statement-requests",customer,valid).andExpect(status().isCreated())).path("requestId").asText();
+  String statementId=value(mvc.perform(post("/api/v1/reporting/statement-requests/"+requestId+"/process")
+    .header("Authorization","Bearer "+customer)).andExpect(status().isOk())).path("statementId").asText();
+  int before=db.queryForObject("SELECT COUNT(*) FROM M10_STATEMENT_ACCESS_AUDIT WHERE STATEMENT_ID=? AND EVENT_TYPE='DOWNLOAD'",Integer.class,statementId);
+  mvc.perform(get("/api/v1/reporting/statements/"+statementId+"/download")
+    .header("Authorization","Bearer "+customer)).andExpect(status().isOk());
+  assertEquals(before+1,db.queryForObject("SELECT COUNT(*) FROM M10_STATEMENT_ACCESS_AUDIT WHERE STATEMENT_ID=? AND EVENT_TYPE='DOWNLOAD'",Integer.class,statementId));
+ }
+ @Test @Order(66) @Transactional void privacyAuditRejectsChangedSourceEventReplay() throws Exception {
+  var context=org.springframework.security.core.context.SecurityContextHolder.createEmptyContext();
+  context.setAuthentication(new org.springframework.security.authentication.TestingAuthenticationToken(
+    "M05_LEDGER","unused","SCOPE_PRIVACY_INTERNAL"));
+  org.springframework.security.core.context.SecurityContextHolder.setContext(context);
+  try {
+   String sourceId=UUID.randomUUID().toString(),id=UUID.randomUUID().toString();
+   var event=new com.moneybags.privacy.audit.AuditController.AuditInput(
+     "M05_LEDGER","POSTINGS",sourceId,"TransactionPosted",java.time.OffsetDateTime.now(),
+     "SUCCESS",null,null,null,null,null,null,null,null,null,null,null,null,null,Map.of());
+   String hash=com.moneybags.statements.Hashing.sha256(json.writeValueAsString(event));
+   db.update("""
+     INSERT INTO M09_PRIVACY_AUDIT_EVENT
+       (AUDIT_EVENT_ID,SOURCE_SERVICE,SOURCE_STREAM,SOURCE_EVENT_ID,EVENT_TYPE,OCCURRED_AT,
+        OUTCOME,EVENT_METADATA,EVENT_SHA256,RETENTION_UNTIL,CREATED_BY)
+     VALUES (?,?,?,?,?,?,?,'{}',?,?,?)
+     """,id,"M05_LEDGER","POSTINGS",sourceId,"TransactionPosted",event.occurredAt(),
+       "SUCCESS",hash,event.occurredAt().plusYears(1),"M05_LEDGER");
+   assertEquals("DUPLICATE",privacyAudit.ingest(event).get("status"));
+   var changed=new com.moneybags.privacy.audit.AuditController.AuditInput(
+     "M05_LEDGER","POSTINGS",sourceId,"TransactionPosted",event.occurredAt(),
+     "DENIED",null,null,null,null,null,null,null,null,null,null,null,null,null,Map.of());
+   assertEquals("AUDIT_EVENT_CONFLICT",assertThrows(com.moneybags.privacy.common.ApiException.class,
+     ()->privacyAudit.ingest(changed)).code());
+  } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+ }
+ @Test @Order(67) @Transactional void privacyCaseIdentityReviewerMustBeIndependent() {
+  String id=UUID.randomUUID().toString();
+  db.update("""
+    INSERT INTO M09_PRIVACY_COMPLIANCE_CASE
+      (COMPLIANCE_CASE_ID,CASE_REFERENCE,CASE_TYPE,CASE_STATUS,PRIORITY,
+       CREATED_BY,UPDATED_BY,IDEMPOTENCY_KEY,VERSION_NO)
+    VALUES (?,?,'ACCESS_REQUEST','IDENTITY_PENDING','NORMAL','maker','maker',?,1)
+    """,id,"PRIV-"+id,"case-"+id);
+  assertEquals(0,privacyCases.verifyIdentity(id,1,"maker"));
+  assertEquals(1,privacyCases.verifyIdentity(id,1,"checker"));
+ }
+ @Test @Order(68) @Transactional void statementStaffPurposeMustBeCurrentlyEffective() throws Exception {
+  String id=UUID.randomUUID().toString(),code="EXPIRED_"+id.substring(0,8);
+  db.update("""
+    INSERT INTO M09_PRIVACY_PROCESSING_PURPOSE
+      (PROCESSING_PURPOSE_ID,PURPOSE_CODE,PURPOSE_VERSION,PURPOSE_NAME,OWNER_SERVICE,
+       LEGAL_BASIS_CODE,STATUS,EFFECTIVE_FROM,EFFECTIVE_TO,APPROVED_AT,APPROVED_BY,
+       CREATED_BY,UPDATED_BY)
+    VALUES (?,?,1,'Expired reporting','M10_STATEMENTS','CONSENT','ACTIVE',?,?,
+            SYSTIMESTAMP,'checker','maker','checker')
+    """,id,code,java.time.OffsetDateTime.now().minusDays(3),java.time.OffsetDateTime.now().minusDays(1));
+  String admin=login("admin"),day=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(31).toString();
+  var body=Map.of("accountId",1,"customerCifId","demo-cif-1","statementType","AD_HOC",
+    "periodStart",day,"periodEnd",day,"format","PDF","channel","WEB","purposeCode",code);
+  mvc.perform(post("/api/v1/reporting/statement-requests")
+    .header("Authorization","Bearer "+admin).header("X-Customer-Hash",HASH)
+    .header("Idempotency-Key",UUID.randomUUID().toString())
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+    .andExpect(status().isForbidden());
+  String activeCode="ACTIVE_"+id.substring(0,8);
+  db.update("""
+    INSERT INTO M09_PRIVACY_PROCESSING_PURPOSE
+      (PROCESSING_PURPOSE_ID,PURPOSE_CODE,PURPOSE_VERSION,PURPOSE_NAME,OWNER_SERVICE,
+       LEGAL_BASIS_CODE,STATUS,EFFECTIVE_FROM,EFFECTIVE_TO,APPROVED_AT,APPROVED_BY,
+       CREATED_BY,UPDATED_BY)
+    VALUES (?,?,1,'Active reporting','M10_STATEMENTS','CONSENT','ACTIVE',?,NULL,
+            SYSTIMESTAMP,'checker','maker','checker')
+    """,UUID.randomUUID().toString(),activeCode,java.time.OffsetDateTime.now().minusDays(1));
+  var active=Map.of("accountId",1,"customerCifId","demo-cif-1","statementType","AD_HOC",
+    "periodStart",day,"periodEnd",day,"format","PDF","channel","WEB","purposeCode",activeCode);
+  mvc.perform(post("/api/v1/reporting/statement-requests")
+    .header("Authorization","Bearer "+admin).header("X-Customer-Hash",HASH)
+    .header("Idempotency-Key",UUID.randomUUID().toString())
+    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(active)))
+    .andExpect(status().isCreated());
+ }
+ @Test @Order(100) @Transactional void fixedDepositPlacementDoesNotConsumeTransferAllowance()throws Exception{
+  String customer=login("customer");
+  db.update("DELETE FROM M03_PM_LIMIT_RULE WHERE PRODUCT_VERSION_ID=1 AND OPERATION_CODE='INTERNAL_TRANSFER'");
+  db.update("DELETE FROM M04_ACCOUNT_LIMIT WHERE ACCOUNT_ID=1 AND OPERATION_CODE='INTERNAL_TRANSFER'");
+  BigDecimal used=db.queryForObject("SELECT COALESCE(SUM(AMOUNT),0) FROM M05_TXN_TRANSACTION_LOG WHERE SOURCE_ACCOUNT_ID=1 AND TARGET_ACCOUNT_ID IS NOT NULL AND VALUE_DATE=? AND TXN_TYPE='INTERNAL_TRANSFER' AND STATUS IN ('POSTED','REVERSED')",BigDecimal.class,java.time.LocalDate.now());
+  db.update("INSERT INTO M03_PM_LIMIT_RULE(PRODUCT_VERSION_ID,RULE_CODE,OPERATION_CODE,PERIOD_CODE,MAX_AMOUNT,CURRENCY_CODE) VALUES (1,'FD_TRANSFER_REGRESSION','INTERNAL_TRANSFER','DAY',?,'INR')",used.add(new BigDecimal("50")));
+  db.update("INSERT INTO M04_ACCOUNT_LIMIT(ACCOUNT_ID,CHANGE_REQUEST_ID,LIMIT_TYPE,OPERATION_CODE,PERIOD_CODE,RESET_RULE_CODE,TIME_ZONE_ID,LIMIT_AMOUNT,EFFECTIVE_FROM,IS_ACTIVE,CREATED_BY_USER_ID) VALUES (1,?,'CUSTOMER','INTERNAL_TRANSFER','DAY','CALENDAR_DAY','Asia/Kolkata',?,SYSDATE,'Y',?)",UUID.randomUUID().toString(),used.add(new BigDecimal("50")),db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class));
+  send("/term-deposits",customer,Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,"amount","1000.00","tenureMonths",1,"requestKey",UUID.randomUUID().toString())).andExpect(status().isOk());
+  BigDecimal before=balance(1);
+  send("/transactions/transfers",customer,transfer(1,2,"10",UUID.randomUUID().toString())).andExpect(status().isOk());
+  assertEquals(0,before.subtract(new BigDecimal("10")).compareTo(balance(1)));
+  send("/transactions/transfers",customer,transfer(1,2,"50",UUID.randomUUID().toString())).andExpect(status().isConflict());
+ }
+
+ @Test @Order(101) @Transactional void consentReadersSeeOnlyCurrentApprovedPurposeNotices()throws Exception{
+  var now=java.time.OffsetDateTime.now();
+  String prefix="CATALOG_"+UUID.randomUUID().toString().substring(0,8);
+  String currentCode=prefix+"_CURRENT";
+  Object[][] versions={
+   {currentCode,1,"ACTIVE",now.minusDays(2),null},
+   {currentCode,2,"ACTIVE",now.minusDays(1),null},
+   {currentCode,3,"ACTIVE",now.plusDays(1),null},
+   {prefix+"_DRAFT",1,"DRAFT",now.minusDays(1),null},
+   {prefix+"_SUSPENDED",1,"SUSPENDED",now.minusDays(1),null},
+   {prefix+"_EXPIRED",1,"ACTIVE",now.minusDays(2),now.minusDays(1)}
+  };
+  for(var row:versions)db.update("""
+    INSERT INTO M09_PRIVACY_PROCESSING_PURPOSE
+      (PROCESSING_PURPOSE_ID,PURPOSE_CODE,PURPOSE_VERSION,PURPOSE_NAME,OWNER_SERVICE,
+       LEGAL_BASIS_CODE,NOTICE_URI,NOTICE_SHA256,STATUS,EFFECTIVE_FROM,EFFECTIVE_TO,
+       APPROVED_AT,APPROVED_BY,CREATED_BY,UPDATED_BY)
+    VALUES (?,?,?,'Approved customer notice','CIF','CONSENT','https://bank.example/privacy',
+            ?,?,?,?,SYSTIMESTAMP,'checker','maker','checker')
+    """,UUID.randomUUID().toString(),row[0],row[1],"a".repeat(64),row[2],row[3],row[4]);
+  mvc.perform(get("/api/v1/privacy/purposes/available")).andExpect(status().isUnauthorized());
+  for(String role:List.of("customer","customer2","checker","admin")){
+   String token=login(role);
+   var response=mvc.perform(get("/api/v1/privacy/purposes/available")
+    .header("Authorization","Bearer "+token)).andExpect(status().isOk()).andReturn();
+   var catalog=json.readTree(response.getResponse().getContentAsString());
+   var matching=new ArrayList<JsonNode>();
+   catalog.forEach(row->{if(row.path("code").asText().startsWith(prefix))matching.add(row);});
+   assertEquals(1,matching.size());
+   assertEquals(currentCode,matching.get(0).path("code").asText());
+   assertEquals(2,matching.get(0).path("version").asInt());
+   var fields=new HashSet<String>();
+   matching.get(0).fieldNames().forEachRemaining(fields::add);
+   assertEquals(Set.of("code","version","name","legalBasisCode","noticeUri","noticeSha256"),fields);
+   if(role.startsWith("customer"))mvc.perform(get("/api/v1/privacy/purposes")
+    .header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+  }
+ }
+ @Test @Order(102) @Transactional void numberTransferDoesNotRequireReadingRecipientAndChecksSenderFirst()throws Exception{
+  String customer=login("customer"),other=login("customer2");
+  BigDecimal before=balance(1),otherBefore=balance(2);
+  var body=Map.of("sourceAccountNumber","MB000000001","targetAccountNumber","MB000000002",
+    "amount","1.00","requestKey",UUID.randomUUID().toString(),"correlationId",UUID.randomUUID().toString());
+  var result=send("/transactions/transfers/by-number",customer,body).andExpect(status().isOk());
+  assertEquals("POSTED",value(result).path("status").asText());
+  assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance(1)));
+  assertEquals(0,otherBefore.add(BigDecimal.ONE).compareTo(balance(2)));
+  send("/transactions/transfers/by-number",customer,body).andExpect(status().isOk());
+  assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance(1)));
+  long txn=value(result).path("transactionId").asLong();
+  mvc.perform(get("/api/v1/banking/transactions").param("accountId","1").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.transactionId == "+txn+")].accountRole").value(org.hamcrest.Matchers.contains("SOURCE")));
+  mvc.perform(get("/api/v1/banking/transactions").param("accountId","2").header("Authorization","Bearer "+other))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.transactionId == "+txn+")].accountRole").value(org.hamcrest.Matchers.contains("TARGET")));
+  send("/transactions/transfers/by-number",customer,Map.of("sourceAccountNumber","MB000000001",
+    "targetAccountNumber","MB000000002","amount",before.add(new BigDecimal("1000000")).toPlainString(),
+    "requestKey",UUID.randomUUID().toString(),"correlationId",UUID.randomUUID().toString())).andExpect(status().is4xxClientError());
+  assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance(1)));
+  assertEquals(0,otherBefore.add(BigDecimal.ONE).compareTo(balance(2)));
+  mvc.perform(get("/api/v1/accounts/by-number/MB000000002").header("Authorization","Bearer "+customer))
+    .andExpect(status().isForbidden());
+  send("/transactions/transfers/by-number",other,Map.of("sourceAccountNumber","MB000000001",
+    "targetAccountNumber","NONEXISTENT","amount","1.00","requestKey",UUID.randomUUID().toString(),"correlationId",UUID.randomUUID().toString()))
+    .andExpect(status().isForbidden());
+  assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance(1)));
+ }
+
+ @Test @Order(103) @Transactional void disabledSimulationReportsAvailabilityAndRejectsWithoutCreatingPayment()throws Exception{
+  String customer=login("customer");
+  int before=db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION",Integer.class);
+  org.springframework.test.util.ReflectionTestUtils.setField(paymentWorkflow,"simulation",false);
+  org.springframework.test.util.ReflectionTestUtils.setField(paymentService,"simulation",false);
+  try{
+   mvc.perform(get("/api/v1/payments/availability")).andExpect(status().isUnauthorized());
+   mvc.perform(get("/api/v1/payments/availability").header("Authorization","Bearer "+customer))
+     .andExpect(status().isOk()).andExpect(jsonPath("$.initiationEnabled").value(false)).andExpect(jsonPath("$.mode").value("UNAVAILABLE"));
+   send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId","not-used",
+     "railCode","UPI","amount","1.00","requestKey",UUID.randomUUID().toString()))
+     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SIMULATION_DISABLED"));
+   String originator=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer'",String.class);
+   send("/payments",customer,Map.ofEntries(Map.entry("originatorId",originator),Map.entry("channelCode","WEB"),
+     Map.entry("requestKey",UUID.randomUUID().toString()),Map.entry("correlationId",UUID.randomUUID().toString()),
+     Map.entry("endToEndId",UUID.randomUUID().toString()),Map.entry("direction","OUTBOUND"),Map.entry("kind","PAYMENT"),
+     Map.entry("sourceAccountId",1),Map.entry("sourceCifId","demo-cif-1"),Map.entry("beneficiaryAccountToken","unused"),
+     Map.entry("beneficiaryBankCode","TEST0123456"),Map.entry("railCode","UPI"),Map.entry("amount","1.00"),
+     Map.entry("requestedExecutionDate",java.time.LocalDate.now().toString())))
+     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SIMULATION_DISABLED"));
+   assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION",Integer.class));
+  }finally{
+   org.springframework.test.util.ReflectionTestUtils.setField(paymentWorkflow,"simulation",true);
+   org.springframework.test.util.ReflectionTestUtils.setField(paymentService,"simulation",true);
+  }
+ }
+ @Test @Order(104) @Transactional void privacyReadinessTracksEffectiveApprovedAuditPolicy()throws Exception{
+  String customer=login("customer");
+  mvc.perform(get("/api/v1/privacy/consents/availability")).andExpect(status().isUnauthorized());
+  mvc.perform(get("/api/v1/privacy/consents/availability").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.decisionsEnabled").value(true));
+  db.update("UPDATE M09_PRIVACY_RETENTION_SCHEDULE SET EFFECTIVE_TO=? WHERE OWNING_SERVICE='M09_PRIVACY' AND RECORD_CATEGORY='AUDIT_EVENT'",java.time.OffsetDateTime.now().minusSeconds(1));
+  mvc.perform(get("/api/v1/privacy/consents/availability").header("Authorization","Bearer "+customer))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.decisionsEnabled").value(false));
+  mvc.perform(get("/api/v1/privacy/purposes/available").header("Authorization","Bearer "+customer)).andExpect(status().isOk());
+ }
+ @Test @Order(105) void failedPaymentAuthorizationRollsBackAndUnknownRefundReplaysOnce()throws Exception{
+  String customer=login("customer"),other=login("customer2"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Deep payment review",
+    "accountToken","deep-"+UUID.randomUUID(),"bankCode","TEST0123456")).andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",customer,Map.of()).andExpect(status().isForbidden());
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  BigDecimal before=balance(1),reserve=reserveBalance("CONFIRMED_BALANCE"),held=reserveBalance("ACTIVE_HOLD_AMOUNT");
+  long unfunded=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","NEFT","amount",before.add(new BigDecimal("100000")).toPlainString(),"requestKey",UUID.randomUUID().toString()))
+    .andExpect(status().isOk())).path("paymentId").asLong();
+  send("/payments/"+unfunded+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isConflict());
+  assertEquals("RECEIVED",db.queryForObject("SELECT STATUS FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",String.class,unfunded));
+  for(String table:List.of("M05_FUNDS_HOLD","M07_TREASURY_LIQUIDITY_HOLD","M05_GL_JOURNAL","M06_RAIL_DISPATCH"))
+   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE PAYMENT_ID=?",Integer.class,unfunded));
+  assertEquals(0,before.compareTo(balance(1)));assertEquals(0,held.compareTo(reserveBalance("ACTIVE_HOLD_AMOUNT")));
+  var request=Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode","IMPS","amount","2.00","requestKey",UUID.randomUUID().toString());
+  long payment=value(send("/payments/initiate",customer,request).andExpect(status().isOk())).path("paymentId").asLong();
+  assertEquals(payment,value(send("/payments/initiate",customer,request).andExpect(status().isOk())).path("paymentId").asLong());
+  send("/payments/"+payment+"/authorize-simulation",customer,Map.of("reserveAccountId",1)).andExpect(status().isForbidden());
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+  assertEquals(0,before.subtract(new BigDecimal("2")).compareTo(balance(1)));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='PAYMENT_PROVISIONAL'",Integer.class,payment));
+  long dispatch=db.queryForObject("SELECT DISPATCH_ID FROM M06_RAIL_DISPATCH WHERE PAYMENT_ID=?",Long.class,payment);
+  for(String token:List.of(customer,other))mvc.perform(get("/api/v1/dispatches/"+dispatch+"/attempts").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/dispatches/"+dispatch+"/attempts").header("Authorization","Bearer "+admin)).andExpect(status().isOk()).andExpect(jsonPath("$[0].OUTCOME_CODE").value("SENT"));
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","UNKNOWN")).andExpect(status().isOk());
+  assertEquals(0,before.subtract(new BigDecimal("2")).compareTo(balance(1)));
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","REFUNDED")).andExpect(status().isOk());
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","REFUNDED")).andExpect(status().isOk());
+  assertEquals(0,before.compareTo(balance(1)));assertEquals(0,reserve.compareTo(reserveBalance("CONFIRMED_BALANCE")));
+  assertEquals(0,held.compareTo(reserveBalance("ACTIVE_HOLD_AMOUNT")));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='PAYMENT_REFUND'",Integer.class,payment));
+  int evidence=db.queryForObject("SELECT COUNT(*) FROM M06_RAIL_STATUS_EVIDENCE WHERE PAYMENT_ID=?",Integer.class,payment);
+  send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","SETTLED")).andExpect(status().isConflict());
+  assertEquals(evidence,db.queryForObject("SELECT COUNT(*) FROM M06_RAIL_STATUS_EVIDENCE WHERE PAYMENT_ID=?",Integer.class,payment));
+  assertEquals(0,before.compareTo(balance(1)));
+ }
+ @Test @Order(106) @Transactional void allFourSimulatedRailsSettleOnceWithBalancedJournalsAndReserveMovement()throws Exception{
+  String customer=login("customer"),checker=login("checker"),admin=login("admin");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Four rail test",
+    "accountToken","rails-"+UUID.randomUUID(),"bankCode","TEST0123456")).andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  String fundingKey=UUID.randomUUID().toString(),adminId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  BigDecimal funding=new BigDecimal("300000.00");
+  db.update("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,'BRANCH',?,?,'four-rail-fixture','ADJUSTMENT','POSTED',1,1,?,?)",
+    adminId,fundingKey,com.moneybags.integration.CustomerHashService.digest(fundingKey),funding,java.time.LocalDate.now());
+  long txn=db.queryForObject("SELECT TXN_ID FROM M05_TXN_TRANSACTION_LOG WHERE REQUEST_KEY=?",Long.class,fundingKey);
+  ledger.postJournal(new com.moneybags.txn.api.Contracts.JournalRequest(fundingKey,"ADJUSTMENT",txn,null,null,null,null,null,
+    java.time.LocalDate.now(),"Isolated synthetic funding",List.of(
+      new com.moneybags.txn.api.Contracts.JournalLine(7L,null,null,null,"DR",funding,"Fixture equity"),
+      new com.moneybags.txn.api.Contracts.JournalLine(1L,1L,null,null,"CR",funding,"Fixture customer funds"))),adminId);
+  BigDecimal before=balance(1),reserve=reserveBalance("CONFIRMED_BALANCE"),held=reserveBalance("ACTIVE_HOLD_AMOUNT"),total=BigDecimal.ZERO;
+  for(String rail:List.of("UPI","IMPS","NEFT","RTGS")){
+   BigDecimal amount=new BigDecimal(rail.equals("RTGS")?"200000.00":"1.00");
+   long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+     "railCode",rail,"amount",amount.toPlainString(),"requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("paymentId").asLong();
+   send("/payments/"+payment+"/authorize-simulation",checker,Map.of("reserveAccountId",1)).andExpect(status().isOk());
+   send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","ACCEPTED")).andExpect(status().isOk());
+   send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+   send("/payments/"+payment+"/simulate-outcome",admin,Map.of("outcome","SETTLED")).andExpect(status().isOk());
+   total=total.add(amount);
+   assertEquals(0,before.subtract(total).compareTo(balance(1)));
+   assertEquals(0,reserve.subtract(total).compareTo(reserveBalance("CONFIRMED_BALANCE")));
+   assertEquals(0,held.compareTo(reserveBalance("ACTIVE_HOLD_AMOUNT")));
+   assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE PAYMENT_ID=?",Integer.class,payment));
+   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",Integer.class,payment));
+   long debitJournal=db.queryForObject("SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='PAYMENT_PROVISIONAL'",Long.class,payment);
+   long settlementJournal=db.queryForObject("SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE PAYMENT_ID=? AND JOURNAL_TYPE='SETTLEMENT'",Long.class,payment);
+   long railEvidence=db.queryForObject("SELECT EVIDENCE_ID FROM M06_RAIL_STATUS_EVIDENCE WHERE PAYMENT_ID=? AND RAIL_STATUS='SETTLED'",Long.class,payment);
+   long treasuryEntry=db.queryForObject("SELECT TREASURY_ENTRY_ID FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",Long.class,payment);
+   String reference=db.queryForObject("SELECT EXTERNAL_SETTLEMENT_REF FROM M07_CENTRAL_TREASURY_LEDGER WHERE PAYMENT_ID=?",String.class,payment);
+   send("/payments/"+payment+"/reconciliations",admin,Map.of("reconciledAmount",amount.toPlainString(),
+     "customerJournalId",debitJournal,"settlementJournalId",settlementJournal,"railEvidenceId",railEvidence,
+     "treasuryEntryId",treasuryEntry,"externalSettlementRef",reference)).andExpect(status().isOk());
+   assertEquals("MATCHED",db.queryForObject("SELECT RECONCILIATION_STATUS FROM M06_PAYMENT_RECONCILIATION WHERE PAYMENT_ID=?",String.class,payment));
+  }
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+ }
+ @Test @Order(107) @Transactional void branchPaymentReaderCannotBrowseBankWideOrForeignAccountPaymentEvidence()throws Exception{
+  String role=UUID.randomUUID().toString(),user=UUID.randomUUID().toString(),name="payment_branch_"+UUID.randomUUID().toString().substring(0,8);
+  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,?,'Branch payment reader','ACTIVE','N')",role,name);
+  db.update("INSERT INTO M01_IAM_USER(USER_ID,USERNAME,USER_TYPE,STATUS,EMPLOYEE_REF) VALUES (?,?,'EMPLOYEE','ACTIVE','TEST')",user,name);
+  db.update("INSERT INTO M01_IAM_CREDENTIAL(CREDENTIAL_ID,USER_ID,PASSWORD_HASH,HASH_SCHEME,STATUS) VALUES (?,?,?,'BCRYPT','ACTIVE')",UUID.randomUUID().toString(),user,passwords.encode("LocalBanking!2026"));
+  db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE='PAYMENT_READ'",role);
+  String assignment=UUID.randomUUID().toString();
+  db.update("INSERT INTO M01_IAM_USER_ROLE(ASSIGNMENT_ID,USER_ID,ROLE_ID,SCOPE_TYPE,SCOPE_REF,STATUS,VALID_FROM) VALUES (?,?,?,'BRANCH','TEST001','ACTIVE',?)",assignment,user,role,java.time.OffsetDateTime.now().minusSeconds(1));
+  String token=login(name);
+  String customer=login("customer"),checker=login("checker");
+  String beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","Scope test",
+    "accountToken","scope-"+UUID.randomUUID(),"bankCode","TEST0123456")).andExpect(status().isOk())).path("beneficiaryId").asText();
+  send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
+  long payment=value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,
+    "railCode","UPI","amount","1.00","requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("paymentId").asLong();
+  mvc.perform(get("/api/v1/payments").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+  for(String suffix:List.of("","/history","/rail-evidence"))mvc.perform(get("/api/v1/payments/"+payment+suffix).header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+  db.update("UPDATE M01_IAM_USER_ROLE SET SCOPE_REF='MUM001' WHERE ASSIGNMENT_ID=?",assignment);
+  token=login(name);
+  mvc.perform(get("/api/v1/payments/"+payment).header("Authorization","Bearer "+token)).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/payments").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+ }
+ BigDecimal reserveBalance(String column){return db.queryForObject("SELECT "+column+" FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);}
 }

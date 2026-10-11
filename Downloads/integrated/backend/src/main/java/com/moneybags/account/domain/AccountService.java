@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -81,7 +82,7 @@ public class AccountService {
         if ((kind.equals("opening-evidence") || kind.equals("control-sync")) && !actor.has("ACCOUNT_OFFICER"))
             throw forbidden();
         if (kind.equals("nominees") && !actor.has("ACCOUNT_OFFICER")
-                && !accounts.activePrimary(id, actor.cifId())) throw forbidden();
+                && CurrentActor.get().cifIds().stream().noneMatch(cif -> accounts.activePrimary(id, cif))) throw forbidden();
         return accounts.children(id, kind);
     }
     /** Opens a pending account using fresh CIF, product, and IAM decisions. */
@@ -98,7 +99,11 @@ public class AccountService {
                 request.productVersionId(),customer.homeBranch(),"SELF_OPERATED",List.of()),true);
     }
     private void requireDemoCustomer(String cif){
-        if(!demoCustomerOpening||!"CUSTOMER".equals(CurrentActor.get().userType())||!CurrentActor.get().cifIds().contains(cif))
+        requireLinkedCustomer(cif);
+        if(!demoCustomerOpening) throw forbidden();
+    }
+    private void requireLinkedCustomer(String cif){
+        if(!"CUSTOMER".equals(CurrentActor.get().userType())||!CurrentActor.get().cifIds().contains(cif))
             throw forbidden();
     }
     private AccountView openChecked(OpenAccount command,boolean self){
@@ -132,7 +137,8 @@ public class AccountService {
             if (party.role().equals("GUARDIAN") && !"GUARDIAN".equals(party.operatingInstruction()))
                 throw bad("Guardian role needs guardian operating instruction");
             ModuleClients.CustomerDecision p = peers.party(party.cifId(), command.branchCode());
-            if (!"ACTIVE".equals(p.status())) throw conflict("Additional party is not active in CIF");
+            if (!"ACTIVE".equals(p.status()) || !"VERIFIED".equals(p.kycStatus()))
+                throw conflict("Additional party needs an active CIF with current verified KYC");
             if (party.role().equals("GUARDIAN") && !Boolean.FALSE.equals(p.minor()))
                 throw conflict("Guardian must be an adult in CIF");
         }
@@ -162,19 +168,22 @@ public class AccountService {
     }
     public CommandResult activateSelf(long id,String requestId){
         var account=accounts.account(id,false);
-        requireDemoCustomer(account.primaryCifId());
+        requireLinkedCustomer(account.primaryCifId());
         if(!actor.id().equals(accounts.createdBy(id))||!"SELF_OPERATED".equals(account.operationMode()))throw forbidden();
         return activateChecked(id,requestId,true);
     }
     private CommandResult activateChecked(long id,String requestId,boolean self){
         AccountView original = accounts.account(id, false);
-        if (!"PENDING_OPEN".equals(original.lifecycleStatus())) throw conflict("Only pending accounts can activate");
         if (workflows.controlByRequest(requestId).isPresent()) {
             Map<String, Object> prior = workflows.controlByRequest(requestId).orElseThrow();
             if (((Number) prior.get("ACCOUNT_ID")).longValue() != id) throw conflict("Request ID belongs to another account");
+            if (!"LIFECYCLE".equals(prior.get("CONTROL_TYPE")) || !"APPLY".equals(prior.get("TARGET_ACTION")) ||
+                    !accounts.hasActivationEvidence(id, requestId))
+                throw conflict("Request ID belongs to another account action");
             return new CommandResult(id, String.valueOf(prior.get("SYNC_STATUS")), requestId,
                     ((Number) prior.get("CONTROL_VERSION")).longValue());
         }
+        if (!"PENDING_OPEN".equals(original.lifecycleStatus())) throw conflict("Only pending accounts can activate");
         ModuleClients.CustomerDecision customer = peers.customer(original.primaryCifId(), original.branchCode());
         ModuleClients.ProductDecision product = peers.product(original.productId(), original.productVersionId(), original.branchCode(), original.primaryCifId());
         ModuleClients.IamDecision iam = self
@@ -182,26 +191,33 @@ public class AccountService {
                 : authorize("ACCOUNT_ACTIVATE", id);
         validateOpening(new OpenAccount(requestId, original.primaryCifId(), original.productId(),
                 original.productVersionId(), original.branchCode(), original.operationMode(), List.of()), customer, product);
-        if (!accounts.activePrimary(id, original.primaryCifId())) throw conflict("Active primary holder is missing");
-        if (Boolean.TRUE.equals(customer.minor()) && !accounts.hasActiveRole(id, "GUARDIAN")) throw conflict("Guardian authority is missing");
-        if (Boolean.TRUE.equals(customer.minor())) {
-            for (Map<String, Object> party : accounts.activeParties(id)) {
-                if ("GUARDIAN".equals(party.get("PARTY_ROLE"))) {
-                    ModuleClients.CustomerDecision guardian = peers.party((String) party.get("CIF_ID"), original.branchCode());
-                    if (!"ACTIVE".equals(guardian.status()) || !Boolean.FALSE.equals(guardian.minor()))
-                        throw conflict("Guardian is no longer eligible in CIF");
-                }
-            }
-        }
-        if ("JOINTLY".equals(original.operationMode()) && !accounts.hasActiveRole(id, "JOINT_HOLDER"))
-            throw conflict("Joint holder is missing");
-        if (product.minimumOpeningBalance() != null && product.minimumOpeningBalance().signum() > 0
-                && !peers.openingFunding(id, product.minimumOpeningBalance()).cleared())
+        if (product.accountTerms().minimumOpeningBalance() != null && product.accountTerms().minimumOpeningBalance().signum() > 0
+                && !peers.openingFunding(id, product.accountTerms().minimumOpeningBalance()).cleared())
             throw conflict("Opening funding has not cleared");
         String eventId = UUID.randomUUID().toString();
         return tx.execute(status -> {
             AccountView locked = accounts.account(id, true);
             if (locked.rowVersion() != original.rowVersion()) throw conflict("Account changed during activation check");
+            if (!accounts.activePrimary(id, original.primaryCifId())) throw conflict("Active primary holder is missing");
+            if (Boolean.TRUE.equals(customer.minor()) && !accounts.hasActiveRole(id, "GUARDIAN")) throw conflict("Guardian authority is missing");
+            if (Boolean.TRUE.equals(customer.minor())) {
+                for (Map<String, Object> party : accounts.activeParties(id)) {
+                    if ("GUARDIAN".equals(party.get("PARTY_ROLE"))) {
+                        ModuleClients.CustomerDecision guardian = peers.party((String) party.get("CIF_ID"), original.branchCode());
+                        if (!"ACTIVE".equals(guardian.status()) || !"VERIFIED".equals(guardian.kycStatus()) || !Boolean.FALSE.equals(guardian.minor()))
+                            throw conflict("Guardian is no longer eligible in CIF");
+                    }
+                }
+            }
+            long jointHolders = accounts.activeRoleCount(id, "JOINT_HOLDER");
+            if ("JOINTLY".equals(original.operationMode()) && jointHolders == 0)
+                throw conflict("Joint holder is missing");
+            if (jointHolders > 0 && !product.accountTerms().jointAllowed())
+                throw conflict("Product does not allow joint holders");
+            if (1 + jointHolders > product.accountTerms().maxHolders())
+                throw conflict("Product holder limit exceeded");
+            if (product.accountTerms().nomineeRequired() && accounts.activeNomineeCount(id) == 0)
+                throw conflict("Add a nominee before activating this account");
             long version = workflows.insertControl(id, null, requestId, "APPLY", "LIFECYCLE", null, eventId);
             accounts.openingEvidence(id, requestId + ":activate", customer.decisionRef(),
                     product.decisionRef(), iam.decisionRef(), original.productVersionId(),
@@ -246,11 +262,17 @@ public class AccountService {
         if ("GUARDIAN".equals(party.role()) && !"GUARDIAN".equals(party.operatingInstruction()))
             throw bad("Guardian role needs guardian operating instruction");
         ModuleClients.CustomerDecision partyDecision = peers.party(party.cifId(), account.branchCode());
-        if (!"ACTIVE".equals(partyDecision.status()) ||
+        if (!"ACTIVE".equals(partyDecision.status()) || !"VERIFIED".equals(partyDecision.kycStatus()) ||
                 ("GUARDIAN".equals(party.role()) && !Boolean.FALSE.equals(partyDecision.minor())))
             throw conflict("CIF party is not eligible");
         tx.executeWithoutResult(status -> {
-            requireMutable(accounts.account(id, true));
+            AccountView locked = accounts.account(id, true);
+            requireMutable(locked);
+            if ("JOINT_HOLDER".equals(party.role())) {
+                var terms = peers.accountTerms(locked.productVersionId());
+                if (!terms.jointAllowed() || 1 + accounts.activeRoleCount(id, "JOINT_HOLDER") >= terms.maxHolders())
+                    throw conflict("Product does not allow another joint holder");
+            }
             accounts.addParty(id, party, actor.id());
             events.outbox(id, "ACCOUNT_PARTY_ADDED", UUID.randomUUID().toString(),
                     Map.of("accountId", id, "cifId", party.cifId(), "role", party.role()));
@@ -280,10 +302,7 @@ public class AccountService {
     }
     public void replaceNomineesSelf(long id, ReplaceNominees command) {
         AccountView a = accounts.account(id, false);
-        requireDemoCustomer(a.primaryCifId());
-        if (!"SELF_OPERATED".equals(a.operationMode()) || !accounts.activePrimary(id, a.primaryCifId()) ||
-                accounts.activeParties(id).stream().anyMatch(p -> !"PRIMARY_HOLDER".equals(p.get("PARTY_ROLE"))))
-            throw forbidden();
+        requireSolePrimaryCustomer(a);
         replaceNomineesChecked(id, command);
     }
     private void replaceNomineesChecked(long id, ReplaceNominees command) {
@@ -291,12 +310,16 @@ public class AccountService {
         requireMutable(a);
         BigDecimal total = command.nominees().stream().map(NomineeInput::sharePercentage)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (total.compareTo(new BigDecimal("100.00")) != 0) throw bad("Nominee shares must total 100");
+        if (!command.nominees().isEmpty() && total.compareTo(new BigDecimal("100.00")) != 0)
+            throw bad("Nominee shares must total 100");
         for (NomineeInput n : command.nominees()) {
-            if (n.dateOfBirth() != null) java.time.LocalDate.parse(n.dateOfBirth());
+            if (n.dateOfBirth() != null) parseDate(n.dateOfBirth(), "Nominee date of birth");
         }
         tx.executeWithoutResult(status -> {
-            requireMutable(accounts.account(id, true));
+            AccountView locked = accounts.account(id, true);
+            requireMutable(locked);
+            if (command.nominees().isEmpty() && peers.accountTerms(locked.productVersionId()).nomineeRequired())
+                throw conflict("This product requires a nominee");
             if (events.commandRecorded(id, "ACCOUNT_NOMINEES_CHANGED", command.requestId())) return;
             accounts.replaceNominees(id, command.nominees(), actor.id());
             events.outbox(id, "ACCOUNT_NOMINEES_CHANGED", command.requestId(),
@@ -370,15 +393,18 @@ public class AccountService {
         actor.require("ACCOUNT_OFFICER");
         AccountView a = accounts.account(id, false); authorize("ACCOUNT_LIMIT_CHANGE", id);
         requireMutable(a);
-        if (command.effectiveTo() != null && !java.time.LocalDate.parse(command.effectiveTo())
-                .isAfter(java.time.LocalDate.parse(command.effectiveFrom())))
+        LocalDate limitStart = parseDate(command.effectiveFrom(), "Limit start date");
+        if (command.effectiveTo() != null && !parseDate(command.effectiveTo(), "Limit end date")
+                .isAfter(limitStart))
             throw bad("Limit end date must follow start date");
         if (command.overridePolicyId() != null && (command.approvedByUserId() == null
                 || command.approvedByUserId().equals(actor.id()))) throw bad("Separate approver is required");
         if (!peers.limit(a.productVersionId(), command.productLimitRuleId(), command.overridePolicyId(),
                 command.operationCode(), command.periodCode(), command.amount()).allowed()) throw conflict("Product limit rule denies this amount");
         tx.executeWithoutResult(status -> {
-            requireMutable(accounts.account(id, true));
+            AccountView locked = accounts.account(id, true);
+            requireMutable(locked);
+            if (locked.productVersionId() != a.productVersionId()) throw conflict("Product version changed");
             if(command.overridePolicyId()!=null)approvals.consume(id,"LIMIT",command.requestId(),command);
             if (workflows.limitOverlap(id, command)) throw conflict("An active limit already covers this window");
             workflows.insertLimit(id, command, actor.id());
@@ -508,11 +534,21 @@ public class AccountService {
         ModuleClients.ProductDecision target = peers.product(a.productId(), command.targetVersionId(), a.branchCode(), a.primaryCifId());
         if (!"ACTIVE".equals(target.versionState()) || !"INR".equals(target.currency()))
             throw conflict("Target product version is not currently active");
+        ModuleClients.CustomerDecision customer = peers.customer(a.primaryCifId(), a.branchCode());
         tx.executeWithoutResult(status -> {
             AccountView locked = accounts.account(id, true);
             requireMutable(locked);
             if (locked.productVersionId() != a.productVersionId()) throw conflict("Product version changed");
             if (workflows.activeOverrides(id)) throw conflict("Resolve active limits and rate overrides before adoption");
+            long jointHolders = accounts.activeRoleCount(id, "JOINT_HOLDER");
+            if (Boolean.TRUE.equals(customer.minor()) && !target.accountTerms().minorAllowed())
+                throw conflict("Target product does not allow minor holders");
+            if (jointHolders > 0 && !target.accountTerms().jointAllowed())
+                throw conflict("Target product does not allow joint holders");
+            if (1 + jointHolders > target.accountTerms().maxHolders())
+                throw conflict("Target product holder limit exceeded");
+            if (target.accountTerms().nomineeRequired() && accounts.activeNomineeCount(id) == 0)
+                throw conflict("Add a nominee before adopting this product version");
             workflows.adopt(id, a.productVersionId(), command, actor.id(), command.requestId());
             events.outbox(id, "ACCOUNT_PRODUCT_VERSION_ADOPTED", command.requestId(),
                     Map.of("accountId", id, "fromVersion", a.productVersionId(), "toVersion", command.targetVersionId()));
@@ -526,10 +562,7 @@ public class AccountService {
     /** Customer may request review only for their own sole-operated, fully settled account. */
     public CommandResult requestClosureSelf(long id, ReasonCommand command) {
         AccountView a = accounts.account(id, false);
-        requireDemoCustomer(a.primaryCifId());
-        if (!"SELF_OPERATED".equals(a.operationMode()) || !accounts.activePrimary(id, a.primaryCifId()) ||
-                accounts.activeParties(id).stream().anyMatch(p -> !"PRIMARY_HOLDER".equals(p.get("PARTY_ROLE"))))
-            throw forbidden();
+        requireSolePrimaryCustomer(a);
         if (!peers.closureFundsSettled(id).cleared()) throw conflict("Transfer or withdraw the balance and clear holds before requesting closure");
         if (!peers.paymentClearance(id).cleared() || !peers.loanClearance(id).cleared() ||
                 !peers.termDepositClearance(id).cleared())
@@ -703,6 +736,13 @@ public class AccountService {
                 !"INR".equals(product.currency()) || !"ACTIVE".equals(product.versionState()) ||
                 product.ruleSetHash() == null || !product.ruleSetHash().matches("[0-9a-fA-F]{64}"))
             throw conflict("Product version is not openable");
+        if (Boolean.TRUE.equals(customer.minor()) && !product.accountTerms().minorAllowed())
+            throw conflict("Product does not allow minor holders");
+        long jointHolders = nullSafe(c.additionalParties()).stream().filter(p -> "JOINT_HOLDER".equals(p.role())).count();
+        if (jointHolders > 0 && !product.accountTerms().jointAllowed())
+            throw conflict("Product does not allow joint holders");
+        if (1 + jointHolders > product.accountTerms().maxHolders())
+            throw conflict("Product holder limit exceeded");
         if (Boolean.TRUE.equals(customer.minor()) != "GUARDIAN_OPERATED".equals(c.operationMode()))
             throw conflict("Operation mode does not match minor status");
         if (!Set.of("SELF_OPERATED", "ANYONE", "JOINTLY", "GUARDIAN_OPERATED").contains(c.operationMode()))
@@ -735,6 +775,10 @@ public class AccountService {
         } catch (NoSuchAlgorithmException ex) { throw new IllegalStateException("SHA-256 unavailable", ex); }
     }
     /** Returns a consistent bad-request error. */
+    private LocalDate parseDate(String value, String label) {
+        try { return LocalDate.parse(value); }
+        catch (RuntimeException ex) { throw bad(label + " must be a valid date"); }
+    }
     private ApiException bad(String message) { return new ApiException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", message); }
     /** Returns a consistent conflict error. */
     private ApiException conflict(String message) { return new ApiException(HttpStatus.CONFLICT, "CONFLICT", message); }

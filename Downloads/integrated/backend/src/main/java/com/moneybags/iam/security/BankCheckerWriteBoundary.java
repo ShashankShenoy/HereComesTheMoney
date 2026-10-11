@@ -25,7 +25,7 @@ public class BankCheckerWriteBoundary implements HandlerInterceptor, WebMvcConfi
         "/credit-cards/applications/[^/]+/decision",
         "/transactions/[^/]+/reversal-decision",
         "/period-closes/[^/]+/decision",
-        "/payments/approvals/[^/]+/decision",
+        "/approvals/[^/]+/decision",
         "/payments/[^/]+/authorize-simulation",
         "/treasury/work-items/[^/]+/decision",
         "/treasury/reserve-openings/[^/]+/confirm",

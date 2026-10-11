@@ -12,7 +12,9 @@ import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,9 @@ public class TreasuryService {
     /** Creates reserve master data together with a zero position and an outbox event. */
     @Transactional
     public ReserveAccount createReserveAccount(CreateReserveAccount command, String actor) {
+        repository.lockReserveGl(command.glAccountId());
+        if (!repository.validReserveGl(command.glAccountId()))
+            throw DomainException.invalid("Reserve GL must be a dedicated active INR asset account");
         ReserveAccount account = repository.createReserveAccount(command);
         event("treasury.reserve-account.created.v1", "RESERVE_ACCOUNT", account.id(), account);
         audit(actor, "RESERVE_ACCOUNT_CREATE", "RESERVE_ACCOUNT", account.id(), "SUCCESS", null);
@@ -42,6 +47,11 @@ public class TreasuryService {
     /** Lists configured reserve accounts. */
     @Transactional(readOnly = true)
     public List<ReserveAccount> reserveAccounts() { return repository.findReserveAccounts(); }
+
+    @Transactional(readOnly = true)
+    public ReserveAccount reserveAccount(long id) {
+        return repository.findReserveAccount(id).orElseThrow(() -> DomainException.notFound("Reserve account", id));
+    }
 
     /** Reads a reserve position; callers must not use it as posting authority. */
     @Transactional(readOnly = true)
@@ -76,10 +86,32 @@ public class TreasuryService {
         ReserveAccount account = repository.findReserveAccount(command.reserveAccountId())
             .orElseThrow(() -> DomainException.notFound("Reserve account", command.reserveAccountId()));
         if (!"ACTIVE".equals(account.status())) throw DomainException.invalid("Reserve account is not active");
+        if (!repository.reserveGlIsUsable(account.id())) throw DomainException.invalid("Reserve GL is not usable");
+        if (command.paymentId() != null && (!repository.paymentMatches(command.paymentId(), command.railCode(), command.amount(), "OUT")
+                || !repository.paymentCanReserve(command.paymentId())))
+            throw DomainException.conflict("PAYMENT_SCOPE_MISMATCH", "Payment is not eligible for this liquidity hold");
+        if (command.settlementCycleId() != null) {
+            SettlementCycle cycle = repository.findCycle(command.settlementCycleId())
+                .orElseThrow(() -> DomainException.notFound("Settlement cycle", command.settlementCycleId()));
+            if (cycle.reserveAccountId() != account.id() || !cycle.railCode().equals(command.railCode())
+                    || cycle.netAmount().compareTo(command.amount()) != 0 || !"OUT".equals(cycle.netMovementSide())
+                    || cycle.status() != CycleStatus.CLOSED)
+                throw DomainException.conflict("CYCLE_SCOPE_MISMATCH", "Cycle is not eligible for this liquidity hold");
+        }
         if (command.expiresAt() != null && !command.expiresAt().isAfter(OffsetDateTime.now())) {
             throw DomainException.invalid("expiresAt must be in the future");
         }
         ReservePosition position = repository.lockPosition(command.reserveAccountId());
+        if (!"Y".equals(repository.findReserveReconciliation(account.id())
+                .orElseThrow(() -> DomainException.notFound("Reserve reconciliation", account.id())).isMatched()))
+            throw DomainException.conflict("RESERVE_RECONCILIATION", "Reserve ledger and position do not agree");
+        // Serialize same-key retries on the position before inserting a second hold.
+        existing = repository.findHoldByKey(command.holdKey());
+        if (existing.isPresent()) {
+            if (!MessageDigest.isEqual(existing.get().requestHash(), hash))
+                throw DomainException.conflict("IDEMPOTENCY_MISMATCH", "Hold key was already used with a different request");
+            return existing.get();
+        }
         var spendable = position.availableBalance().subtract(account.safetyBuffer());
         if (spendable.compareTo(command.amount()) < 0) {
             throw DomainException.conflict("INSUFFICIENT_RESERVE_LIQUIDITY", "Amount exceeds available balance after safety buffer");
@@ -95,6 +127,8 @@ public class TreasuryService {
     public LiquidityHold decideHold(long id, HoldDecision command, String actor) {
         LiquidityHold hold = repository.lockHold(id);
         if (hold.status() != HoldStatus.RESERVED) throw DomainException.conflict("INVALID_HOLD_STATE", "Only RESERVED holds can transition");
+        if ("COMMIT".equals(command.decision()) && hold.expiresAt() != null && !hold.expiresAt().isAfter(OffsetDateTime.now()))
+            throw DomainException.conflict("HOLD_EXPIRED", "Expired liquidity cannot be committed");
         if ("RELEASE".equals(command.decision()) && (command.reason() == null || command.reason().isBlank())) {
             throw DomainException.invalid("A release reason is required");
         }
@@ -109,6 +143,11 @@ public class TreasuryService {
     /** Lists liquidity holds for Module 6 support and operations. */
     @Transactional(readOnly = true)
     public List<LiquidityHold> holds(Long accountId, String status) { return repository.findHolds(accountId, status); }
+
+    @Transactional(readOnly = true)
+    public LiquidityHold hold(long id) {
+        return repository.findHold(id).orElseThrow(() -> DomainException.notFound("Liquidity hold", id));
+    }
 
     /** Expires uncommitted reservations in bounded, skip-locked batches across service instances. */
     @Scheduled(fixedDelayString = "${moneybags.liquidity-expiry-interval-ms:30000}")
@@ -126,8 +165,12 @@ public class TreasuryService {
     /** Opens a cycle with a stable Module 6 clearing batch reference. */
     @Transactional
     public SettlementCycle createCycle(CreateCycle command, String actor) {
-        repository.findReserveAccount(command.reserveAccountId())
+        ReserveAccount account = repository.findReserveAccount(command.reserveAccountId())
             .orElseThrow(() -> DomainException.notFound("Reserve account", command.reserveAccountId()));
+        if (!"ACTIVE".equals(account.status()) || !repository.reserveGlIsUsable(account.id()))
+            throw DomainException.invalid("Reserve account is not active or its GL is unusable");
+        if (!repository.cycleBatchMatches(command))
+            throw DomainException.conflict("BATCH_SCOPE_MISMATCH", "Clearing batch does not match this cycle");
         SettlementCycle cycle = repository.createCycle(command);
         event("treasury.settlement-cycle.opened.v1", "SETTLEMENT_CYCLE", cycle.id(), cycle);
         audit(actor, "CYCLE_CREATE", "SETTLEMENT_CYCLE", cycle.id(), "SUCCESS", null);
@@ -139,7 +182,13 @@ public class TreasuryService {
     public SettlementCycle addCycleItems(long cycleId, AddCycleItems command, String actor) {
         SettlementCycle cycle = repository.lockCycle(cycleId);
         if (cycle.status() != CycleStatus.OPEN) throw DomainException.conflict("CYCLE_NOT_OPEN", "Items can only be added to OPEN cycles");
-        command.items().forEach(item -> repository.addCycleItem(cycleId, item));
+        for (CycleItem item : command.items()) {
+            if (item == null || item.paymentId() <= 0 || item.amount() == null || item.amount().signum() <= 0
+                    || !("IN".equals(item.direction()) || "OUT".equals(item.direction()))
+                    || !repository.cycleItemMatches(cycle, item))
+                throw DomainException.conflict("CYCLE_ITEM_MISMATCH", "Cycle item does not match its payment and clearing batch");
+            repository.addCycleItem(cycleId, item);
+        }
         repository.recalculateCycle(cycleId);
         audit(actor, "CYCLE_ITEMS_ADD", "SETTLEMENT_CYCLE", cycleId, "SUCCESS", null);
         return repository.findCycle(cycleId).orElseThrow();
@@ -151,6 +200,10 @@ public class TreasuryService {
         SettlementCycle cycle = repository.lockCycle(cycleId);
         if (cycle.status() != CycleStatus.OPEN) throw DomainException.conflict("CYCLE_NOT_OPEN", "Only an OPEN cycle can close");
         repository.recalculateCycle(cycleId);
+        if (repository.findCycleItems(cycleId).isEmpty())
+            throw DomainException.invalid("A settlement cycle needs at least one payment item");
+        if (!repository.cycleMatchesBatch(repository.findCycle(cycleId).orElseThrow()))
+            throw DomainException.conflict("BATCH_TOTALS_MISMATCH", "Cycle items and totals do not match the clearing batch");
         repository.closeCycle(cycleId);
         SettlementCycle closed = repository.findCycle(cycleId).orElseThrow();
         event("treasury.settlement-cycle.closed.v1", "SETTLEMENT_CYCLE", cycleId, closed);
@@ -158,23 +211,70 @@ public class TreasuryService {
         return closed;
     }
 
+    /** Finalizes a cycle whose payments already moved the reserve individually. */
+    @Transactional
+    public SettlementCycle finalizeCycle(long cycleId, String actor) {
+        SettlementCycle cycle = repository.lockCycle(cycleId);
+        if (cycle.status() == CycleStatus.SETTLED) return cycle;
+        if (cycle.status() != CycleStatus.CLOSED)
+            throw DomainException.conflict("CYCLE_NOT_CLOSED", "Only a closed cycle can be finalized");
+        if (repository.findCycleItems(cycleId).isEmpty() || !repository.cycleItemsIndividuallySettled(cycle))
+            throw DomainException.conflict("CYCLE_PAYMENTS_PENDING", "Every cycle payment needs its own verified reserve movement and final status");
+        repository.settleCycle(cycleId);
+        SettlementCycle settled = repository.findCycle(cycleId).orElseThrow();
+        event("treasury.settlement-cycle.settled.v1", "SETTLEMENT_CYCLE", cycleId, settled);
+        audit(actor, "CYCLE_FINALIZE", "SETTLEMENT_CYCLE", cycleId, "SUCCESS", null);
+        return settled;
+    }
+
     /** Lists settlement cycles for the Oracle JET workbench. */
     @Transactional(readOnly = true)
     public List<SettlementCycle> cycles(String status, String rail) { return repository.findCycles(status, rail); }
 
+    @Transactional(readOnly = true)
+    public SettlementCycle cycle(long id) {
+        return repository.findCycle(id).orElseThrow(() -> DomainException.notFound("Settlement cycle", id));
+    }
+
     /** Returns payment snapshots in one settlement cycle. */
     @Transactional(readOnly = true)
-    public List<SettlementCycleItem> cycleItems(long cycleId) { return repository.findCycleItems(cycleId); }
+    public List<SettlementCycleItem> cycleItems(long cycleId) {
+        cycle(cycleId);
+        return repository.findCycleItems(cycleId);
+    }
 
     /** Persists append-only, content-hashed external settlement evidence. */
     @Transactional
     public SettlementEvidence recordEvidence(SettlementEvidenceCommand command, String actor) {
         validateExclusiveScope(command.paymentId(), command.settlementCycleId());
-        SettlementEvidence evidence = repository.insertEvidence(command,
-            sha256(command.evidencePayload().getBytes(StandardCharsets.UTF_8)));
+        byte[] evidenceHash = sha256(command.evidencePayload().getBytes(StandardCharsets.UTF_8));
+        var previous = repository.findEvidenceByReference(command.reserveAccountId(), command.externalSettlementRef());
+        if (previous.isPresent()) {
+            SettlementEvidence prior = previous.get();
+            if (!MessageDigest.isEqual(repository.evidenceHash(prior.id()), evidenceHash)
+                    || !Objects.equals(prior.paymentId(), command.paymentId())
+                    || !Objects.equals(prior.cycleId(), command.settlementCycleId())
+                    || !prior.railCode().equals(command.railCode()) || !prior.type().equals(command.evidenceType())
+                    || !prior.status().equals(command.evidenceStatus()) || !prior.movementSide().equals(command.movementSide())
+                    || prior.amount().compareTo(command.amount()) != 0
+                    || !Objects.equals(prior.externalStatementRef(), command.externalStatementRef())
+                    || !Objects.equals(repository.evidenceReference(prior.id()), command.evidenceRef())
+                    || !prior.occurredAt().toInstant().plusNanos(500).truncatedTo(ChronoUnit.MICROS)
+                        .equals(command.occurredAt().toInstant().plusNanos(500).truncatedTo(ChronoUnit.MICROS)))
+                throw DomainException.conflict("EVIDENCE_REFERENCE_CONFLICT", "Settlement reference was used for different evidence");
+            return prior;
+        }
+        validateEvidenceScope(command.reserveAccountId(), command.paymentId(), command.settlementCycleId(),
+            command.railCode(), command.movementSide(), command.amount(), "VERIFIED".equals(command.evidenceStatus()));
+        SettlementEvidence evidence = repository.insertEvidence(command, evidenceHash);
         event("treasury.settlement-evidence.recorded.v1", "SETTLEMENT_EVIDENCE", evidence.id(), evidence);
         audit(actor, "EVIDENCE_RECORD", "SETTLEMENT_EVIDENCE", evidence.id(), "SUCCESS", null);
         return evidence;
+    }
+
+    @Transactional(readOnly = true)
+    public SettlementEvidence evidence(long id) {
+        return repository.findEvidence(id).orElseThrow(() -> DomainException.notFound("Settlement evidence", id));
     }
 
     /** Mirrors a Module 5 GL journal only after verified evidence exists; retry is safe by unique evidence/journal keys. */
@@ -191,6 +291,19 @@ public class TreasuryService {
             }
             return existing.get();
         }
+        validateEvidenceScope(evidence.reserveAccountId(), evidence.paymentId(), evidence.cycleId(),
+            evidence.railCode(), evidence.movementSide(), evidence.amount(), true);
+        if (!repository.movementScopeUnused(evidence))
+            throw DomainException.conflict("MOVEMENT_SCOPE_USED", "A payment in this settlement already moved the reserve");
+        ReserveAccount account = repository.findReserveAccount(evidence.reserveAccountId()).orElseThrow();
+        if (!"Y".equals(repository.findReserveReconciliation(account.id())
+                .orElseThrow(() -> DomainException.notFound("Reserve reconciliation", account.id())).isMatched()))
+            throw DomainException.conflict("RESERVE_RECONCILIATION", "Reserve ledger and position do not agree");
+        if (!repository.journalMatches(evidence, command.glJournalId(), account.glAccountId()))
+            throw DomainException.conflict("JOURNAL_MISMATCH", "Settlement journal does not match the verified reserve movement");
+        if (evidence.paymentId() != null && "OUT".equals(evidence.movementSide())
+                && !repository.matchingCommittedHold(evidence))
+            throw DomainException.conflict("HOLD_MISMATCH", "Outbound settlement needs its committed liquidity hold");
         TreasuryEntry entry = repository.insertTreasuryEntry(evidence, command.glJournalId());
         repository.applyEntryToPosition(entry);
         repository.consumeMatchingHold(entry);
@@ -275,6 +388,11 @@ public class TreasuryService {
         return repository.findExceptions(status, severity);
     }
 
+    @Transactional(readOnly = true)
+    public ReconciliationException exception(long id) {
+        return repository.findException(id).orElseThrow(() -> DomainException.notFound("Reconciliation exception", id));
+    }
+
     /** Completes an exception with explicit resolution evidence. */
     @Transactional
     public void resolveException(long id, ResolveException command, String actor) {
@@ -296,6 +414,11 @@ public class TreasuryService {
     @Transactional(readOnly = true)
     public List<WorkItem> workItems(String status, String owner) { return repository.findWorkItems(status, owner); }
 
+    @Transactional(readOnly = true)
+    public WorkItem workItem(long id) {
+        return repository.findWorkItem(id).orElseThrow(() -> DomainException.notFound("Work item", id));
+    }
+
     /** Submits a maker's completed work for independent approval. */
     @Transactional
     public void submitWork(long id, String maker, int version) {
@@ -312,6 +435,26 @@ public class TreasuryService {
 
     private void validateExclusiveScope(Long paymentId, Long cycleId) {
         if ((paymentId == null) == (cycleId == null)) throw DomainException.invalid("Exactly one of paymentId or settlementCycleId is required");
+    }
+
+    private void validateEvidenceScope(long reserveAccountId, Long paymentId, Long cycleId,
+                                       String rail, String side, BigDecimal amount, boolean verified) {
+        ReserveAccount account = repository.findReserveAccount(reserveAccountId)
+            .orElseThrow(() -> DomainException.notFound("Reserve account", reserveAccountId));
+        if (!"ACTIVE".equals(account.status()) || !repository.reserveGlIsUsable(account.id()))
+            throw DomainException.invalid("Reserve account is not active or its GL is unusable");
+        if (!verified) return;
+        if (paymentId != null) {
+            if (!repository.paymentMatches(paymentId, rail, amount, side) || !repository.paymentCanSettle(paymentId))
+                throw DomainException.conflict("PAYMENT_SCOPE_MISMATCH", "Verified evidence does not match a settleable payment");
+        } else {
+            SettlementCycle cycle = repository.findCycle(cycleId)
+                .orElseThrow(() -> DomainException.notFound("Settlement cycle", cycleId));
+            if (cycle.reserveAccountId() != reserveAccountId || !cycle.railCode().equals(rail)
+                    || cycle.netAmount().compareTo(amount) != 0 || !side.equals(cycle.netMovementSide())
+                    || cycle.status() != CycleStatus.CLOSED)
+                throw DomainException.conflict("CYCLE_SCOPE_MISMATCH", "Verified evidence does not match a closed cycle");
+        }
     }
 
     private void validateSubject(String subject, Long paymentId, Long cycleId) {

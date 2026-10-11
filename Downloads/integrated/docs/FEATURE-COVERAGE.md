@@ -24,6 +24,8 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Requested feature | Implementation / boundary |
 | --- | --- |
 | Code, name, type, currency, availability dates | Versioned M03 product/availability workflows; branch and customer-segment context passed during opening. Deposit posting remains INR. |
+| Customer product discovery | One customer view presents eligible M03 account/loan offers and approved M11 credit card products, with links into their own application journeys. FX is displayed as a rate-information service; it is not an M03 account product. The M03 and M11 catalogs remain independently governed. |
+| Customer overview | Own account balances and recent transactions are shown with own card balances and recent payment progress. Card and payment panels fail independently so one unavailable feature does not blank the overview. |
 | Interest, fee, penalty, limit, eligibility rules | Rule-definition screens and validation retained. Fixed-rate savings interest posts monthly from daily closing balances; fixed deposit interest posts at maturity. Loan interest and fixed fees execute. Floating/tiered deposit interest, tax, penalty and complex pricing engines are not implemented. |
 | Minimum balance, transaction restrictions | Opening-funding minimum, transfer policy, posting fences and available-funds checks are integrated. Maintenance minimum-balance charging and every policy family across every channel require additional engines. |
 | Draft, approved, active, suspended, retired | Product lifecycle and effective-version resolution retained. |
@@ -68,8 +70,10 @@ Every requested domain has a menu entry and API-backed screens. “Integrated”
 | Requested feature | Implementation / boundary |
 | --- | --- |
 | Beneficiaries | Customer ownership, pending verification and independent activation; account tokens omitted from directory results. No live beneficiary-name verification. |
+| Customer send-money journey | Payments offers a direct account-number transfer between demo users: an owned eligible source, recipient account number, separate confirmation, atomic debit/credit, and sent/received history. It works with external simulation disabled. A separate verified-recipient form creates external simulated payment requests and their owner-scoped status history; external settlement does not credit another demo user. |
 | Rail choice and limits | UPI/IMPS/NEFT/RTGS codes and explicit simulator bounds. These are illustrative application policies, not an assertion of current network limits. |
-| Initiation/authorization | Own account/beneficiary validation and separate simulation checker. |
+| Initiation/authorization | Own account/beneficiary validation and separate simulation checker. Invalid simulated rail amounts are rejected before an instruction is created; customer direct-instruction creation follows the same simulation boundary. |
+| Customer payment visibility | Payment lists, details, history and rail evidence are scoped to the signed-in originator. Other customers receive a not-found response; customer history omits internal actor and evidence references. |
 | ISO 20022-style canonical model | Supplied canonical instruction, references and state/evidence records retained; no ISO message certification or external signing adapter. |
 | Async status/duplicate messages | Durable dispatch and rail evidence plus outboxes/inboxes. Simulator outcomes are operator-driven; no live rail consumer connected. |
 | Timeout/retry/return/reject/reversal | Original dispatch/exception APIs and simulator UNKNOWN/REJECTED/REFUNDED paths; settled-payment return processing needs network-specific adapters. |
@@ -151,6 +155,7 @@ See [credit card setup and policy](CREDIT-CARDS.md).
 | Requested feature | Implementation / boundary |
 | --- | --- |
 | Currency master | Supported-currency directory; core account ledger remains INR under the supplied schema. |
+| Customer FX comparison | Dedicated customer view shows only active currencies and an indicative calculation, with rate source and expiry. The API selects a current approved direct or reciprocal rate for active currencies and uses the destination currency's decimal precision. No executable conversion or international transfer exists. |
 | Provider adapter | Configurable HTTPS JSON contract, bounded response, timeout and validation; external network test pending. |
 | Source/timestamp/validity, buy/sell/mid | Stored and validated; latest approved quotes expose explicit staleness. |
 | Fallback/circuit/retry | Cached approved records, expiry rejection, two attempts, circuit opening after repeated failures. |

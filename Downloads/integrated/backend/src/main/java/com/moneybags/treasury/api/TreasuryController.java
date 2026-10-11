@@ -38,6 +38,10 @@ public class TreasuryController {
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public List<ReserveAccount> accounts() { return service.reserveAccounts(); }
 
+    @GetMapping("/reserve-accounts/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public ReserveAccount account(@PathVariable long id) { return service.reserveAccount(id); }
+
     /** Returns the current reserve read model. */
     @GetMapping("/reserve-accounts/{id}/position")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
@@ -76,6 +80,10 @@ public class TreasuryController {
         return service.holds(reserveAccountId, status);
     }
 
+    @GetMapping("/liquidity-holds/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
+    public LiquidityHold hold(@PathVariable long id) { return service.hold(id); }
+
     /** Commits a hold before dispatch or releases it when the obligation ends. */
     @PostMapping("/liquidity-holds/{id}/decision")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_LIQUIDITY_MANAGE')")
@@ -99,6 +107,10 @@ public class TreasuryController {
         return service.cycles(status, railCode);
     }
 
+    @GetMapping("/settlement-cycles/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public SettlementCycle cycle(@PathVariable long id) { return service.cycle(id); }
+
     /** Adds Module 6 payment snapshots to an open cycle. */
     @PostMapping("/settlement-cycles/{id}/items")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
@@ -118,6 +130,13 @@ public class TreasuryController {
         return service.closeCycle(id, actor(principal));
     }
 
+    /** Closes a cycle after its member payments have settled through individual reserve entries. */
+    @PostMapping("/settlement-cycles/{id}/finalize")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public SettlementCycle finalizeCycle(@PathVariable long id, Principal principal) {
+        return service.finalizeCycle(id, actor(principal));
+    }
+
     /** Records content-hashed evidence from a rail, clearing file or reserve statement. */
     @PostMapping("/settlement-evidence")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
@@ -126,6 +145,10 @@ public class TreasuryController {
         SettlementEvidence created = service.recordEvidence(body, actor(principal));
         return ResponseEntity.created(location("/api/v1/treasury/settlement-evidence/{id}", created.id())).body(created);
     }
+
+    @GetMapping("/settlement-evidence/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public SettlementEvidence evidence(@PathVariable long id) { return service.evidence(id); }
 
     /** Appends the local reserve mirror after Module 5 has committed the GL journal. */
     @PostMapping("/reserve-movements/confirm")
@@ -152,6 +175,10 @@ public class TreasuryController {
         return service.exceptions(status, severity);
     }
 
+    @GetMapping("/reconciliation-exceptions/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    public ReconciliationException exception(@PathVariable long id) { return service.exception(id); }
+
     /** Resolves or waives an exception with a reason. */
     @PostMapping("/reconciliation-exceptions/{id}/resolution")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
@@ -176,6 +203,10 @@ public class TreasuryController {
                                @RequestParam(required=false) String ownerId) {
         return service.workItems(status, ownerId);
     }
+
+    @GetMapping("/work-items/{id}")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE') or @treasuryAccess.allowed(authentication, 'TREASURY_WORK_APPROVE')")
+    public WorkItem workItem(@PathVariable long id) { return service.workItem(id); }
 
     /** Sends a maker's work for approval. */
     @PostMapping("/work-items/{id}/submit")

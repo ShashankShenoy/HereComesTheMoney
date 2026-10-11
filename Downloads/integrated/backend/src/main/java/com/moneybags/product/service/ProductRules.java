@@ -232,6 +232,10 @@ public final class ProductRules {
           Set.of("IN", "NOT_IN").contains(r.get("OPERATOR_CODE")) &&
           !"TEXT".equals(type)
         ) errors.add("IN operators require comma-separated TEXT");
+        if (Set.of("IN", "NOT_IN").contains(r.get("OPERATOR_CODE")) &&
+            r.get("VALUE_TEXT") != null &&
+            Arrays.stream(r.get("VALUE_TEXT").toString().split(",", -1)).anyMatch(String::isBlank))
+          errors.add("List values cannot be blank");
       }
       case "account" -> {
         flags(r, errors, "MINOR_ALLOWED", "JOINT_ALLOWED", "NOMINEE_REQUIRED");

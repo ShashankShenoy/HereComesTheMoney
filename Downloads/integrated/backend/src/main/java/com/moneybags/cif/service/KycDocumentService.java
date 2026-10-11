@@ -202,6 +202,13 @@ public class KycDocumentService {
     boolean reviewer = false;
     if ("PENDING".equals(str(d, "SCAN_STATUS"))) {
       cif.caseAccess(user, str(d, "CASE_ID"), "KYC_REVIEW", false);
+      if (!Set.of("SUBMITTED", "UNDER_REVIEW").contains(str(k, "STATUS")) ||
+          user.userId().equals(str(k, "MAKER_USER_ID")) ||
+          user.userId().equals(str(d, "UPLOADED_BY_USER_ID")) ||
+          (k.get("ASSIGNED_OFFICER_USER_ID") != null &&
+            !user.userId().equals(str(k, "ASSIGNED_OFFICER_USER_ID")))) throw new BusinessException(
+        HttpStatus.FORBIDDEN, "OFFICER_MISMATCH", "Only the independent case reviewer may inspect pending evidence"
+      );
       reviewer = true;
     }
     if (

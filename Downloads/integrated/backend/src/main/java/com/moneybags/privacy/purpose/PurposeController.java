@@ -26,6 +26,14 @@ public class PurposeController {
         this.contexts = contexts;
     }
 
+    /** Lets consent readers discover current notices without access to staff catalogue history. */
+    @GetMapping("/available")
+    @PreAuthorize("hasAnyAuthority('PRIVACY_CONSENT_VIEW','PRIVACY_CONSENT_SELF','PRIVACY_PURPOSE_VIEW')")
+    @Operation(summary = "View available privacy purposes")
+    public java.util.List<PurposeService.AvailablePurpose> available() {
+        return service.available();
+    }
+
     /** Lists catalogue versions for operational and approval screens. */
     @GetMapping
     @PreAuthorize("hasAuthority('PRIVACY_PURPOSE_VIEW')")

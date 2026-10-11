@@ -88,7 +88,7 @@ public class InboundService {
             AccountView a = accounts.account(event.accountId(), true);
             if ("CLOSED".equals(a.lifecycleStatus()) || "CANCELLED".equals(a.lifecycleStatus()))
                 throw conflict("Terminal account cannot receive new financial projection events");
-            ProjectionPolicy.validate(a, event);
+            ProjectionPolicy.validate(accounts.projectionSnapshot(event.accountId()), event);
             events.projection(event);
             events.inbox(event.eventId(), event.eventType(), "MB_TXN", event.accountId());
         });

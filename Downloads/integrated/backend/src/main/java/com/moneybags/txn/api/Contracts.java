@@ -19,6 +19,10 @@ public final class Contracts {
     public record TransferRequest(@NotNull Long sourceAccountId, @NotNull Long targetAccountId,
             @NotNull @DecimalMin("0.01") BigDecimal amount, @NotBlank String channelCode,
             @NotBlank String requestKey, @NotBlank String correlationId, @NotNull LocalDate valueDate) { }
+    public record NumberTransferRequest(@NotBlank @Size(max=20) String sourceAccountNumber,
+            @NotBlank @Size(max=20) String targetAccountNumber,
+            @NotNull @DecimalMin("0.01") BigDecimal amount, @NotBlank String requestKey,
+            @NotBlank String correlationId) { }
     public record TransactionView(long transactionId, String status, Long journalId,
             String type, BigDecimal amount, String currency, String correlationId) { }
     public record PositionView(long accountId, BigDecimal posted, BigDecimal holds, BigDecimal liens,

@@ -6,11 +6,13 @@ import com.moneybags.statements.ApiModels.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,8 +27,11 @@ public class RequestService {
     private final AuthorizationService auth;
     private final AuditService audits;
     private final OutboxService outbox;
-    public RequestService(JdbcTemplate jdbc,ObjectMapper mapper,AuthorizationService auth,AuditService audits,OutboxService outbox) {
+    private final ZoneId businessZone;
+    public RequestService(JdbcTemplate jdbc,ObjectMapper mapper,AuthorizationService auth,AuditService audits,
+        OutboxService outbox,@Value("${moneybags.business-zone}") String businessZone) {
         this.jdbc=jdbc; this.mapper=mapper; this.auth=auth; this.audits=audits; this.outbox=outbox;
+        this.businessZone=ZoneId.of(businessZone);
     }
     public record Row(String id,Long accountId,String cif,String type,LocalDate from,LocalDate through,
         String locale,String format,String requesterType,String requesterId,String channel,String purpose,
@@ -40,6 +45,8 @@ public class RequestService {
             (actor.type().equals("STAFF") && (body.purposeCode()==null || body.purposeCode().isBlank())) ||
             (Set.of("STAFF_ASSISTED","LEGALLY_REQUIRED").contains(body.statementType()) &&
              (body.caseReference()==null || body.caseReference().isBlank()))) throw bad("INVALID_REQUEST");
+        if(body.periodEnd().isAfter(LocalDate.now(businessZone)))
+            throw new ApiException(HttpStatus.BAD_REQUEST,"FUTURE_PERIOD","Statement period cannot end in the future");
         boolean revision=Set.of("REISSUE","CORRECTED").contains(body.statementType());
         if(revision != (body.priorStatementId()!=null && body.correctionReasonCode()!=null &&
                         !body.correctionReasonCode().isBlank()))
@@ -124,12 +131,14 @@ public class RequestService {
     /** Lists one account's recent requests without exposing another account's records. */
     public List<RequestView> list(long accountId,String requesterId,int limit) {
         return jdbc.query("""
-            SELECT REQUEST_ID,ACCOUNT_ID,STATUS,STATEMENT_TYPE,PERIOD_START_DATE,PERIOD_END_DATE,
-                   REQUESTED_FORMAT,FAILURE_CODE
-            FROM M10_STATEMENT_REQUEST WHERE ACCOUNT_ID=? AND REQUESTER_ID=? ORDER BY REQUESTED_AT DESC
+            SELECT R.REQUEST_ID,R.ACCOUNT_ID,R.STATUS,R.STATEMENT_TYPE,R.PERIOD_START_DATE,R.PERIOD_END_DATE,
+                   R.REQUESTED_FORMAT,R.FAILURE_CODE,
+                   (SELECT S.STATEMENT_ID FROM M10_STATEMENT_SNAPSHOT S WHERE S.REQUEST_ID=R.REQUEST_ID
+                    ORDER BY S.CREATED_AT DESC FETCH FIRST 1 ROW ONLY) AS STATEMENT_ID
+            FROM M10_STATEMENT_REQUEST R WHERE R.ACCOUNT_ID=? AND R.REQUESTER_ID=? ORDER BY R.REQUESTED_AT DESC
             FETCH FIRST ? ROWS ONLY
             """,(rs,n)->new RequestView(rs.getString(1),rs.getLong(2),rs.getString(3),rs.getString(4),
-                rs.getDate(5).toLocalDate(),rs.getDate(6).toLocalDate(),rs.getString(7),rs.getString(8),null),
+                rs.getDate(5).toLocalDate(),rs.getDate(6).toLocalDate(),rs.getString(7),rs.getString(8),rs.getString(9)),
             accountId,requesterId,Math.min(Math.max(limit,1),100));
     }
     /** Cancels only a request that has not started processing. */

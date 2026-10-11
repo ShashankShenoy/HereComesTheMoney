@@ -62,6 +62,170 @@ public class TreasuryRepository {
             .param("id", id).query(this::reserveAccount).optional();
     }
 
+    /** A reserve must own one active INR asset GL, never a shared ledger account. */
+    public void lockReserveGl(long glAccountId) {
+        jdbc.sql("SELECT GL_ACCOUNT_ID FROM M05_GL_ACCOUNT WHERE GL_ACCOUNT_ID=:id FOR UPDATE")
+            .param("id", glAccountId).query(Long.class).optional()
+            .orElseThrow(() -> DomainException.notFound("GL account", glAccountId));
+    }
+
+    public boolean validReserveGl(long glAccountId) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M05_GL_ACCOUNT g WHERE g.GL_ACCOUNT_ID=:id
+              AND g.ACCOUNT_CLASS='ASSET' AND g.NORMAL_SIDE='DR'
+              AND g.CURRENCY_CODE='INR' AND g.ACTIVE_FLAG='Y'
+              AND NOT EXISTS (SELECT 1 FROM M07_RESERVE_ACCOUNT r WHERE r.GL_ACCOUNT_ID=g.GL_ACCOUNT_ID)
+              AND NOT EXISTS (SELECT 1 FROM M05_GL_POSTING p WHERE p.GL_ACCOUNT_ID=g.GL_ACCOUNT_ID)
+              AND NOT EXISTS (SELECT 1 FROM MBX_BRANCH_VAULT v WHERE v.VAULT_GL_ID=g.GL_ACCOUNT_ID)
+              AND NOT EXISTS (SELECT 1 FROM MBX_TELLER_TILL t WHERE t.CASH_GL_ID=g.GL_ACCOUNT_ID)
+            """).param("id", glAccountId).query(Integer.class).single() == 1;
+    }
+
+    public boolean reserveGlIsUsable(long accountId) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M07_RESERVE_ACCOUNT r JOIN M05_GL_ACCOUNT g ON g.GL_ACCOUNT_ID=r.GL_ACCOUNT_ID
+             WHERE r.RESERVE_ACCOUNT_ID=:id AND r.ACCOUNT_STATUS='ACTIVE'
+               AND g.ACCOUNT_CLASS='ASSET' AND g.NORMAL_SIDE='DR' AND g.ACTIVE_FLAG='Y' AND g.CURRENCY_CODE='INR'
+               AND (SELECT COUNT(*) FROM M07_RESERVE_ACCOUNT x WHERE x.GL_ACCOUNT_ID=r.GL_ACCOUNT_ID)=1
+            """).param("id", accountId).query(Integer.class).single() == 1;
+    }
+
+    public boolean paymentCanReserve(long paymentId) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=:id
+              AND STATUS IN ('AUTHORIZED','LIQUIDITY_PENDING','HELD','DEBIT_POSTED','DISPATCHED','ACCEPTED','UNKNOWN','SETTLEMENT_PENDING')
+            """).param("id", paymentId).query(Integer.class).single() == 1;
+    }
+
+    /** Checks the source obligation without relying on untrusted request snapshots. */
+    public boolean paymentMatches(long paymentId, String rail, BigDecimal amount, String side) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=:id
+              AND RAIL_CODE=:rail AND AMOUNT=:amount
+              AND PAYMENT_DIRECTION=:direction AND CURRENCY_CODE='INR'
+            """).param("id", paymentId).param("rail", rail).param("amount", amount)
+            .param("direction", "OUT".equals(side) ? "OUTBOUND" : "INBOUND")
+            .query(Integer.class).single() == 1;
+    }
+
+    public boolean paymentCanSettle(long paymentId) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=:id
+              AND STATUS IN ('DISPATCHED','ACCEPTED','UNKNOWN','SETTLEMENT_PENDING','SETTLED')
+            """).param("id", paymentId).query(Integer.class).single() == 1;
+    }
+
+    public boolean cycleItemMatches(SettlementCycle cycle, CycleItem item) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=:paymentId
+              AND RAIL_CODE=:rail AND AMOUNT=:amount AND CURRENCY_CODE='INR'
+              AND PAYMENT_DIRECTION=:direction
+              AND (:batchId IS NULL OR CLEARING_BATCH_ID=:batchId)
+              AND (:batchId IS NULL OR EXISTS (SELECT 1 FROM M06_CLEARING_BATCH_ITEM bi
+                   WHERE bi.CLEARING_BATCH_ID=:batchId AND bi.PAYMENT_ID=:paymentId
+                     AND bi.MOVEMENT_SIDE=:side AND bi.AMOUNT=:amount
+                     AND bi.ITEM_STATUS NOT IN ('REJECTED','RETURNED','EXCEPTION')))
+            """).param("paymentId", item.paymentId()).param("rail", cycle.railCode())
+            .param("amount", item.amount()).param("direction", "OUT".equals(item.direction()) ? "OUTBOUND" : "INBOUND")
+            .param("side", item.direction()).param("batchId", cycle.clearingBatchId()).query(Integer.class).single() == 1;
+    }
+
+    public boolean cycleMatchesBatch(SettlementCycle cycle) {
+        if (cycle.clearingBatchId() == null) return true;
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_CLEARING_BATCH b WHERE b.CLEARING_BATCH_ID=:batchId
+              AND b.BATCH_STATUS IN ('CLOSED','SUBMITTED','SETTLEMENT_PENDING')
+              AND b.RAIL_CODE=:rail AND b.BATCH_DIRECTION=:direction
+              AND b.ITEM_COUNT=(SELECT COUNT(*) FROM M07_SETTLEMENT_CYCLE_ITEM WHERE SETTLEMENT_CYCLE_ID=:cycleId)
+              AND b.GROSS_OUT_AMOUNT=:grossOut AND b.GROSS_IN_AMOUNT=:grossIn
+              AND b.NET_AMOUNT=:netAmount
+              AND ((b.NET_MOVEMENT_SIDE IS NULL AND :side IS NULL) OR b.NET_MOVEMENT_SIDE=:side)
+              AND NOT EXISTS (SELECT 1 FROM M06_CLEARING_BATCH_ITEM bi
+                LEFT JOIN M07_SETTLEMENT_CYCLE_ITEM ci ON ci.SETTLEMENT_CYCLE_ID=:cycleId
+                  AND ci.PAYMENT_ID=bi.PAYMENT_ID AND ci.DIRECTION=bi.MOVEMENT_SIDE AND ci.AMOUNT=bi.AMOUNT
+                WHERE bi.CLEARING_BATCH_ID=b.CLEARING_BATCH_ID AND ci.SETTLEMENT_CYCLE_ITEM_ID IS NULL)
+            """).param("batchId", cycle.clearingBatchId()).param("rail", cycle.railCode())
+            .param("direction", cycle.direction()).param("cycleId", cycle.id())
+            .param("grossOut", cycle.grossOut()).param("grossIn", cycle.grossIn())
+            .param("netAmount", cycle.netAmount()).param("side", cycle.netMovementSide())
+            .query(Integer.class).single() == 1;
+    }
+
+    /** Confirms every cycle item already has its own final, verified reserve movement. */
+    public boolean cycleItemsIndividuallySettled(SettlementCycle cycle) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M07_SETTLEMENT_CYCLE_ITEM ci
+              LEFT JOIN M06_PAYMENT_INSTRUCTION p ON p.PAYMENT_ID=ci.PAYMENT_ID
+             WHERE ci.SETTLEMENT_CYCLE_ID=:cycleId AND ci.ITEM_STATUS='INCLUDED'
+               AND (p.PAYMENT_ID IS NULL OR p.STATUS<>'SETTLED' OR NOT EXISTS (
+                 SELECT 1 FROM M07_CENTRAL_TREASURY_LEDGER t
+                   JOIN M07_SETTLEMENT_EVIDENCE e ON e.EVIDENCE_ID=t.EVIDENCE_ID
+                  WHERE t.PAYMENT_ID=ci.PAYMENT_ID AND t.SETTLEMENT_CYCLE_ID IS NULL
+                    AND t.RESERVE_ACCOUNT_ID=:accountId AND t.RAIL_CODE=:rail
+                    AND t.MOVEMENT_SIDE=ci.DIRECTION AND t.AMOUNT=ci.AMOUNT
+                    AND e.EVIDENCE_STATUS='VERIFIED'))
+            """).param("cycleId", cycle.id()).param("accountId", cycle.reserveAccountId())
+            .param("rail", cycle.railCode()).query(Integer.class).single() == 0;
+    }
+
+    public boolean cycleBatchMatches(CreateCycle command) {
+        if (command.clearingBatchId() == null) return true;
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=:batchId
+              AND RAIL_CODE=:rail AND BATCH_DIRECTION=:direction
+              AND BATCH_STATUS IN ('CLOSED','SUBMITTED','SETTLEMENT_PENDING','SETTLED')
+            """).param("batchId", command.clearingBatchId()).param("rail", command.railCode())
+            .param("direction", command.direction()).query(Integer.class).single() == 1;
+    }
+
+    public boolean matchingCommittedHold(SettlementEvidence evidence) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M07_TREASURY_LIQUIDITY_HOLD
+             WHERE STATUS='COMMITTED' AND RESERVE_ACCOUNT_ID=:accountId AND RAIL_CODE=:rail
+               AND AMOUNT=:amount AND ((:paymentId IS NOT NULL AND PAYMENT_ID=:paymentId)
+                 OR (:cycleId IS NOT NULL AND SETTLEMENT_CYCLE_ID=:cycleId))
+            """).param("accountId", evidence.reserveAccountId()).param("rail", evidence.railCode())
+            .param("amount", evidence.amount()).param("paymentId", evidence.paymentId())
+            .param("cycleId", evidence.cycleId()).query(Integer.class).single() == 1;
+    }
+
+    /** Prevents a payment from moving the reserve both individually and through a cycle. */
+    public boolean movementScopeUnused(SettlementEvidence evidence) {
+        if (evidence.paymentId() != null) {
+            return jdbc.sql("""
+                SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER l
+                 WHERE l.PAYMENT_ID=:paymentId OR l.SETTLEMENT_CYCLE_ID IN
+                   (SELECT SETTLEMENT_CYCLE_ID FROM M07_SETTLEMENT_CYCLE_ITEM WHERE PAYMENT_ID=:paymentId)
+                """).param("paymentId", evidence.paymentId()).query(Integer.class).single() == 0;
+        }
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER l
+             WHERE l.SETTLEMENT_CYCLE_ID=:cycleId OR l.PAYMENT_ID IN
+               (SELECT PAYMENT_ID FROM M07_SETTLEMENT_CYCLE_ITEM WHERE SETTLEMENT_CYCLE_ID=:cycleId)
+            """).param("cycleId", evidence.cycleId()).query(Integer.class).single() == 0;
+    }
+
+    /** Proves that the posted settlement journal changes this reserve by exactly the evidenced amount. */
+    public boolean journalMatches(SettlementEvidence evidence, long journalId, long reserveGlId) {
+        int journal = jdbc.sql("""
+            SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE JOURNAL_ID=:journalId
+              AND JOURNAL_TYPE='SETTLEMENT' AND REVERSAL_OF_JOURNAL_ID IS NULL
+              AND ((:paymentId IS NOT NULL AND PAYMENT_ID=:paymentId AND SETTLEMENT_CYCLE_ID IS NULL)
+                OR (:cycleId IS NOT NULL AND SETTLEMENT_CYCLE_ID=:cycleId AND PAYMENT_ID IS NULL))
+            """).param("journalId", journalId).param("paymentId", evidence.paymentId())
+            .param("cycleId", evidence.cycleId()).query(Integer.class).single();
+        if (journal != 1) return false;
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM M05_GL_POSTING WHERE JOURNAL_ID=:journalId
+              AND GL_ACCOUNT_ID=:glId AND ENTRY_SIDE=:side AND AMOUNT=:amount
+              AND BANK_ACCOUNT_ID IS NULL AND LOAN_FACILITY_ID IS NULL
+            """).param("journalId", journalId).param("glId", reserveGlId)
+            .param("side", "IN".equals(evidence.movementSide()) ? "DR" : "CR")
+            .param("amount", evidence.amount()).query(Integer.class).single() == 1
+            && jdbc.sql("SELECT COUNT(*) FROM M05_GL_POSTING WHERE JOURNAL_ID=:journalId AND GL_ACCOUNT_ID=:glId")
+                .param("journalId", journalId).param("glId", reserveGlId).query(Integer.class).single() == 1;
+    }
+
     /** Reads the current reserve projection without treating it as posting authority. */
     public Optional<ReservePosition> findPosition(long accountId) {
         return jdbc.sql("SELECT * FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=:id AND CURRENCY_CODE='INR'")
@@ -117,6 +281,11 @@ public class TreasuryRepository {
     public Optional<LiquidityHold> findHoldByKey(String holdKey) {
         return jdbc.sql("SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD WHERE HOLD_KEY=:key")
             .param("key", holdKey).query(this::hold).optional();
+    }
+
+    public Optional<LiquidityHold> findHold(long id) {
+        return jdbc.sql("SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD WHERE LIQUIDITY_HOLD_ID=:id")
+            .param("id", id).query(this::hold).optional();
     }
 
     /** Resolves and locks a hold for a state transition. */
@@ -284,6 +453,23 @@ public class TreasuryRepository {
             .param("id", id).query(this::evidence).optional();
     }
 
+    public Optional<SettlementEvidence> findEvidenceByReference(long accountId, String reference) {
+        return jdbc.sql("""
+            SELECT * FROM M07_SETTLEMENT_EVIDENCE
+             WHERE RESERVE_ACCOUNT_ID=:accountId AND EXTERNAL_SETTLEMENT_REF=:reference
+            """).param("accountId", accountId).param("reference", reference).query(this::evidence).optional();
+    }
+
+    public byte[] evidenceHash(long id) {
+        return jdbc.sql("SELECT EVIDENCE_HASH FROM M07_SETTLEMENT_EVIDENCE WHERE EVIDENCE_ID=:id")
+            .param("id", id).query(byte[].class).single();
+    }
+
+    public String evidenceReference(long id) {
+        return jdbc.sql("SELECT EVIDENCE_REF FROM M07_SETTLEMENT_EVIDENCE WHERE EVIDENCE_ID=:id")
+            .param("id", id).query(String.class).optional().orElse(null);
+    }
+
     /** Records the verified receipt of notes as a distinct cash-delivery scope. */
     public long insertCashDeliveryEvidence(String deliveryId, long reserveAccountId, BigDecimal amount,
                                            String shipmentRef, String receiptRef, OffsetDateTime occurredAt,
@@ -391,23 +577,42 @@ public class TreasuryRepository {
 
     /** Consumes the matching committed hold, if one exists. */
     public void consumeMatchingHold(TreasuryEntry entry) {
-        if (!"OUT".equals(entry.movementSide())) return;
-        List<LiquidityHold> holds = jdbc.sql("""
-            SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD
-             WHERE STATUS='COMMITTED'
-               AND ((:paymentId IS NOT NULL AND PAYMENT_ID=:paymentId)
-                 OR (:cycleId IS NOT NULL AND SETTLEMENT_CYCLE_ID=:cycleId)) FOR UPDATE
-            """).param("paymentId", entry.paymentId()).param("cycleId", entry.cycleId()).query(this::hold).list();
-        for (LiquidityHold hold : holds) {
-            if (hold.amount().compareTo(entry.amount()) != 0) {
-                throw DomainException.conflict("HOLD_AMOUNT_MISMATCH", "Settlement amount differs from committed liquidity hold");
+        if (entry.paymentId() != null) {
+            if ("OUT".equals(entry.movementSide())) {
+                List<LiquidityHold> holds = jdbc.sql("""
+                    SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD
+                     WHERE PAYMENT_ID=:id AND STATUS='COMMITTED' FOR UPDATE
+                    """).param("id", entry.paymentId()).query(this::hold).list();
+                if (holds.size() != 1) throw DomainException.conflict("HOLD_MISMATCH", "Outbound payment has no committed reserve hold");
+                consumeHold(holds.get(0), entry, entry.amount());
             }
-            jdbc.sql("""
-                UPDATE M07_TREASURY_LIQUIDITY_HOLD SET STATUS='CONSUMED', CONSUMED_BY_ENTRY_ID=:entryId,
-                  CLOSED_AT=SYSTIMESTAMP, VERSION_NO=VERSION_NO+1 WHERE LIQUIDITY_HOLD_ID=:id
-                """).param("entryId", entry.id()).param("id", hold.id()).update();
-            decrementActiveHold(hold.reserveAccountId(), hold.amount());
+            return;
         }
+        for (SettlementCycleItem item : findCycleItems(entry.cycleId())) {
+            if (!"OUT".equals(item.direction()) || !"INCLUDED".equals(item.status())) continue;
+            List<LiquidityHold> holds = jdbc.sql("""
+                SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD
+                 WHERE PAYMENT_ID=:id AND STATUS='COMMITTED' FOR UPDATE
+                """).param("id", item.paymentId()).query(this::hold).list();
+            if (holds.size() != 1) throw DomainException.conflict("HOLD_MISMATCH", "Cycle payment has no committed reserve hold");
+            consumeHold(holds.get(0), entry, item.amount());
+        }
+        List<LiquidityHold> cycleHolds = jdbc.sql("""
+            SELECT * FROM M07_TREASURY_LIQUIDITY_HOLD
+             WHERE SETTLEMENT_CYCLE_ID=:id AND STATUS='COMMITTED' FOR UPDATE
+            """).param("id", entry.cycleId()).query(this::hold).list();
+        for (LiquidityHold hold : cycleHolds) consumeHold(hold, entry, entry.amount());
+    }
+
+    private void consumeHold(LiquidityHold hold, TreasuryEntry entry, BigDecimal amount) {
+        if (hold.amount().compareTo(amount) != 0 || hold.reserveAccountId() != entry.reserveAccountId()
+                || !hold.railCode().equals(entry.railCode()))
+            throw DomainException.conflict("HOLD_MISMATCH", "Settlement differs from committed liquidity hold");
+        jdbc.sql("""
+            UPDATE M07_TREASURY_LIQUIDITY_HOLD SET STATUS='CONSUMED', CONSUMED_BY_ENTRY_ID=:entryId,
+              CLOSED_AT=SYSTIMESTAMP, VERSION_NO=VERSION_NO+1 WHERE LIQUIDITY_HOLD_ID=:id
+            """).param("entryId", entry.id()).param("id", hold.id()).update();
+        decrementActiveHold(hold.reserveAccountId(), hold.amount());
     }
 
     /** Marks a cycle and its items settled after its reserve movement is confirmed. */
@@ -447,6 +652,11 @@ public class TreasuryRepository {
             """).param("status", status).param("severity", severity).query(this::reconException).list();
     }
 
+    public Optional<ReconciliationException> findException(long id) {
+        return jdbc.sql("SELECT * FROM M07_RECONCILIATION_EXCEPTION WHERE EXCEPTION_ID=:id")
+            .param("id", id).query(this::reconException).optional();
+    }
+
     /** Resolves or waives an open reconciliation exception. */
     public void resolveException(long id, ResolveException command) {
         int changed = jdbc.sql("""
@@ -477,6 +687,11 @@ public class TreasuryRepository {
             SELECT * FROM M07_TREASURY_WORK_ITEM WHERE (:status IS NULL OR STATUS=:status)
               AND (:owner IS NULL OR OWNER_ID=:owner) ORDER BY OPENED_AT FETCH FIRST 500 ROWS ONLY
             """).param("status", status).param("owner", ownerId).query(this::workItem).list();
+    }
+
+    public Optional<WorkItem> findWorkItem(long id) {
+        return jdbc.sql("SELECT * FROM M07_TREASURY_WORK_ITEM WHERE WORK_ITEM_ID=:id")
+            .param("id", id).query(this::workItem).optional();
     }
 
     /** Records the maker submission before an independent checker decision. */

@@ -13,6 +13,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -35,10 +36,11 @@ public class LedgerService {
     private final ObjectMapper json;
     private final AccountCatalog accounts;
     private final PaymentCatalog payments;
+    private final Clock clock;
 
     /** Injects JDBC and the replaceable cross-module account adapter. */
-    public LedgerService(JdbcTemplate db, ObjectMapper json, AccountCatalog accounts, PaymentCatalog payments) {
-        this.db = db; this.json = json; this.accounts = accounts; this.payments = payments;
+    public LedgerService(JdbcTemplate db, ObjectMapper json, AccountCatalog accounts, PaymentCatalog payments, Clock clock) {
+        this.db = db; this.json = json; this.accounts = accounts; this.payments = payments; this.clock = clock;
     }
 
     /** Reads the authoritative spendable position; it is never read from Module 4's projection. */
@@ -56,6 +58,9 @@ public class LedgerService {
         accounts.requireExists(accountId);
         if (!List.of("OPEN", "CLOSED").contains(request.debitStatus()) || !List.of("OPEN", "CLOSED").contains(request.creditStatus()))
             throw invalid("CONTROL_STATUS", "Control direction must be OPEN or CLOSED");
+        // Serialize both initial setup and retries before checking the inbox. A missing
+        // fence row cannot itself be locked, and a retry may have waited for the first commit.
+        db.queryForList("SELECT ACCOUNT_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=? FOR UPDATE", accountId);
         byte[] event = raw(request.eventId());
         if (!db.query("SELECT EVENT_ID FROM M05_CONSUMER_INBOX WHERE CONSUMER_NAME='M04_CONTROL' AND EVENT_ID=?",
                 (rs, n) -> rs.getBytes(1), event).isEmpty()) {
@@ -112,8 +117,21 @@ public class LedgerService {
                 throw new ApiException(HttpStatus.CONFLICT, "HOLD_KEY_CONFLICT", "Hold key was used for another request");
             return value;
         }
-        payments.requireAuthorizedHold(request.paymentId(), request.bankAccountId(), request.amount());
         PositionView position = lockedPosition(request.bankAccountId());
+        // A concurrent attempt may have committed while this request waited for the
+        // position lock. The payment can own only one hold, even with a new key.
+        List<HoldView> committed = db.query("SELECT HOLD_ID,STATUS,BANK_ACCOUNT_ID,PAYMENT_ID,AMOUNT FROM M05_FUNDS_HOLD WHERE HOLD_KEY=?",
+                (rs, n) -> new HoldView(rs.getLong(1), rs.getString(2), rs.getLong(3), rs.getLong(4), rs.getBigDecimal(5)), request.holdKey());
+        if (!committed.isEmpty()) {
+            HoldView value = committed.get(0);
+            if (value.bankAccountId() != request.bankAccountId() || value.paymentId() != request.paymentId() || value.amount().compareTo(request.amount()) != 0)
+                throw new ApiException(HttpStatus.CONFLICT, "HOLD_KEY_CONFLICT", "Hold key was used for another request");
+            return value;
+        }
+        Integer paymentHolds = db.queryForObject("SELECT COUNT(*) FROM M05_FUNDS_HOLD WHERE PAYMENT_ID=?", Integer.class, request.paymentId());
+        if (paymentHolds != null && paymentHolds > 0)
+            throw new ApiException(HttpStatus.CONFLICT, "PAYMENT_HOLD_EXISTS", "Payment already has a hold");
+        payments.requireAuthorizedHold(request.paymentId(), request.bankAccountId(), request.amount());
         requireFence(request.bankAccountId(), "DR");
         if (position.spendable().compareTo(request.amount()) < 0)
             throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_FUNDS", "Spendable funds are insufficient");
@@ -149,15 +167,8 @@ public class LedgerService {
     @Transactional
     public JournalView postJournal(JournalRequest request, String actor) {
         validateJournal(request);
-        List<JournalView> old = db.query("SELECT J.JOURNAL_ID,J.POSTING_KEY,V.DEBIT_TOTAL,V.CREDIT_TOTAL,J.CURRENCY_CODE FROM M05_GL_JOURNAL J JOIN M05_V_GL_JOURNAL_CONTROL V ON V.JOURNAL_ID=J.JOURNAL_ID WHERE J.POSTING_KEY=?",
-                (rs, n) -> new JournalView(rs.getLong(1), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4), rs.getString(5)), request.postingKey());
-        if (!old.isEmpty()) {
-            List<byte[]> hashes = db.query("SELECT REQUEST_HASH FROM M05_IDEMPOTENCY_RECORD WHERE ORIGINATOR_ID='M05_JOURNAL' AND CHANNEL_CODE='INTERNAL' AND REQUEST_KEY=?",
-                    (rs, n) -> rs.getBytes(1), idempotencyKey(request.postingKey()));
-            if (hashes.isEmpty() || !Arrays.equals(hashes.get(0), sha256(request)))
-                throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Posting key was reused with another payload");
-            return old.get(0);
-        }
+        JournalView old = existingJournal(request);
+        if (old != null) return old;
         checkPeriod(request.valueDate());
         Map<Long, BigDecimal> deltas = new HashMap<>();
         for (JournalLine line : request.lines()) {
@@ -194,8 +205,15 @@ public class LedgerService {
             if (delta.signum() < 0 && available.add(delta).signum() < 0)
                 throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_FUNDS", "Spendable funds are insufficient");
         }
-        long id = insertId("INSERT INTO M05_GL_JOURNAL(POSTING_KEY,TXN_ID,PAYMENT_ID,SETTLEMENT_CYCLE_ID,LOAN_FACILITY_ID,JOURNAL_TYPE,BOOKED_AT,VALUE_DATE,REVERSAL_OF_JOURNAL_ID,DESCRIPTION,CREATED_BY) VALUES (?,?,?,?,?,?,SYSTIMESTAMP,?,?,?,?)",
-                "JOURNAL_ID", request.postingKey(), request.transactionId(), request.paymentId(), request.settlementCycleId(), request.loanFacilityId(), request.journalType(), request.valueDate(), request.reversalOfJournalId(), request.description(), actor);
+        long id;
+        try {
+            id = insertId("INSERT INTO M05_GL_JOURNAL(POSTING_KEY,TXN_ID,PAYMENT_ID,SETTLEMENT_CYCLE_ID,LOAN_FACILITY_ID,JOURNAL_TYPE,BOOKED_AT,VALUE_DATE,REVERSAL_OF_JOURNAL_ID,DESCRIPTION,CREATED_BY) VALUES (?,?,?,?,?,?,SYSTIMESTAMP,?,?,?,?)",
+                    "JOURNAL_ID", request.postingKey(), request.transactionId(), request.paymentId(), request.settlementCycleId(), request.loanFacilityId(), request.journalType(), request.valueDate(), request.reversalOfJournalId(), request.description(), actor);
+        } catch (DuplicateKeyException duplicate) {
+            JournalView committed = existingJournal(request);
+            if (committed != null) return committed;
+            throw duplicate;
+        }
         int lineNo = 1;
         for (JournalLine line : request.lines()) {
             db.update("INSERT INTO M05_GL_POSTING(JOURNAL_ID,LINE_NO,GL_ACCOUNT_ID,BANK_ACCOUNT_ID,LOAN_FACILITY_ID,LOAN_COMPONENT_CODE,ENTRY_SIDE,AMOUNT,NARRATIVE) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -235,8 +253,8 @@ public class LedgerService {
         }
         var source = accounts.requireActive(request.sourceAccountId());
         var target = accounts.requireActive(request.targetAccountId());
-        accounts.requireTransferAllowed(source.productVersionId(), request.channelCode());
-        accounts.requireTransferAllowed(target.productVersionId(), request.channelCode());
+        accounts.requireTransferAllowed(source.productVersionId(), request.channelCode(), "DEBIT");
+        accounts.requireTransferAllowed(target.productVersionId(), request.channelCode(), "CREDIT");
         long sourceGl = mappedGl(source.productVersionId(), "TRANSFER", "CUSTOMER_LIABILITY", request.valueDate());
         long targetGl = mappedGl(target.productVersionId(), "TRANSFER", "CUSTOMER_LIABILITY", request.valueDate());
         long id = insertId("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,?,?,?,?,'INTERNAL_TRANSFER','RECEIVED',?,?,?,?,?)",
@@ -286,12 +304,16 @@ public class LedgerService {
     /** Enforces maker-checker separation and books opposite entries on approval. */
     @Transactional
     public TransactionView decideReversal(long reversalId, ApprovalDecision decision, String checker) {
-        List<Map<String, Object>> approvals = db.queryForList("SELECT APPROVAL_ID,MAKER_ID,STATUS FROM M05_TXN_APPROVAL WHERE TXN_ID=? AND ACTION_CODE='REVERSAL' FOR UPDATE", reversalId);
+        if (!List.of("APPROVED", "REJECTED").contains(decision.decision())) throw invalid("DECISION", "Decision must be APPROVED or REJECTED");
+        List<Map<String, Object>> approvals = db.queryForList("SELECT APPROVAL_ID,MAKER_ID,CHECKER_ID,STATUS FROM M05_TXN_APPROVAL WHERE TXN_ID=? AND ACTION_CODE='REVERSAL' FOR UPDATE", reversalId);
         if (approvals.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "APPROVAL_NOT_FOUND", "Reversal approval does not exist");
         Map<String, Object> approval = approvals.get(0);
-        if (!"PENDING".equals(approval.get("STATUS"))) throw new ApiException(HttpStatus.CONFLICT, "APPROVAL_CLOSED", "Approval has already been decided");
+        if (!"PENDING".equals(approval.get("STATUS"))) {
+            if (decision.decision().equals(approval.get("STATUS")) && checker.equals(approval.get("CHECKER_ID")))
+                return transaction(reversalId);
+            throw new ApiException(HttpStatus.CONFLICT, "APPROVAL_CLOSED", "Approval has already been decided");
+        }
         if (checker.equals(approval.get("MAKER_ID"))) throw new ApiException(HttpStatus.FORBIDDEN, "MAKER_CHECKER", "Maker cannot approve or reject their own reversal");
-        if (!List.of("APPROVED", "REJECTED").contains(decision.decision())) throw invalid("DECISION", "Decision must be APPROVED or REJECTED");
         List<Map<String, Object>> reversals = db.queryForList("SELECT REVERSAL_OF_TXN_ID,CORRELATION_ID,VALUE_DATE FROM M05_TXN_TRANSACTION_LOG WHERE TXN_ID=? AND STATUS='APPROVAL_PENDING' FOR UPDATE", reversalId);
         if (reversals.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "STATE_CHANGED", "Reversal is not pending");
         long originalId = ((Number) reversals.get(0).get("REVERSAL_OF_TXN_ID")).longValue();
@@ -333,6 +355,18 @@ public class LedgerService {
         List<Map<String, Object>> rows = db.queryForList("SELECT JOURNAL_ID,LINE_COUNT,DEBIT_TOTAL,CREDIT_TOTAL,BALANCE_DIFFERENCE,IS_BALANCED FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?", journalId);
         if (rows.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "JOURNAL_NOT_FOUND", "Journal does not exist");
         return rows.get(0);
+    }
+
+    /** Resolves a committed posting-key replay and detects a changed request body. */
+    private JournalView existingJournal(JournalRequest request) {
+        List<JournalView> old = db.query("SELECT J.JOURNAL_ID,J.POSTING_KEY,V.DEBIT_TOTAL,V.CREDIT_TOTAL,J.CURRENCY_CODE FROM M05_GL_JOURNAL J JOIN M05_V_GL_JOURNAL_CONTROL V ON V.JOURNAL_ID=J.JOURNAL_ID WHERE J.POSTING_KEY=?",
+                (rs, n) -> new JournalView(rs.getLong(1), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4), rs.getString(5)), request.postingKey());
+        if (old.isEmpty()) return null;
+        List<byte[]> hashes = db.query("SELECT REQUEST_HASH FROM M05_IDEMPOTENCY_RECORD WHERE ORIGINATOR_ID='M05_JOURNAL' AND CHANNEL_CODE='INTERNAL' AND REQUEST_KEY=?",
+                (rs, n) -> rs.getBytes(1), idempotencyKey(request.postingKey()));
+        if (hashes.size() != 1 || !Arrays.equals(hashes.get(0), sha256(request)))
+            throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Posting key was reused with another payload");
+        return old.get(0);
     }
 
     /** Returns account positions that differ from the immutable posting-derived balance. */
@@ -406,6 +440,8 @@ public class LedgerService {
 
     /** Blocks a backdated journal after the most recent approved period close. */
     private void checkPeriod(LocalDate valueDate) {
+        if (valueDate.isAfter(LocalDate.now(clock.withZone(java.time.ZoneId.of("Asia/Kolkata")))))
+            throw invalid("FUTURE_VALUE_DATE", "An immediately posted journal cannot have a future value date");
         List<CloseRow> closes = db.query("SELECT CLOSED_THROUGH_DATE,STATUS FROM M05_GL_PERIOD_CLOSE WHERE STATUS IN ('PENDING','APPROVED') FOR UPDATE",
                 (rs, n) -> new CloseRow(rs.getDate(1).toLocalDate(), rs.getString(2)));
         LocalDate closed = closes.stream().filter(row -> "APPROVED".equals(row.status()))

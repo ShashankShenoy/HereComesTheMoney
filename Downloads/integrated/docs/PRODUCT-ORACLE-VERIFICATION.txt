@@ -1,0 +1,62 @@
+MONEYBAGS PRODUCT VERIFICATION — 11 October 2026 (IST)
+Database: main Oracle ALPHA schema, PDB1. All product entries were committed.
+Scope: all 10 active M03 products and the approved Moneybags Classic credit card.
+
+Dedicated customer: product.review.20261011 / Product Review Customer
+CIF: 6c1c1441-55c4-4af4-ae12-ed894ea7600d
+
+PRODUCT                            PERSISTED ENTRY                   RESULT
+Business Loan                      Facility 2 / application 29      PASS
+Education Loan                     Facility 3 / application 30      PASS
+Home Loan                          Facility 4 / application 31      PASS
+Other Loan                         Facility 5 / application 32      PASS
+Personal Loan WEB_01               Facility 6 / application 33      PASS
+Vehicle Loan                       Facility 7 / application 34      PASS
+Personal Loan WEB_02               Facility 8 / application 35      PASS
+Liberty Savings                    Account 22, active version 62    PASS
+MCP-ALPHA-SAV                      Accounts 21 and 23, version 41   PASS
+Fixed Deposit                      Contract 22, INR 1,000            PASS
+Moneybags Classic                  Active card (ID below)         PASS
+Card ID: 9953a8bd-5532-47be-ae8e-10eba254cf27
+
+CORRECTIONS
+- Created and independently approved Liberty Savings version 62, using the existing approved savings terms (3% fixed simple interest) and matching GL mappings.
+- Corrected the unused draft PERSONAL_LOAN_WEB_01 from SAVINGS to LOAN, completed its rules from approved personal-loan version 34, and independently approved and activated version 33. Guards confirmed no linked accounts or approved version history.
+- Fixed Oracle loan conversion: INSERT SELECT with generated keys caused ORA-00933. Conversion now uses INSERT VALUES while preserving the application terms.
+- Tightened signed-offer validation: a document must be created after offer issuance and the most recent account selection change. Re-verifying an older document cannot satisfy changed terms.
+- Fixed both product and account transfer allowance calculations: fixed-deposit funding has no target bank account and must not consume the account-to-account transfer allowance. Genuine transfers still consume the limit.
+- Enabled the installed deposit-interest feature in the workstation Oracle configuration.
+
+AUTOMATED CHECKS: 91 backend tests and 24 frontend tests passed; frontend syntax check and build passed.
+
+VERIFIED WORKFLOWS
+Loans: customer submission and replay, invalid amount rejection, assessment, independent sanction, customer account-bound offer acceptance, verified signed-offer metadata, facility conversion, independent disbursement, exact balance credit, disbursement replay, installment count and total principal. Due-interest accrual, repayment, and replay were tested inside rollback-only date fixtures.
+Savings: account opening, opening replay, real Module 5 fence activation, transfers, exact source debit/target credit, replay and insufficient-funds rejection. Transfer after fixed-deposit funding was also verified inside a rollback-only transaction.
+Fixed deposit: approved minimum amount and term, exact funding debit, request replay, premature payout rejection, principal plus interest payout and maturity replay. Future maturity was simulated in a savepoint and rolled back; the persisted deposit remains active and matures on 11 November 2026 with INR 5.52 interest.
+Credit card: application and replay, independent approval, activation, purchase and replay, limit rejection, freeze/blocked purchase/unfreeze, exact linked-account repayment and replay, zero outstanding and matching ledger reconciliation. Statement generation and replay used a rollback-only billing-date fixture.
+Calendar: savings month-end used an injected future ledger clock inside rolled-back transactions. Account 21 calculated INR 1,215.10; INR 1 balances on accounts 22 and 23 correctly rounded to INR 0.00. No future-dated interest or billing records were committed.
+API: six authenticated Oracle endpoints passed for customer offers, dashboard, loan applications, fixed deposits, credit cards and account position. Unauthenticated dashboard access returned 401 and unrelated-account position returned 403.
+
+FINAL ORACLE READBACK
+Seven active loan facilities have total principal/outstanding INR 705,000.
+Account 21 posted balance: INR 703,988. Accounts 22 and 23: INR 1 each.
+Fixed-deposit principal: INR 1,000. Credit-card principal/interest outstanding: INR 0.
+All Oracle journals balance. Verification sessions were revoked. Future interest periods were absent after rollback.
+
+VERIFICATION BOUNDARIES
+Approval automation used the existing admin and checker1 entitlements with independent identities; it did not grant roles. The dedicated customer was created through the configured demonstration onboarding service, which assumes KYC. Offer/document references identify verification metadata. Card-network processing and external payment rails remain simulated by the application. Early loan prepayment requires the existing reschedule workflow and remains rejected; this verification covers supported due-installment servicing. These checks do not certify real-world identity evidence, external networks or bank compliance.
+Retired historical versions and the retired CC_MERGE_VERIFY product were preserved.
+
+RUNNING APPLICATION
+http://localhost:5174
+Start/restart the corrected package: tools/start-product-verified.ps1
+Stop it: stop-oracle-alpha.ps1
+A separate verified package was built because an existing preview holds the original backend JAR open. The preview was preserved; the running Oracle app uses the corrected separate package.
+
+EVIDENCE
+.runtime/product-oracle-results.txt
+.runtime/product-final-readback.txt
+.runtime/product-backend-tests.log
+.runtime/product-frontend-tests.log
+.runtime/product-limit-regression.log
+.runtime/product-oracle-final.log

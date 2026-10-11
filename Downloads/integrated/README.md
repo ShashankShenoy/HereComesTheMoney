@@ -1,216 +1,518 @@
-# Money Bags — integrated banking workspace
+# Moneybags — setup and product demo guide
 
-English, Hindi and Kannada interface support is documented in [Multilingual UI](docs/MULTILINGUAL.md).
+Moneybags combines a Spring Boot backend, an Oracle JET / Knockout frontend, shared sign-in and permissions, and a balanced transaction ledger. Run it with a fresh local H2 database or an existing Oracle database.
 
-One Spring Boot application, one Oracle JET / Knockout frontend, and the supplied Oracle schema. The original module folders are preserved. New work lives entirely in `integrated/`.
+This guide covers setup, startup, logins, and demonstrations for each product and supporting banking tab. **Transfers between two users of this demo bank debit the sender and credit the recipient.** External payment rails, card purchases, and the RBI reserve mirror have separate simulation workflows.
 
-**This is a runnable integration and local banking demonstrator, not a production-certified bank.** All requested domains have navigation and API-backed workflow screens. Supported money movements use balanced ledger postings. External rails are explicitly simulated. Oracle acceptance, broker integration, institution-specific policies and compliance validation remain deployment gates; see [feature coverage](docs/FEATURE-COVERAGE.md).
+## Contents
+
+- [Choose your setup](#choose-your-setup)
+- [Prerequisites](#prerequisites)
+- [Start the local demo](#start-the-local-demo)
+- [Local users and data](#local-users-and-data)
+- [Use Oracle](#use-oracle)
+- [Oracle startup and VPN recovery](#oracle-startup-and-vpn-recovery)
+- [Optional configuration](#optional-configuration)
+- [Prepare a demonstration](#prepare-a-demonstration)
+- [Product demo walkthroughs](#product-demo-walkthroughs)
+- [Supporting banking and administration tabs](#supporting-banking-and-administration-tabs)
+- [Troubleshooting](#troubleshooting)
+- [Verification and handoff](#verification-and-handoff)
+- [Further documentation](#further-documentation)
+
+## Choose your setup
+
+| Setup | Database | Default web address | Restart behavior |
+| --- | --- | --- | --- |
+| Local demo | In-memory H2 with synthetic users/products | http://localhost:5173 | All demo changes reset to the seeded starting state |
+| Oracle demo | Your configured Oracle schema | http://localhost:5174 | Committed records remain |
+
+Choose local H2 for a first run or repeatable presentation. It needs no Oracle installation, VPN, database password, AI key, or Kafka broker. Choose Oracle when accounts, products, approvals, and transactions must survive restart. Local users/passwords are **not automatically created in Oracle**.
+
+## Prerequisites
+
+| Tool | Requirement |
+| --- | --- |
+| Java JDK | 17 or newer; latest verification used JDK 21 |
+| Maven | 3.9 or newer |
+| Node.js and npm | Node.js 20 or newer; latest verification used Node.js 22 |
+| PowerShell | Windows PowerShell 5.1 or PowerShell 7 for the supplied launchers |
+| Browser | A current desktop browser; separate profiles help demonstrate several users |
+| SQL Developer / SQL*Plus | Oracle schema installation and diagnostics only |
+
+Put Java, Maven, Node.js, and npm on PATH. Obtain the project, then open PowerShell in the **integrated directory** containing this README, backend, frontend, and the startup scripts:
+
+~~~powershell
+Set-Location 'C:/path/to/integrated'
+java -version
+mvn -version
+node --version
+npm --version
+~~~
+
+**Every command below assumes this directory.** Replace example paths and configuration placeholders. The first build needs access to Maven and npm repositories to download dependencies.
 
 ## Start the local demo
 
-Prerequisites: Java 17+, Maven 3.9+, Node.js 20+ and npm. From the repository root, start the app with:
+~~~powershell
+& ./start-local.ps1
+~~~
 
-```powershell
-& ./Downloads/integrated/start-local.ps1
-```
+Wait for the **Local workspace** message. The launcher runs backend verification, installs frontend dependencies with npm ci, checks/tests the frontend, builds frontend/dist, and starts Java and Node in hidden windows.
 
-On every start, the launcher calls `build-before-start.ps1`, which runs Maven clean verify, npm ci, the frontend check, and the frontend build. It serves the newly built `frontend/dist` files.
-
-Open [the banking workspace](http://localhost:5173). The backend listens at `http://127.0.0.1:8090`; [API documentation](http://localhost:5173/swagger) and [health](http://localhost:5173/actuator/health) use the same frontend proxy.
-
-The starter runs Java and Node in hidden processes and checks backend health. A failed build stops startup before either process launches. Logs and verified process IDs are stored under `.runtime/`. Stop the running app before pulling changes and starting again:
-
-```powershell
-& ./Downloads/integrated/stop-local.ps1
-```
-
-`start-local.ps1 -BackendPort 8091 -FrontendPort 5174` selects alternate ports. The local profile uses Tomcat NIO2 to accommodate Windows hosts where the default Java selector cannot create its loopback socket. It binds both services to loopback.
-
-### Local users and data
-
-All four **synthetic local** users use password `LocalBanking!2026`:
-
-| Login | Purpose |
+| Page | Address |
 | --- | --- |
-| `admin` | Maker and banking administration |
-| `checker` | Bank Checker: read access and independent approvals only; cannot initiate other changes or approve the maker's own request |
-| `customer` | Self access to account 1 / `demo-cif-1` |
-| `customer2` | Self access to account 2 / `demo-cif-2` |
+| Customer sign-in | [localhost:5173/login](http://localhost:5173/login) |
+| Bank-admin / employee sign-in | [localhost:5173/employee/login](http://localhost:5173/employee/login) |
+| API documentation | [localhost:5173/swagger](http://localhost:5173/swagger) |
+| Health | [localhost:5173/actuator/health](http://localhost:5173/actuator/health) |
+| Backend directly | http://127.0.0.1:8090 |
 
-Account 1 starts at INR 75,000; account 2 at INR 25,000. Branch: `MUM001`. Savings product/version: `1`; fixed-rate monthly loan product/version: `2`. The reserve is synthetic, and displayed demo FX rates are deliberately not market prices.
+Health should return status **UP**. Stop with:
 
-Customer 1's demonstration hash is:
+~~~powershell
+& ./stop-local.ps1
+~~~
 
-```text
-customer-demo-hash-xxxxxxxxxxxxxxxxxxxxxxxx
-```
+Restarting the local backend resets all synthetic data. Keep it running until a multi-step demonstration finishes.
 
-Use the **account number** shown to the customer in **Banking → Account transactions**, **Banking → Account-holder access key**, and account fields in the operation forms. The app resolves it to the numeric account ID expected by existing service APIs. That ID remains an internal database reference used to join ledger and account records; existing API calls using it remain supported. Authorized staff can enter an account number to identify active holders who can provide a key. Existing keys cannot be retrieved from their stored digests. A signed-in customer can generate a replacement key in the same section; the old key then stops working.
+For alternative ports, allow the new browser origin before startup:
 
-Customers can view balances, transactions, and statements for their linked accounts after signing in. An employee with an active, unrestricted, global `BANK_ADMIN` assignment and `TXN_READ` permission can review account transactions and their details without an account-holder key; those reads are audited. Other staff need their own IAM permission and account scope plus a matching holder key for protected transaction details. The key alone never grants account access. A customer cannot use another customer's key to read another account. Payment receipts, account positions, and statement downloads still follow their separate access rules.
+~~~powershell
+$env:FRONTEND_ORIGINS='http://localhost:5177,http://127.0.0.1:5177'
+& ./start-local.ps1 -BackendPort 8097 -FrontendPort 5177
+~~~
 
-The **Transactions & ledger** page shows account transactions directly, displaying 25 rows at a time from its most recent 100 results. Duplicate read operations are omitted from its operation menu; the underlying APIs remain available to other clients. **Show ledger actions** loads the remaining transfer, reversal, fee, and reconciliation workflows only when needed. Account number suggestions load when the search field receives focus. The account transaction endpoint reads its list from one Oracle query and applies the account access check before returning financial fields.
+Use http://localhost:5177 for that run. Stop an earlier recorded local run before starting another. When returning to default ports, update or remove the FRONTEND_ORIGINS override.
 
-Staff can find **Treasury & RBI ledger** under Banking. For an existing Oracle installation, run [database/010-bank-admin-and-checker-roles.sql](database/010-bank-admin-and-checker-roles.sql) as the Moneybags schema owner with F5 in SQL Developer, then sign out and back in. It gives `BANK_ADMIN` every configured permission and creates `BANK_CHECKER` with read and independent approval permissions. It can be rerun safely; it does not assign or remove roles from users. Use the IAM access request workflow to assign `BANK_CHECKER` to an employee and revoke their broader role after an independent checker approves both requests. The section displays Moneybags' simulated local reserve mirror, not a live RBI connection.
+## Local users and data
 
-The demo is an in-memory H2 database in Oracle compatibility mode. **Restarting the backend resets all demo data.** It never uses the Oracle connection guide's credentials. Do not use the local profile for real customer data or public hosting.
+All four **synthetic local users** use password **LocalBanking!2026**. These credentials apply only to the isolated local fixture.
 
-### Demo customer sign-up
+| Username | Sign-in page | Role / demonstration |
+| --- | --- | --- |
+| customer | /login | Own savings account, transfers, deposits, card/loan applications, statements |
+| customer2 | /login | Different customer; receive money, send it back, inspect own history |
+| admin | /employee/login | Global bank administrator / maker; products, servicing, ledger, teller, treasury, administration |
+| checker | /employee/login | Restricted independent checker; named approvals and verification |
 
-The sign-in page offers **Create a customer account** when `CUSTOMER_SIGNUP_ENABLED=true` (enabled by the local and Oracle ALPHA launchers). The administrator's **Users → Create user → CUSTOMER** option uses the same demo onboarding flow. It accepts adults only; minors need the existing guardian-assisted staff workflow. A new customer gets an active login, a linked CIF, a `SELF` customer role, and an assumed approved KYC case. No identity evidence is collected or checked. After signing in, the customer can open an eligible savings or current account from **Accounts**. A zero-minimum-opening-balance account activates immediately; an account requiring opening funding remains pending until the funding clears. The customer role is limited to the app's retail customer permissions.
+| Fixture | Fresh local value |
+| --- | --- |
+| Customer 1 account | MB000000001, internal account ID 1, INR 75,000 |
+| Customer 2 account | MB000000002, internal account ID 2, INR 25,000 |
+| CIFs | demo-cif-1 and demo-cif-2, with synthetic verified KYC |
+| Branch | MUM001 |
+| Savings | Everyday Savings, product/version 1, illustrative 3% annual rate |
+| Loan | Monthly Personal Loan, product/version 2, illustrative 12% fixed annual rate |
+| Fixed deposit | Fixed Deposit, product/version 3, illustrative 6.5% fixed annual rate |
+| Credit card | Moneybags Classic, approved version 1, illustrative 24% annual rate |
+| Example GL IDs | Customer deposits 1; teller cash 2; suspense 3; reserve 6; vault cash 8 |
+| Reserve account | ID 1, synthetic opening INR 1,000,000 |
+| Branch vault | Registered synthetic opening INR 100,000 |
+| Internal bank code | MCPB0000002, for verified-beneficiary routing in the assistant |
 
-Other deployments leave sign-up disabled by default. Use `CUSTOMER_SIGNUP_BRANCH` to select the home branch, and disable the feature before connecting the application to real customer data.
-
-## Credit cards
-
-Open **Banking → Credit cards** for versioned product terms, applications with independent approval, card activation/freeze/block/closure, simulated purchases and refunds, monthly statements, and repayments from the linked deposit account. The local demo includes **Moneybags Classic**; sign in as `customer` to apply and `checker` to approve, then return to the customer to activate the card.
-
-The service adds six `M11_CC_*` tables and balanced M05 postings, with request replay protection, database locks, credit-limit checks, current KYC checks and scoped access. Its configurable demo interest policy uses simple ACT/365 interest from purchase with no interest-free grace period. See [credit card terms, setup, APIs and verification](docs/CREDIT-CARDS.md).
-
-Existing Oracle deployments must install **`database/015-credit-cards.sql` once** after migrations 001–014, configure `CC_LIMIT` approval authority, and sign in again. This script was formerly named `011-credit-cards.sql` on the credit card feature branch. If that script is already installed, **skip 015** and run the read-only credit card acceptance checks; renumbering does not require rebuilding tables. The local H2 demo installs its generated schema automatically. No Oracle migration is executed by application startup. Card-network processing is simulated.
-
-**015 is the SQL file's installation sequence; M11 is the permanent credit card module name.** Oracle tables continue to be named `M11_CC_*`, including installations created from the former filename. Do not rename them to M15 or rerun the credit card installer. Git commits and Oracle commits are separate: updating Git does not change the installed schema. See [the numbering explanation and existing-installation checklist](docs/CREDIT-CARD-MAIN-MERGE.md#sql-file-number-and-oracle-table-names).
-
-The combined release preserves the newer teller/vault/RBI migrations `011`–`014`. Review [the main-branch integration and database upgrade steps](docs/CREDIT-CARD-MAIN-MERGE.md) before starting the combined application against an existing Oracle schema.
-
-## What is connected
-
-- Credit card products, independent application approval, simulated purchases/refunds, card controls, monthly billing and linked-account repayments. See [credit card setup and workflow](docs/CREDIT-CARDS.md).
-- IAM, customer/CIF/KYC and versioned product administration.
-- Account opening, parties, nominees, restrictions, limits, approved overrides and closure controls.
-- Monthly fixed-rate savings interest credits and customer fixed deposits funded from an existing account, with maturity payout.
-- Transfers, teller cash, fixed-fee collection, reversal workflows, holds, double-entry journals and reconciliation.
-- Verified beneficiaries, simulated interbank payments, clearing operations and reserve settlement.
-- Loan origination, independent sanction, acceptance, disbursement, fixed monthly schedules, due-interest accrual and repayments.
-- Customer loan applications: eligible loan products, self-service submission, application/offer status, account-bound offer acceptance and repayment schedules.
-- Immutable statement snapshots with PDF/CSV/HTML downloads and hash-gated access.
-- Customer chat and authenticated MCP tools for exact internal-transfer and outbound-payment drafts, payment status, the last 1–100 transactions, and statement generation, request status, preview, and download paths.
-- Purpose/consent, legal-hold, casework and audit-evidence workflows.
-- Currency master, approved FX rates and an optional HTTPS provider adapter.
-- Optional Kafka publication from transactional outboxes for M05–M08.
-
-Banking screens use the backend OpenAPI contract to render Oracle JET fields and Knockout observables, including nested objects, repeating lines, dates, idempotency keys and optimistic-version headers. The menu uses Oracle JET CoreRouter. Original IAM/CIF/product screens remain integrated. Credit cards have a dedicated customer/staff workspace using the same Oracle JET forms and authenticated APIs.
-
-### Customer loan application flow
-
-Sign in as a customer and open **Loans → Apply for a loan**. Only active INR loan products offered to the linked CIF, home branch and `WEB` channel appear. Enter an amount within the displayed product limits, a term in months and a purpose. The customer-specific `POST /api/v1/loans/my/applications` accepts `cifId`, `productId`, `productVersionId`, `amount`, `tenureMonths` and `purposeCode`, plus an `Idempotency-Key` header. The backend derives the branch from the linked CIF, fixes the channel to `WEB`, checks verified KYC and product rules, creates the application and submits its first immutable revision. It returns a `SUBMITTED` application; no approval or funds movement occurs at this step. `GET /api/v1/loans/my/applications` returns only applications in the signed-in customer's current CIF scope.
-
-A bank officer then assesses the application, a separate checker decides it, and an authorized officer issues an offer using the existing Loans operations. The customer can view offers and accept an issued offer with their own active INR disbursement and repayment accounts. The bank finishes document verification, facility conversion and disbursement. The customer can then view the facility and repayment schedule. The `LOAN_APPLY` permission is assigned to the retail customer role; staff use the existing `LOAN_CREATE` workflow.
-
-The local demo includes a suitable loan product. An existing Oracle schema needs the additive `database/016-customer-loan-apply.sql` permission migration and an active, approved, available loan product/version/rule before customers will see an Apply button. Run the migration as the schema owner, then have the customer sign out and in to refresh the session permissions. The migration does not create a loan product or approve any application.
-
-### Deposit interest and fixed deposits
-
-Customers open **Accounts** to view savings interest credits and available fixed deposit products. A fixed deposit is a separate contract funded from the customer's active INR savings/current account; its principal and fixed interest return to that account at maturity. The funding account cannot close while a fixed deposit is active. Interest on savings accounts uses each day's closing posted balance, the approved fixed rate (or approved account override), and the product's day-count basis. One balanced credit posts for each completed calendar month; retries do not duplicate it. Interest begins at migration rollout, so the new service does not create historical back-payments.
-
-For Oracle, apply [the additive deposit migration](database/018-deposit-interest.sql) as the schema owner, verify the GL account mappings, set `DEPOSIT_INTEREST_ENABLED=true`, rebuild, and restart the backend. The application never migrates Oracle at startup. A deposit product must be created in Product master with a single fixed SIMPLE interest rule paid `AT_MATURITY`, term limits, WEB/INR availability, independent approval, and activation. The local H2 demo has an example fixed deposit product. Floating rates, tiered rates, early withdrawal, tax withholding, and deposit insurance logic are outside this flow. See [the operations guide](docs/DEPOSIT-INTEREST.md).
-
-### Customer assistant and MCP
-
-Signed-in customers can ask **Ask Moneybags** for balances, a specific count of recent transactions, saved beneficiaries, payment status, and statements. Asking to add a beneficiary opens a secure form; the recipient details go directly to the banking API and registration stays pending until independent verification. An active internal beneficiary yields a five-minute transfer draft; separate confirmation posts a balanced Module 5 ledger transaction, debits the source, and credits the recipient. An external beneficiary yields a simulated outbound rail draft; confirmation creates a pending Module 6 payment instruction, with later status checks distinguishing pending, rejected, refunded, and settled outcomes. A statement request for a linked account and past period of at most one year uses the existing reporting authorization and immutable snapshot workflow. The tool returns a request/statement ID and an authenticated download path; PDF, CSV, and HTML are available through the reporting API. Existing issued statements for the same period are reused.
-
-The same role-filtered tools are available at `POST /api/v1/assistant/mcp` with a Moneybags bearer session and the documented MCP headers. Tool calls are limited to the signed-in customer's account and current permissions. `draft_internal_transfer` prepares a review card for an active internal beneficiary; separate authenticated confirmation posts the ledger transfer and credits the recipient. `draft_payment` handles simulated outbound rails. Neither tool accepts a caller-supplied customer identity or confirms its own draft. See [assistant tools and MCP examples](docs/ASSISTANT-README.md) for names, arguments, and status behavior.
+Rates and amounts are software-demo fixtures. After transactions, use **current balances**, not these starting values. Customer UI account fields use account numbers; product, application, card, journal, GL, and payment references are separate IDs. Copy newly created IDs from the result shown on screen.
 
 ## Use Oracle
 
-Read [the Oracle and operations runbook](docs/OPERATIONS.md) first. The application does not migrate Oracle at startup.
+### 1. Prepare or check the schema
 
-- For an existing installed schema, inspect compatibility and apply only missing additive scripts `002` through `019` with your DBA. The `012-rbi-cash-delivery-readiness.sql` file is a read-only diagnostic, not another migration.
-- `database/001-original-oracle.sql` is the supplied **destructive clean-install script**. It is retained for traceability and fresh disposable schemas. Never run it against an existing database containing needed data.
-- Supply `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and `FRONTEND_ORIGINS` through your environment or secret manager. No original connection-guide credentials were copied into application configuration.
-- Omit `--spring.profiles.active=local`. Enable first-admin bootstrap only for an empty IAM setup, with a new private password.
+The application **does not run Oracle migrations at startup**.
 
-```powershell
-$env:DB_URL='jdbc:oracle:thin:@<host>:1521/<service>'
-$env:DB_USERNAME='<application-user>'
-$env:DB_PASSWORD='<obtain-from-your-secret-manager>'
-$env:FRONTEND_ORIGINS='https://<your-banking-host>'
-java -jar Downloads/integrated/backend/target/moneybags-integrated-1.0.0.jar
-```
+- Existing schema: inspect installed objects and apply only missing additive scripts in order. Do not rerun completed non-repeatable scripts.
+- Empty disposable schema: the schema owner can review and run database/001-original-oracle.sql, then the required additive scripts.
+- **001 removes/recreates objects. Never use it to upgrade a database containing records you need.**
 
-For the development proxy, set `BACKEND_URL=http://127.0.0.1:8080` and run `node Downloads/integrated/frontend/dist/server.mjs`. Use a TLS reverse proxy and institution-managed deployment configuration outside the local demo.
+| Scripts | Setup |
+| --- | --- |
+| 002–006 | Statement extensions, integration objects, overrides, permissions, immutable audit |
+| 007–008 | Assistant drafts and internal-transfer intents |
+| 009–010 | Treasury access and bank admin/checker roles |
+| 011, 012-rbi-cash-delivery.sql, 013, 014 | Vault allocation, cash delivery, replenishment, synthetic reserve opening |
+| 015-credit-cards.sql | M11 credit cards and permissions |
+| 016-customer-loan-apply.sql, 017-loan-operational-readiness.sql | Customer loan application and operational readiness |
+| 018-deposit-interest.sql | Monthly savings interest and fixed deposits |
+| 019-customer-account-requests.sql | Account service requests |
+| 020-cif-proposed-segment.sql | Segment proposals governed by KYC approval |
 
-### Oracle connection settings after cloning
+**012-rbi-cash-delivery-readiness.sql is a diagnostic, not an additional migration.** Inspect scripts under database/acceptance before running them: the general readiness checks are read-only, but specifically named synthetic fixture scripts can change demo configuration.
 
-The launcher requires `Downloads/integrated/.env.ps1`. This private file is ignored by Git and is therefore missing from a fresh clone. From the repository root, copy the supplied template **only if `.env.ps1` does not already exist**:
+If the former 011-credit-cards.sql from the card branch is already installed, **skip 015**. File 015 is installation order; the permanent module/table prefix remains **M11 / M11_CC_**. See [the existing-installation checklist](docs/CREDIT-CARD-MAIN-MERGE.md).
 
-```powershell
-if (-not (Test-Path -LiteralPath '.\Downloads\integrated\.env.ps1')) {
-    Copy-Item -LiteralPath '.\Downloads\integrated\.env.example.ps1' -Destination '.\Downloads\integrated\.env.ps1'
+Run applicable read-only checks: [Oracle readiness](database/acceptance/oracle-readiness.sql), [integrated schema/balances](database/acceptance/integrated-main.sql), and [credit cards](database/acceptance/credit-cards.sql). Resolve missing/invalid objects and accounting exceptions before financial demos. [Operations](docs/OPERATIONS.md) contains the installation details.
+
+### 2. Create the private connection file
+
+The ignored .env.ps1 file is missing from a fresh clone. Preserve an existing file:
+
+~~~powershell
+if (-not (Test-Path -LiteralPath './.env.ps1')) {
+    Copy-Item -LiteralPath './.env.example.ps1' -Destination './.env.ps1'
 }
-notepad .\Downloads\integrated\.env.ps1
-```
+notepad ./.env.ps1
+~~~
 
-Replace the placeholders using the same Oracle connection you use in SQL Developer:
+Use your SQL Developer connection details:
 
-- `DB_URL`: `jdbc:oracle:thin:@HOST:PORT/SERVICE_NAME`. If that connection uses a **SID** instead of a service name, use `jdbc:oracle:thin:@HOST:PORT:SID`.
-- `DB_USERNAME`: the owner of the existing Moneybags tables, not the banking application's login name.
-- The template prompts for the Oracle password with hidden input on each start; do not put a real password in the tracked example file. It is passed to Java through the environment. AI provider keys are optional and separate from the database settings.
+~~~powershell
+# Service-name connection:
+$env:DB_URL='jdbc:oracle:thin:@HOST:1521/SERVICE_NAME'
+$env:DB_USERNAME='YOUR_MONEYBAGS_SCHEMA'
+# For a SID connection, use HOST:1521:SID instead.
+~~~
 
-Save the file, connect to the required network/VPN, and run `& ./Downloads/integrated/start-oracle-alpha.ps1`. The launcher checks configuration before building. Do not enable the `local` Spring profile for Oracle. Startup does not install database migrations or copy H2 demo data into Oracle.
+Keep the template's hidden password prompt. DB_USERNAME is the database identity, not a web login. Do not put real database passwords or provider/access keys into tracked files.
 
-For basic Oracle host/port URLs, the launcher checks DNS and database-port reachability before building. `ORA-17868: Unknown host specified` means the configured hostname cannot be resolved; connect the database VPN and verify the hostname. After an already successful build, use `start-oracle-alpha.ps1 -SkipBuild` on the VPN. The launcher records its processes immediately, includes the actual JVM behind Windows `javapath`, and cleans up its own processes if startup fails. The stop script checks each recorded process's start time before stopping it. The frontend health check uses basic HTTP parsing so it works in Windows PowerShell without Internet Explorer setup.
+For an **empty IAM installation only**, configure the one-time BOOTSTRAP_ADMIN, BOOTSTRAP_USERNAME, and private BOOTSTRAP_PASSWORD settings to create the first administrator, then disable bootstrap. Startup does not reset existing users, passwords, or roles. Set up a separate checker and customer/CIF links through the application, or use existing Oracle users.
 
-`& ./Downloads/integrated/start-oracle-alpha.ps1` runs backend verification, frontend dependency installation, syntax checks, frontend tests and the frontend build, then starts the application against the Oracle schema configured in `.env.ps1`, at `http://localhost:5174`; `& ./Downloads/integrated/stop-oracle-alpha.ps1` stops it. The original ALPHA workstation also configured OpenRouter in its private settings; those settings are not included in a clone. The `mcp_demo_*` users are optional seeded test accounts, not a separate MCP service. An authorized administrator can create and grant other users in the IAM screens, then link customer users to their CIFs and accounts. Startup never displays an existing Oracle administrator password. The private `show-mcp-demo-credentials.ps1` script displays only the four synthetic demo passwords and access keys in your own console. `start-local.ps1` and the assistant preview use temporary H2 data instead of Oracle.
+### 3. Start, open, and stop
 
-After pulling new code, run `stop-oracle-alpha.ps1` and then `start-oracle-alpha.ps1` from the same updated checkout. The restart rebuilds the JAR and UI and replaces the running processes.
+Connect the required database network/VPN:
 
-If the Oracle VPN blocks Maven Central, stop Oracle Alpha and run `& ./Downloads/integrated/build-before-start.ps1` while disconnected from the VPN. Reconnect, then run `& ./Downloads/integrated/start-oracle-alpha.ps1 -SkipBuild`. The `-SkipBuild` path verifies that the source files, JAR, and frontend output match the completed build; it refuses to launch after a pull or source edit until you rebuild.
+~~~powershell
+& ./start-oracle-alpha.ps1
+~~~
 
-If all dependencies are already cached, `build-before-start.ps1 -Offline` can build and run the backend/frontend tests while connected to the database VPN. It uses Maven offline mode and npm's local cache. Missing cached packages require the normal online build. File fingerprints use ordinal ordering so Windows PowerShell and PowerShell 7 agree on the verified build.
+| Page | Address |
+| --- | --- |
+| Customer sign-in | [localhost:5174/login](http://localhost:5174/login) |
+| Bank-admin / employee sign-in | [localhost:5174/employee/login](http://localhost:5174/employee/login) |
+| API documentation | [localhost:5174/swagger](http://localhost:5174/swagger) |
+| Health | [localhost:5174/actuator/health](http://localhost:5174/actuator/health) |
+| Backend directly | http://127.0.0.1:8091 |
 
-`restart-oracle-alpha.ps1` checks the build, stops the recorded application processes, and starts Oracle mode with `-SkipBuild`. Its JAR is `backend/target/moneybags-integrated-1.0.0.jar`, the standard Maven output containing all integrated modules. It neither builds a separate credit card service nor installs SQL. The startup/VPN cleanup fixes check connectivity, track the actual Java process and stop failed launches; they do not remove database rows.
+~~~powershell
+& ./stop-oracle-alpha.ps1
+~~~
 
-### Oracle startup and VPN recovery
+Use the installation's actual web credentials and MFA settings. The local fixture password does not establish an Oracle login. [The Oracle ALPHA fixture record](docs/MCP-ORACLE-DEMO.md) documents this workstation's synthetic accounts; check their current balances rather than assuming the historical figures.
 
-The commands below work in Windows PowerShell 5.1 and PowerShell 7. An earlier fingerprint mismatch between them was fixed by sorting file paths with ordinal comparison; rebuild once with the updated helper to replace an older build record. From the repository root:
+The Oracle demo launcher enables demo signup and external payment simulation, and sets the synthetic internal bank code. Oracle deposit-interest services additionally require DEPOSIT_INTEREST_ENABLED=true, migration 018, and complete product/GL mappings. Do not enable the local Spring profile when using Oracle.
 
-```powershell
-cd "C:\Users\Nikunj_Mittal\Desktop\Training\MONEYBAGS_PROJECT\moneybags-integrated"
-# Only if this window refuses to run the scripts:
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-& .\Downloads\integrated\stop-oracle-alpha.ps1
-# If dependencies are blocked by the VPN, disconnect before this build:
-& .\Downloads\integrated\build-before-start.ps1
-# Connect the database VPN before the next command and keep it connected:
-& .\Downloads\integrated\start-oracle-alpha.ps1 -SkipBuild
-```
+To disable external initiation while retaining direct same-bank transfers:
 
-After a successful build, routine starts need only the VPN and `start-oracle-alpha.ps1 -SkipBuild`; stop an existing run first. Open [Oracle Moneybags](http://localhost:5174) and sign in with an application account. The Oracle schema password is separate from the application password. A backend restart preserves Oracle data.
+~~~powershell
+& ./start-oracle-alpha.ps1 -PaymentSimulationEnabled $false
+~~~
 
-If connection fails:
+## Oracle startup and VPN recovery
 
-1. Run `stop-oracle-alpha.ps1`, connect/reconnect the database VPN, and confirm the same connection works in SQL Developer.
-2. Check the database hostname and port from `.env.ps1` using `Resolve-DnsName <database-host>` and `Test-NetConnection <database-host> -Port 1521`. DNS success is required first; `TcpTestSucceeded` must be `True`. Successful TCP connectivity does not verify the password or service name.
-3. Restart with `-SkipBuild`. If source actually changed, stop and rebuild. Use `build-before-start.ps1 -Offline` when dependencies are cached, or build off VPN, reconnect, and start again.
-4. For a remaining failure, read `Downloads/integrated/.runtime/oracle-alpha-backend.log` and `.err.log`. [ORA-17868](https://docs.oracle.com/en/error-help/db/ora-17868/) indicates an unknown hostname; a connection timeout points to network/listener reachability; [ORA-01017](https://docs.oracle.com/en/error-help/db/ora-01017/) indicates invalid credentials or denied database authorization. Do not reinstall the schema to fix a VPN failure.
+If the database VPN blocks dependency downloads, build on a network that permits them first:
 
-The launcher now rejects missing settings, unreachable database hosts/ports, and occupied app ports before launching, and cleans up its recorded processes after startup failure. If the VPN drops during a run, reconnect it and check [backend health](http://127.0.0.1:8091/actuator/health); restart with stop/start if health remains down.
+~~~powershell
+& ./build-before-start.ps1
+# Connect the database VPN after the build succeeds.
+& ./start-oracle-alpha.ps1 -SkipBuild
+~~~
+
+With cached dependencies, build-before-start.ps1 -Offline can build without downloads. Missing cached packages require an online build. **-SkipBuild verifies the recorded source, JAR, and frontend fingerprints**; it does not bypass checks. Rebuild after source/output changes. Stop the backend before replacing its running JAR.
+
+Check your configured host and listener port:
+
+~~~powershell
+Resolve-DnsName 'YOUR_ORACLE_HOST'
+Test-NetConnection -ComputerName 'YOUR_ORACLE_HOST' -Port 1521
+~~~
+
+DNS and TCP reachability do not verify database credentials. Application health checks the database connection too. After a VPN drop, reconnect, check health, and stop/start if it remains unhealthy. Do not reinstall the schema to fix networking.
 
 ### Is a database COMMIT needed?
 
-- **Application actions:** no manual SQL Developer `COMMIT` is needed. Successful product configuration, approval, purchases, repayments and refunds commit through the application's transactions; a failed command rolls back its writes.
-- **Credit card migration 015 (formerly 011-credit-cards.sql):** its final `COMMIT;` commits the permission/ledger seed changes. Oracle also commits DDL implicitly. If the full script already completed successfully, do not run it again or issue another commit for the application.
-- **Your manual SQL `INSERT`/`UPDATE`/`DELETE`:** commit the intended successful changes in that SQL session unless autocommit is enabled. Acceptance scripts contain only `SELECT` queries and need no commit. A SQL Developer commit cannot commit a separate application's connection. See [Oracle COMMIT documentation](https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/COMMIT.html).
+- Successful application actions commit through their own transactions; no manual SQL Developer commit is needed.
+- Commit manual SQL changes in the session that made them, unless autocommit is enabled. That cannot commit another application's connection.
+- Oracle DDL commits implicitly. Review a partially failed migration before retrying it.
+- Read-only acceptance queries need no commit.
+
+## Optional configuration
+
+| Setting | Purpose |
+| --- | --- |
+| DB_URL, DB_USERNAME, DB_PASSWORD | Oracle connection |
+| FRONTEND_ORIGINS | Allowed browser origins, including custom local ports |
+| CUSTOMER_SIGNUP_ENABLED / CUSTOMER_SIGNUP_BRANCH | Demo onboarding; enabled by the local profile and Oracle demo launcher |
+| DEPOSIT_INTEREST_ENABLED | Savings interest/deposit services; local profile enables it; Oracle needs migration/mappings |
+| PAYMENT_SIMULATION_ENABLED | External simulator; local profile/demo launcher enable it; base default is false |
+| INTERNAL_BANK_CODES | Assistant verified-beneficiary routing; direct account-number transfers do not need it |
+| AI_PROVIDER, AI_MODEL, OPENAI_API_KEY or OPENROUTER_API_KEY | Optional Ask Moneybags provider |
+| AI_FALLBACK_MODEL | Optional fallback model for that provider |
+| KAFKA_ENABLED / KAFKA_BOOTSTRAP_SERVERS | Optional outbox publication; ordinary banking does not need Kafka |
+| FX_PROVIDER_URL / FX_API_TOKEN | Optional HTTPS rate feed; manually approved rates need no feed |
+| BACKEND_URL / PORT | Frontend proxy target/web port; launchers set these |
+
+For local AI demos, set the provider/model/key in the PowerShell environment **before** starting. start-local.ps1 does not automatically load .env.ps1; the Oracle launcher does. Choose a provider-supported model with tool calling. Java launchers enable the system proxy. See [assistant setup](docs/ASSISTANT-README.md).
+
+Demo signup assumes verified KYC without checking real identity evidence. Use synthetic people only. This shortcut is disabled in the base application configuration.
+
+## Prepare a demonstration
+
+1. Use separate browser profiles for customer, customer2, admin, and checker, or sign out/in when switching identities.
+2. Use English labels to follow this guide; Hindi and Kannada are also available.
+3. Record starting balances and every returned reference. Prior demos change later starting balances.
+4. On staff screens, open **Choose operation / Operations** and search for the described action. Required fields and allowed choices come from the running API contract.
+5. Use a **different checker** for independent decisions. Admin privileges do not bypass self-approval controls.
+6. For Oracle, confirm active products, effective availability/GL mappings, verified KYC, customer ownership links, scope, and authorities such as LOAN_SANCTION and CC_LIMIT.
+
+A short presentation can follow: savings overview → two-user transfer → admin ledger → fixed deposit → credit card → loan → statement. Add the other modules when presenting them. Keep the local backend running through the whole presentation.
+
+## Product demo walkthroughs
+
+### 1. Savings accounts and customer onboarding
+
+**User:** customer. **Screen:** My accounts / Accounts.
+
+1. Sign in and review the overview's own balances/activity.
+2. Open MB000000001; a fresh local backend shows INR 75,000. Inspect details, status, product, posted/spendable balances.
+3. Use nominees to add a synthetic nominee; shares must total 100%.
+4. Submit a limit request or issue, refresh, and show the saved request. A request does not automatically change the limit.
+5. Open another eligible savings account. The seeded product's zero opening minimum allows an eligible opening to activate immediately; a product requiring funding remains pending until funded.
+6. Optionally use **Create a customer account** on the sign-in page for an adult synthetic person, sign in, and open an account. A new account does not receive the seeded INR 75,000 automatically.
+
+**Expected:** own-account access and saved service requests. Funds come from actual demo ledger postings.
+
+**Current accounts:** supported for eligible INR products, but the fresh catalog does not seed a CURRENT product. To demonstrate one, create its product/version in Product master, configure account rules, WEB/INR availability and supported transaction rules, submit, independently approve and activate it, and configure effective customer-liability GL mappings before posting. Creating a product identity alone does not make a customer offer.
+
+### 2. Payments between two different users
+
+**Users:** customer and customer2. **Screen:** Payments → Send to another bank account.
+
+1. As customer2, copy MB000000002 from My accounts.
+2. As customer, choose source MB000000001, recipient MB000000002, and amount **25**.
+3. Click **Review transfer**, check the details, and confirm.
+4. Refresh both accounts and **Sent and received transfers**. Both see the same reference and **Completed** status; directions are Sent and Received.
+5. Optionally send INR 3 back from customer2.
+
+| Fresh fixture | Before INR 25 transfer | After |
+| --- | --- | --- |
+| Customer 1 | INR 75,000 | INR 74,975 |
+| Customer 2 | INR 25,000 | INR 25,025 |
+
+**Expected:** both balances change together and one balanced journal posts. Cancellation, insufficient funds, and invalid recipients leave balances unchanged. Retrying the same confirmed request posts once; confirming a new request creates a new transfer. The sender does not gain access to the recipient's private details.
+
+This flow needs no external beneficiary verification, reserve authorization, or live network, and works with external simulation disabled. Its endpoint is **POST /api/v1/transactions/transfers/by-number**.
+
+### 3. Bank-admin account ledger and general ledger
+
+**User:** admin. **Screen:** Transactions & ledger.
+
+1. Sign in through the employee page and open **Account transactions**.
+2. Load MB000000001, find the transfer, and open **View details**.
+3. Review amount, status history, linked journal, debit/credit totals, and **Balanced**.
+4. Load MB000000002 to inspect the recipient side.
+5. Open **GL account ledger**, load local GL ID **1**, and use **View journal** to inspect every debit/credit line.
+6. If available, inspect the transaction through **Audit trail** using its reference/date filters.
+
+**Expected:** an active unrestricted global BANK_ADMIN with TXN_READ can view account transactions without a customer key. GL inquiry also requires GL_RECONCILE. Reads are audited. Account activity contains the latest 100 results with Show more; the GL has paging. Other staff still require their own scope and any required holder key.
+
+### 4. Fixed deposits and savings interest
+
+**User:** customer. **Screen:** My accounts / Accounts.
+
+1. Open the **Fixed Deposit** product, funded from MB000000001.
+2. Enter principal **1000** and tenure **6 months**; review the rate and expected payout.
+3. Confirm, then inspect ACTIVE deposit details: principal, funding account, rate, maturity, payout.
+4. Check the funding account decreased by INR 1,000 and its ledger contains the funding posting.
+5. Use the savings account's **Interest** action to review posted monthly credits.
+
+**Expected:** a separate deposit contract holds principal; principal/interest return to the funding account at maturity. It does not immediately mature for a presentation. A fresh savings account may have no completed-month credit yet.
+
+Savings posting runs at 01:10 Asia/Kolkata on the first of the month; maturity runs daily at 01:30. Retry actions still require due dates/eligible periods. Early/partial withdrawal, automatic renewal, and tax withholding are not implemented. See [Deposit interest](docs/DEPOSIT-INTEREST.md) for Oracle mappings and service setup.
+
+### 5. Credit cards
+
+**Users:** customer, checker; admin for staff actions. **Screen:** Credit cards.
+
+1. As customer, review **Moneybags Classic** terms and apply with, for example, a **25,000** requested limit linked to your active deposit account. Accept the terms.
+2. As checker, independently approve within the request, product range, and CC_LIMIT authority. The local range is INR 10,000–200,000.
+3. Refresh as customer and activate the synthetic card.
+4. Make a simulated **100** purchase; inspect outstanding balance, available credit, and history.
+5. Freeze it to show spending is unavailable, then unfreeze.
+6. Repay from the linked account using the **current payoff shown**. Elapsed-day interest may make payoff differ from the original purchase.
+7. Review reconciliation: expected **MATCHED**. Authorized staff can demonstrate a full purchase refund once.
+
+**Expected:** purchase increases card receivable; repayment reduces deposit/card balances through balanced journals. No live merchant/card network is involved. Scheduled statements become issuable on/after billing, not immediately upon application. Terms use simple ACT/365 interest from purchase without an interest-free grace period. No real PAN/PIN/CVV is created. [Credit cards](docs/CREDIT-CARDS.md) covers billing, refunds, closure, and Oracle setup.
+
+### 6. Personal loans
+
+**Users:** customer → admin → checker at the relevant stages. **Screen:** Loans.
+
+1. Customer: **Apply for a loan**, select Monthly Personal Loan, amount **10000**, tenure **12 months**, and an allowed purpose. Submit: SUBMITTED, with no account credit yet.
+2. Admin: assess the application using sample monthly income **50000**, obligations **5000**, recommendation APPROVE, and reason AFFORDABLE.
+3. Checker: independently approve **10000 / 12 months / 12%**, authority LOAN_SANCTION, with a synthetic authority evidence reference.
+4. Admin: issue an offer with a future expiry and synthetic document reference such as demo://loan-offer.
+5. Customer: refresh, inspect the offer, and accept it with your active INR disbursement/repayment account.
+6. Admin: register a SIGNED_OFFER document with synthetic storage reference and SHA-256 digest. Use the actual digest for a real file; a 64-character hexadecimal test value represents synthetic evidence only. Checker: verify the document.
+7. Admin: convert to a facility and request disbursement. Checker: approve disbursement with the required authority.
+8. Customer: verify the account credit of INR 10,000 and inspect the 12-installment schedule.
+
+**Expected:** application/sanction alone do not move money; approved disbursement does. Copy the correct application, offer, document, facility, and disbursement IDs between stages.
+
+Servicing requires eligible due interest accrual before a due repayment; future/unsupported prepayments fail. Oracle needs loan products/rules/mappings, KYC, customer permissions, and checker authority. See [Operations](docs/OPERATIONS.md).
+
+### 7. External payment simulation and recipients
+
+**Users:** customer, checker, admin. **Screens:** Payments, Beneficiaries, Payments & clearing.
+
+1. Customer: add a recipient, for example Demo External Recipient, account/payment address DEMOEXTERNAL001, bank code TEST0123456.
+2. Checker: independently verify it under Beneficiaries; refresh the customer screen.
+3. Customer: in the separate **External payment simulation** form, choose your account, that verified recipient, UPI, amount **10**. Review/confirm and record the payment ID.
+4. Checker: **Authorize simulated payment**, using that ID and local reserve account **1**.
+5. Admin: **Record simulated rail outcome**, first ACCEPTED, then SETTLED.
+6. Customer: refresh **Payment requests → View progress**, ending at **Settled in simulation**.
+
+**Expected:** initiation creates a request; authorization debits the customer, and the simulator uses suspense/reserve accounting. **It does not credit customer2. Use walkthrough 2 for transfers between demo users.**
+
+Illustrative simulator limits: UPI/IMPS up to INR 100,000; RTGS starts at INR 200,000. A fresh INR 75,000 account cannot fund RTGS without additional valid demo funding. Invalid transitions/repeated terminal outcomes do not duplicate financial postings. These rail choices do not represent live network connections.
+
+### 8. Statements and documents
+
+**User:** customer. **Screen:** Statements & documents.
+
+1. Perform a transfer or other posting first.
+2. Create a statement request with your account number, type AD_HOC, a non-future period containing the activity, PDF format, WEB channel, and en-IN locale.
+3. Copy the **request ID**, process that request, and record the returned **statement ID**.
+4. Open completed request history and download PDF, CSV, and/or HTML.
+5. Check opening, transaction, running, and closing balances.
+
+**Expected:** completed requests retain a downloadable reference; request ID and statement ID differ. Another customer cannot access it. Later postings do not rewrite an issued immutable snapshot. Approved narration/masking is seeded locally and must be configured on Oracle. Use en-IN for the built-in PDF demo; non-Latin PDF narration needs additional font support. Email/SMS delivery is not connected.
+
+### 9. Currency and rate comparison
+
+**Users:** customer; admin/checker for a proposal. **Screen:** Currency & rates.
+
+1. Customer: choose an approved pair, enter an amount, and calculate. Inspect source/expiry. The local synthetic USD/INR rate expires after 12 hours.
+2. Optional admin proposal: EUR/INR buy **89**, mid **90**, sell **91**, current observation time and future validity; label its source synthetic.
+3. Checker: independently approve the proposal.
+4. Customer: refresh. With that example mid-rate, EUR 10 compares to INR 900 and reciprocal INR 180 to EUR 2.
+
+**Expected:** no balance movement. Pending/expired rates are not current approved quotes. Executable conversion, foreign-currency account posting, and international transfers are not implemented.
+
+## Supporting banking and administration tabs
+
+### Teller cash
+
+1. Admin: **Open a teller till**, branch MUM001. Opening allocates INR **5,000** from the seeded vault.
+2. Record the till ID. **Post a cash deposit or withdrawal** to MB000000001: DEPOSIT **100**, with a reason.
+3. Post WITHDRAWAL **40**. The customer gains net INR 60; this otherwise untouched till expects INR **5,060**.
+4. Checker: **Independently close a teller till**, using its ID, actual counted cash, and reason.
+5. Check CLOSED status and cash returned to the vault. Use the current expected amount if other cash operations occurred.
+
+An already open till for the same teller/branch/day cannot be opened again. Oracle needs registered vault cash and sufficient funds. These internal cash movements do not alter RBI reserve balances.
+
+### Treasury & RBI ledger
+
+1. Admin: select local reserve account **1**, load the position/movements, and review **Matched** reconciliation.
+2. Complete an external simulated payment, then refresh to show the reserve movement.
+3. Optional hold demo: use an **eligible authorized payment** with matching rail/reserve, reserve INR 25 until a future expiry, then release that hold with a reason.
+4. Verify active holds increase/decrease by 25 while the hold itself leaves confirmed balance unchanged.
+
+A new Oracle reserve starts at zero and needs the independently confirmed synthetic opening workflow. Never manually edit balance rows to fund a demo. See [Operations](docs/OPERATIONS.md) for openings, cash delivery, evidence, and reconciliation.
+
+### Users, roles, access requests, and security
+
+1. Admin: create a synthetic employee under Users, activate it, and inspect status.
+2. Create a demo read-only role under Roles with appropriate inquiry permissions.
+3. Propose the role assignment under Access requests with the intended scope. A different checker approves.
+4. Employee: sign in again or refresh the session under Security; navigation reflects current permissions.
+5. Demonstrate password/session controls without changing another presenter's credentials mid-demo.
+
+Restricted checkers can review and make named independent decisions; they cannot initiate transfers/purchases/general maintenance. On Oracle, migration 010 synchronizes role permissions but does not assign roles to people. Holding both admin and checker roles retains admin rights.
+
+### Customers & KYC, Product master, and account controls
+
+- **Customers & KYC:** inspect the seeded CIF, then propose synthetic contact/profile changes through an open KYC case and have a different reviewer decide. No government verification is connected. Segment proposals become final only through the KYC decision.
+- **Product master:** create identity/version, add type-specific rules and effective availability, submit, independently approve, activate, then show customer discovery. Credit cards use the separate Credit cards catalog.
+- **Account controls:** demonstrate supported restrictions or an exact-command override approval. Use a separate disposable account for closure: it needs zero exposure and no open card, fixed deposit, payment, or loan obligations.
+
+### Privacy & compliance
+
+1. Admin: create a synthetic purpose with CONSENT legal basis, version, a reachable demo notice URI, its digest, and effective date.
+2. Checker: approve using the current version.
+3. Customer: refresh, read the approved notice, acknowledge review, then allow/deny the purpose.
+4. Withdraw a grant and inspect immutable history; another customer cannot read it.
+
+The local fixture has a **synthetic approved 12-month audit retention policy** for this journey. That is not an approved bank policy. Oracle needs an effective approved M09_PRIVACY / AUDIT_EVENT retention schedule before consent changes work. Without it, the screen preserves notices/history and disables changes. Obtain the actual approved policy from its owner rather than copying the local fixture. Casework/legal-hold records do not provide automatic erasure or compliance certification.
+
+### Account-holder access key
+
+Customers can read their own linked transactions after sign-in. Global bank admins can review account transactions without a holder key. Other authorized staff need their own permissions/scope and any required key.
+
+Customer: generate a replacement in **Account-holder access key**, copy it privately for authorized staff, and demonstrate one-time display. The previous key stops working; stored keys cannot be retrieved. A key alone never grants access to unrelated accounts or spending permission.
+
+### Ask Moneybags
+
+With the optional provider configured, open Ask Moneybags and try:
+
+- “Show my account balances.”
+- “Show my last five transactions.”
+- “Show my payment status.”
+- “Prepare a transfer of INR 25 to my verified internal beneficiary.”
+
+For the last example, register the other local account with bank code MCPB0000002 and have another employee verify it first. Review the five-minute draft and **separately confirm** it. This assistant route needs the verified account token and internal bank code; the direct Payments form does not. Drafting does not move money.
+
+If the model is unconfigured/unavailable, ordinary banking remains usable. Never paste access keys or database/provider credentials into chat. [Assistant documentation](docs/ASSISTANT-README.md) covers authenticated MCP and statement tools.
+
+## Troubleshooting
+
+| Symptom | Action |
+| --- | --- |
+| Tool command not found | Check PATH and prerequisite versions |
+| Dependency downloads fail | Check repository/proxy access; build before restrictive VPN; offline builds need cached packages |
+| Run record/port already in use | Use the matching stop script; do not kill unrelated processes or delete records blindly |
+| -SkipBuild fingerprint mismatch | Rebuild after source/output changes |
+| Missing Oracle settings | Create the private .env.ps1 and replace placeholders |
+| ORA-17868 / unknown host | Verify configured hostname, DNS, and required VPN |
+| Database timeout | Check VPN route, listener port, service, and database availability |
+| ORA-01017 | Check database credentials; these differ from web login |
+| Health stays down after VPN recovery | Reconnect, then stop/start if needed |
+| HTTP 403 on custom ports | Set the exact browser origin before backend startup |
+| Missing tab/action | Check user type, active permissions/scope/authority; refresh session or sign in again |
+| Self-approval rejected | Use a different checker |
+| Wrong reference accepted nowhere | Account UI fields use numbers; product/GL/application/facility/payment fields use their own IDs |
+| Insufficient funds/frozen account | Inspect spendable balance, holds, debit/credit controls, and limits |
+| No product offer | Check active approved version, availability, KYC, branch/segment, and permissions |
+| External form unavailable | Check simulator enablement; direct account transfers remain separate |
+| Internal transfer missing from Payment requests | Use Sent and received transfers or account history |
+| Privacy changes unavailable | Oracle needs the approved audit retention schedule |
+| Statement cannot issue/download | Check account access, approved narration/masking, locale, and completed statement ID |
+| Maturity/interest/billing action too early | Use an eligible period/due date; the app does not advance time for a demo |
+| Assistant provider error | Check backend provider/model/key, system proxy, and restart after environment changes |
+
+Local logs: .runtime/backend.log, backend.err.log, frontend.log, frontend.err.log. Standard Oracle logs use .runtime/oracle-alpha-backend.log and corresponding frontend/error logs. This workstation's prepackaged runner may use product-verified-backend.log and product-verified-frontend.log instead. Keep private runtime files/logs out of published demo materials.
 
 ## Verification and handoff
 
-**Updated main integration — 7 October 2026:** PR #8 merged the newer main `da8929e` and credit card feature `78ea458` into main `495888b`. A fresh offline build on VPN passed **34 backend tests**, **14 frontend tests**, JavaScript checks and builds. The combined JAR then passed Oracle ALPHA admin/checker product approval, purchase/freeze/repayment/refund/replay and matched reconciliation. Main's account, paged GL, teller and treasury inquiry APIs remained available. All needed tables/columns were already installed, so no installer was rerun. Two existing treasury triggers invalidated by schema changes were recompiled without changing their source or data; the schema now has zero invalid objects and no journal/vault/reserve/card accounting mismatches. SQL file **015** keeps the permanent **M11** module/table names. See [integration verification and Oracle upgrade order](docs/CREDIT-CARD-MAIN-MERGE.md).
+Full build and verification:
 
-**Credit card addition — 7 October 2026:** Maven `verify` passed all 32 backend tests; all 14 frontend tests, JavaScript checks, and the frontend build passed. Both the H2 workflow and an Oracle ALPHA staff workflow passed. On Oracle, `admin` proposed Moneybags Classic and `checker1` independently approved the terms and a INR 25,000 synthetic card. Activation, purchase, frozen-card repayment, full refund, unfreeze, replay and ledger reconciliation passed. Six tables, three enabled/valid triggers and three ledger accounts were verified; all acceptance exception queries returned zero rows. The test deposit balance was restored to INR 1,050 and the card balance to zero. See [credit card verification and acceptance](docs/CREDIT-CARDS.md#verification) for scope and remaining checks.
+~~~powershell
+& ./build-before-start.ps1
+~~~
 
+Targeted checks with dependencies installed:
 
-The integrated test suite covers authentication/CORS, signed-in customer ownership and officer key checks, balanced/idempotent transfers, activation fences, teller controls, FX approval, one-time key issuance, reproducible statements and PDF downloads, payment settlement, loan disbursement/accrual/repayment, exact-command override approval, freeze/release, fee collection and branch isolation.
+~~~powershell
+mvn -f backend/pom.xml verify
+npm --prefix frontend test
+npm --prefix frontend run check
+npm --prefix frontend run build
+~~~
 
-Automated backend tests use the generated H2 schema with keys and check constraints; they provide isolated regression coverage. The combined application was also tested separately against Oracle, including trigger enforcement and locking from two independent sessions. These checks do not cover all concurrent financial workflows, query plans or crash recovery. Kafka and the external FX provider have not been exercised against live services.
+The latest verification before this documentation update passed **98 backend tests**, **32 frontend tests**, syntax checks, and frontend build. Two-user Payments checks covered balances/history, reload, lost-response retry, insufficient funds, ownership, return transfer, and mobile layout. A separate local admin check verified both account histories and a balanced GL journal without a holder key. Oracle connectivity and read-only journal/reserve consistency were checked. See [the latest demo payment record](docs/DEMO-PAYMENTS-VERIFIED-2026-10-11.html).
 
-- [Full API catalog](docs/API-CATALOG.md)
-- [Feature-by-feature coverage and boundaries](docs/FEATURE-COVERAGE.md)
-- [Integration decisions and data flow](docs/INTEGRATION.md)
-- [Operations and Oracle acceptance](docs/OPERATIONS.md)
-- [Verification record](docs/VERIFICATION.md)
+These checks do not certify live rails, every Oracle product configuration, regulatory compliance, or all crash/concurrency cases. H2 demonstrations use generated synthetic fixtures; Oracle retains its own users/products. This documentation update does not change credentials, install schema, or reset balances.
+
+## Further documentation
+
+- [Feature coverage and boundaries](docs/FEATURE-COVERAGE.md)
+- [Oracle operations](docs/OPERATIONS.md)
+- [Combined release / schema upgrades](docs/CREDIT-CARD-MAIN-MERGE.md)
+- [Credit cards](docs/CREDIT-CARDS.md)
+- [Savings interest and fixed deposits](docs/DEPOSIT-INTEREST.md)
+- [Assistant and MCP](docs/ASSISTANT-README.md)
+- [Historical Oracle ALPHA fixtures](docs/MCP-ORACLE-DEMO.md)
+- [API catalog](docs/API-CATALOG.md) — use the running /v3/api-docs for current schemas
+- [English, Hindi, and Kannada UI](docs/MULTILINGUAL.md)
+- [Integration decisions](docs/INTEGRATION.md)
+- [Earlier verification records](docs/VERIFICATION.md)
 - [Source import manifest](docs/source-manifest.json)
-- [AI assistant setup, skills, tools, MCP, and usage](docs/ASSISTANT-README.md)
-- [Oracle ALPHA MCP demo, users, and smoke checks](docs/MCP-ORACLE-DEMO.md)
 
-The `tools/assemble.py` and `tools/wire_frontend.py` scripts record the original import process. **Do not rerun them over the integrated implementation.** `tools/generate_local_schema.py` can regenerate the H2 fixture after reviewed schema changes.
+tools/assemble.py and tools/wire_frontend.py record the original import; do not rerun them over the integrated implementation. tools/generate_local_schema.py regenerates the H2 fixture after reviewed schema changes.

@@ -82,6 +82,7 @@ export async function enhanceForms(root) {
     );
     component.setAttribute("label-hint", text);
     component.setAttribute("label-edge", "inside");
+    component.userAssistanceDensity = "compact";
     component.value = value();
     component.required = input.required;
     component.disabled = input.matches(":disabled");

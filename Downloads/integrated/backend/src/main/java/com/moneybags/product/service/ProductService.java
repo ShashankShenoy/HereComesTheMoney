@@ -730,7 +730,6 @@ public class ProductService implements ProductDefinitionsPort {
           "PRODUCT_INCOMPLETE",
           String.join("; ", errors)
         );
-        checkOverlap(v);
         db
           .jdbc()
           .update(
@@ -1236,11 +1235,11 @@ public class ProductService implements ProductDefinitionsPort {
     );
   }
 
-  /** Overlap is checked on the same product lock and only for intersecting sales contexts. */
+  /** Only simultaneously active versions can conflict at activation or reactivation. */
   private void checkOverlap(BigDecimal vId) {
     var v = versionRow(vId, false);
     var others = db.rows(
-      "SELECT * FROM M03_PM_PRODUCT_VERSION WHERE PRODUCT_ID=? AND PRODUCT_VERSION_ID<>? AND VERSION_STATE IN ('APPROVED','ACTIVE','SUSPENDED')",
+      "SELECT * FROM M03_PM_PRODUCT_VERSION WHERE PRODUCT_ID=? AND PRODUCT_VERSION_ID<>? AND VERSION_STATE='ACTIVE'",
       v.get("PRODUCT_ID"),
       vId
     );
@@ -1419,10 +1418,12 @@ public class ProductService implements ProductDefinitionsPort {
     OffsetDateTime at
   ) {
     List<Map<String, Object>> found = new ArrayList<>();
-    for (var p : list(u, "", branch)) {
+    for (var p : db.rows(
+      "SELECT * FROM M03_PM_PRODUCT WHERE STATUS='ACTIVE' AND CURRENCY_CODE=? ORDER BY PRODUCT_CODE",
+      currency
+    )) {
       if (
-        !"ACTIVE".equals(str(p, "STATUS")) ||
-        !Objects.equals(currency, p.get("CURRENCY_CODE")) ||
+        !access.allowed(u, "PRODUCT_READ", branch, null, str(p, "PRODUCT_TYPE"), currency) ||
         !inside(
           at,
           (OffsetDateTime) p.get("SALES_START_AT"),
@@ -1481,10 +1482,19 @@ public class ProductService implements ProductDefinitionsPort {
     List<String> failures = new ArrayList<>(customerEligibilityFailures(facts, v, at));
     for (var rule : rules(v, family("account")))
       if (
-        in.openingAmount() == null ||
-        in.openingAmount().compareTo(decimal(rule.get("MIN_OPENING_BALANCE"))) <
+        (in.openingAmount() == null ? BigDecimal.ZERO : in.openingAmount()).compareTo(decimal(rule.get("MIN_OPENING_BALANCE"))) <
         0
       ) failures.add("OPENING_BALANCE_REQUIRED");
+    for (var rule : rules(v, family("term"))) {
+      if (in.depositAmount() == null ||
+          in.depositAmount().compareTo(decimal(rule.get("MIN_DEPOSIT_AMOUNT"))) < 0 ||
+          in.depositAmount().compareTo(decimal(rule.get("MAX_DEPOSIT_AMOUNT"))) > 0)
+        failures.add("DEPOSIT_AMOUNT_OUTSIDE_RANGE");
+      if (in.tenureMonths() == null ||
+          in.tenureMonths() < number(rule, "MIN_TENURE_MONTHS") ||
+          in.tenureMonths() > number(rule, "MAX_TENURE_MONTHS"))
+        failures.add("DEPOSIT_TENURE_OUTSIDE_RANGE");
+    }
     for (var rule : rules(v, family("loan"))) {
       if (
         in.loanAmount() == null ||
@@ -1567,10 +1577,20 @@ public class ProductService implements ProductDefinitionsPort {
       "VERSION_PRODUCT_MISMATCH",
       "Version belongs to another product"
     );
+    var p = product(productId, false);
+    OffsetDateTime evaluatedAt = at == null ? now() : at;
+    conflict(
+      !"ACTIVE".equals(str(p, "STATUS")) ||
+        !"ACTIVE".equals(str(version, "VERSION_STATE")) ||
+        !inside(evaluatedAt, (OffsetDateTime) p.get("SALES_START_AT"), (OffsetDateTime) p.get("SALES_END_AT")) ||
+        !inside(evaluatedAt, (OffsetDateTime) version.get("EFFECTIVE_FROM_AT"), (OffsetDateTime) version.get("EFFECTIVE_TO_AT")),
+      "PRODUCT_UNAVAILABLE",
+      "Only a currently available version can be adopted"
+    );
     var failures = customerEligibilityFailures(
       customers.facts(cifId),
       versionId,
-      at == null ? now() : at
+      evaluatedAt
     );
     conflict(
       !failures.isEmpty(),
@@ -1723,10 +1743,23 @@ public class ProductService implements ProductDefinitionsPort {
               v.get("VERSION_NO")
             ),
             "rules",
-            allRules(decimal(v.get("PRODUCT_VERSION_ID")))
+            publicOfferRules(decimal(v.get("PRODUCT_VERSION_ID")), str(p, "PRODUCT_TYPE"))
           )
         );
     }
+    return result;
+  }
+
+  /** Customer offers carry sale terms, not internal authorities or transaction controls. */
+  private Map<String, Object> publicOfferRules(BigDecimal versionId, String productType) {
+    List<String> families = switch (productType) {
+      case "SAVINGS", "CURRENT" -> List.of("account", "balance", "interest", "tiers", "fees");
+      case "DEPOSIT" -> List.of("term", "interest", "tiers", "fees");
+      case "LOAN" -> List.of("loan", "interest", "tiers", "fees", "penalties");
+      default -> List.of();
+    };
+    Map<String, Object> result = new LinkedHashMap<>();
+    for (String code : families) result.put(code, rules(versionId, family(code)));
     return result;
   }
 

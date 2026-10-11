@@ -44,7 +44,7 @@ public class FinancialAuditOracleSmoke {
         var decisions = new AccessDecisionService(new IamAdminRepository(db, schema), iam, Clock.systemUTC());
         var access = new BankingAccess(new BusinessRepository(db, schema), decisions);
         var ledger = new LedgerService(db, new ObjectMapper().findAndRegisterModules(),
-                new AccountCatalog(db), new PaymentCatalog(db));
+                new AccountCatalog(db), new PaymentCatalog(db), Clock.systemUTC());
         var banking = new BankingService(new BusinessRepository(db, schema), access, ledger);
         var audit = new FinancialAuditController(db, access, "Asia/Kolkata");
         var manager = new DataSourceTransactionManager(source);

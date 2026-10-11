@@ -5,8 +5,12 @@ import com.moneybags.txn.api.OperationsContracts.*;
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -17,9 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class OperationsService {
     private final JdbcTemplate db;
+    private final Clock clock;
 
     /** Injects JDBC for Oracle's preinstalled Module 5 tables. */
-    public OperationsService(JdbcTemplate db) { this.db = db; }
+    public OperationsService(JdbcTemplate db, Clock clock) { this.db = db; this.clock = clock; }
 
     /** Adds one INR GL account after validating its class and normal side. */
     @Transactional
@@ -44,6 +49,11 @@ public class OperationsService {
             throw new ApiException(HttpStatus.CONFLICT, "GL_INACTIVE", "GL account is missing or inactive");
         if ("CUSTOMER_LIABILITY".equals(request.roleCode()) && !"LIABILITY".equals(gl.get(0).get("ACCOUNT_CLASS")))
             throw new ApiException(HttpStatus.BAD_REQUEST, "GL_CLASS", "Customer liability role requires a liability GL");
+        String expectedClass = Map.of("TERM_LIABILITY", "LIABILITY",
+                "LOAN_PRINCIPAL", "ASSET", "LOAN_INTEREST", "ASSET", "INTEREST_EXPENSE", "EXPENSE",
+                "INTEREST_INCOME", "INCOME", "FEE_INCOME", "INCOME").get(request.roleCode());
+        if (expectedClass != null && !expectedClass.equals(gl.get(0).get("ACCOUNT_CLASS")))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "GL_CLASS", "Posting role does not match the GL account class");
         Integer overlaps = db.queryForObject("SELECT COUNT(*) FROM M05_GL_PRODUCT_MAPPING WHERE PRODUCT_VERSION_ID=? AND POSTING_TYPE=? AND GL_ROLE_CODE=? AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=NVL(?,DATE '9999-12-31') AND NVL(EFFECTIVE_TO,DATE '9999-12-31')>=?",
                 Integer.class, request.productVersionId(), request.postingType(), request.roleCode(), request.effectiveTo(), request.effectiveFrom());
         if (overlaps != null && overlaps > 0) throw new ApiException(HttpStatus.CONFLICT, "MAPPING_OVERLAP", "Active mapping effective dates overlap");
@@ -55,22 +65,46 @@ public class OperationsService {
     /** Requests a period close and records its maker for independent review. */
     @Transactional
     public Map<String, Object> requestClose(CloseRequest request, String maker) {
-        List<Map<String, Object>> old = db.queryForList("SELECT CLOSE_ID,STATUS FROM M05_GL_PERIOD_CLOSE WHERE REQUEST_KEY=?", request.requestKey());
-        if (!old.isEmpty()) return old.get(0);
-        long id = insertId("INSERT INTO M05_GL_PERIOD_CLOSE(REQUEST_KEY,CLOSED_THROUGH_DATE,MAKER_USER_ID,REASON_TEXT) VALUES (?,?,?,?)", "CLOSE_ID",
-                request.requestKey(), request.closedThroughDate(), maker, request.reasonText());
-        return Map.of("closeId", id, "status", "PENDING");
+        if (request.closedThroughDate().isAfter(LocalDate.now(clock.withZone(ZoneId.of("Asia/Kolkata")))))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "FUTURE_CLOSE_DATE", "A future accounting date cannot be closed");
+        Map<String, Object> old = existingClose(request, maker);
+        if (old != null) return old;
+        try {
+            long id = insertId("INSERT INTO M05_GL_PERIOD_CLOSE(REQUEST_KEY,CLOSED_THROUGH_DATE,MAKER_USER_ID,REASON_TEXT) VALUES (?,?,?,?)", "CLOSE_ID",
+                    request.requestKey(), request.closedThroughDate(), maker, request.reasonText());
+            return Map.of("closeId", id, "status", "PENDING");
+        } catch (DuplicateKeyException duplicate) {
+            Map<String, Object> committed = existingClose(request, maker);
+            if (committed != null) return committed;
+            throw new ApiException(HttpStatus.CONFLICT, "CLOSE_DATE_CONFLICT", "A close request already exists for this date");
+        }
+    }
+
+    private Map<String, Object> existingClose(CloseRequest request, String maker) {
+        List<Map<String, Object>> old = db.queryForList("SELECT CLOSE_ID,STATUS,CLOSED_THROUGH_DATE,MAKER_USER_ID,REASON_TEXT FROM M05_GL_PERIOD_CLOSE WHERE REQUEST_KEY=?", request.requestKey());
+        if (!old.isEmpty()) {
+            Map<String, Object> prior = old.get(0);
+            if (!com.moneybags.common.database.BusinessRepository.localDate(prior.get("CLOSED_THROUGH_DATE")).equals(request.closedThroughDate()) ||
+                    !Objects.equals(prior.get("MAKER_USER_ID"), maker) || !Objects.equals(prior.get("REASON_TEXT"), request.reasonText()))
+                throw new ApiException(HttpStatus.CONFLICT, "CLOSE_KEY_CONFLICT", "Close request key was reused with different details");
+            return Map.of("closeId", ((Number) prior.get("CLOSE_ID")).longValue(), "status", prior.get("STATUS"));
+        }
+        return null;
     }
 
     /** Approves a close only after both Oracle reconciliation views are clear. */
     @Transactional
     public Map<String, Object> decideClose(long id, CloseDecision decision, String checker) {
-        List<Map<String, Object>> rows = db.queryForList("SELECT MAKER_USER_ID,STATUS,CLOSED_THROUGH_DATE FROM M05_GL_PERIOD_CLOSE WHERE CLOSE_ID=? FOR UPDATE", id);
+        if (!List.of("APPROVED", "REJECTED").contains(decision.decision())) throw new ApiException(HttpStatus.BAD_REQUEST, "DECISION", "Decision must be APPROVED or REJECTED");
+        List<Map<String, Object>> rows = db.queryForList("SELECT MAKER_USER_ID,CHECKER_USER_ID,STATUS,CLOSED_THROUGH_DATE FROM M05_GL_PERIOD_CLOSE WHERE CLOSE_ID=? FOR UPDATE", id);
         if (rows.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "CLOSE_NOT_FOUND", "Period close request does not exist");
         Map<String, Object> close = rows.get(0);
-        if (!"PENDING".equals(close.get("STATUS"))) throw new ApiException(HttpStatus.CONFLICT, "CLOSE_DECIDED", "Period close is already decided");
+        if (!"PENDING".equals(close.get("STATUS"))) {
+            if (decision.decision().equals(close.get("STATUS")) && checker.equals(close.get("CHECKER_USER_ID")))
+                return Map.of("closeId", id, "status", close.get("STATUS"));
+            throw new ApiException(HttpStatus.CONFLICT, "CLOSE_DECIDED", "Period close is already decided");
+        }
         if (checker.equals(close.get("MAKER_USER_ID"))) throw new ApiException(HttpStatus.FORBIDDEN, "MAKER_CHECKER", "Maker cannot decide their own period close");
-        if (!List.of("APPROVED", "REJECTED").contains(decision.decision())) throw new ApiException(HttpStatus.BAD_REQUEST, "DECISION", "Decision must be APPROVED or REJECTED");
         if ("APPROVED".equals(decision.decision())) {
             Integer badJournals = db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'", Integer.class);
             Integer badPositions = db.queryForObject("SELECT COUNT(*) FROM M05_V_ACCOUNT_POSITION_RECON WHERE IS_MATCHED='N'", Integer.class);
@@ -85,22 +119,38 @@ public class OperationsService {
     @Transactional
     public Map<String, Object> assessFee(FeeRequest request) {
         if ((request.bankAccountId() == null) == (request.loanFacilityId() == null) ||
+                request.assessedAmount() == null || request.assessedAmount().signum() <= 0 ||
                 request.assessedAmount().scale() > 2 || request.assessedAmount().precision() > 18)
             throw new ApiException(HttpStatus.BAD_REQUEST, "FEE_SCOPE", "Fee needs exactly one account or loan and a valid INR amount");
-        List<Map<String, Object>> old = db.queryForList("SELECT * FROM M05_FEE_ASSESSMENT WHERE FEE_KEY=?", request.feeKey());
-        if (!old.isEmpty()) {
-            if (((BigDecimal) old.get(0).get("ASSESSED_AMOUNT")).compareTo(request.assessedAmount()) != 0 || !java.util.Objects.equals(asLong(old.get(0).get("BANK_ACCOUNT_ID")),request.bankAccountId()) || !java.util.Objects.equals(asLong(old.get(0).get("LOAN_FACILITY_ID")),request.loanFacilityId()) || asLong(old.get(0).get("PRODUCT_FEE_RULE_ID")).longValue()!=request.productFeeRuleId() || !com.moneybags.common.database.BusinessRepository.localDate(old.get(0).get("DUE_DATE")).equals(request.dueDate()))
-                throw new ApiException(HttpStatus.CONFLICT, "FEE_KEY_CONFLICT", "Fee key was reused for another amount");
-            return Map.of("feeAssessmentId", old.get(0).get("FEE_ASSESSMENT_ID"), "status", old.get(0).get("STATUS"));
-        }
-        Long version=db.queryForObject(request.bankAccountId()!=null?"SELECT PRODUCT_VERSION_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?":"SELECT PRODUCT_VERSION_ID FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",Long.class,request.bankAccountId()!=null?request.bankAccountId():request.loanFacilityId());
+        Map<String, Object> old = existingFee(request);
+        if (old != null) return old;
+        List<Long> versions=db.query(request.bankAccountId()!=null?"SELECT PRODUCT_VERSION_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?":"SELECT PRODUCT_VERSION_ID FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",
+                (rs,n)->rs.getLong(1),request.bankAccountId()!=null?request.bankAccountId():request.loanFacilityId());
+        if (versions.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND,"FEE_OWNER_NOT_FOUND","Fee account or loan facility does not exist");
+        Long version=versions.get(0);
         var rules=db.queryForList("SELECT CHARGE_BASIS,FIXED_AMOUNT,TAX_CODE FROM M03_PM_FEE_RULE WHERE FEE_RULE_ID=? AND PRODUCT_VERSION_ID=? AND (EFFECTIVE_FROM_AT IS NULL OR EFFECTIVE_FROM_AT<=SYSTIMESTAMP) AND (EFFECTIVE_TO_AT IS NULL OR EFFECTIVE_TO_AT>SYSTIMESTAMP)",request.productFeeRuleId(),version);
         if(rules.size()!=1)throw new ApiException(HttpStatus.CONFLICT,"FEE_RULE_MISSING","An effective fee rule for this account product is required");
         var rule=rules.get(0);
         if(!"FIXED".equals(rule.get("CHARGE_BASIS"))||rule.get("TAX_CODE")!=null||!(rule.get("FIXED_AMOUNT") instanceof BigDecimal fixed)||fixed.compareTo(request.assessedAmount())!=0)throw new ApiException(HttpStatus.CONFLICT,"FEE_RULE_UNSUPPORTED","Assessment requires the exact untaxed fixed product fee; percentage and tax adapters must be configured separately");
-        long id = insertId("INSERT INTO M05_FEE_ASSESSMENT(FEE_KEY,BANK_ACCOUNT_ID,LOAN_FACILITY_ID,PRODUCT_FEE_RULE_ID,ASSESSED_AMOUNT,DUE_DATE) VALUES (?,?,?,?,?,?)", "FEE_ASSESSMENT_ID",
-                request.feeKey(), request.bankAccountId(), request.loanFacilityId(), request.productFeeRuleId(), request.assessedAmount(), request.dueDate());
-        return Map.of("feeAssessmentId", id, "status", "ASSESSED");
+        try {
+            long id = insertId("INSERT INTO M05_FEE_ASSESSMENT(FEE_KEY,BANK_ACCOUNT_ID,LOAN_FACILITY_ID,PRODUCT_FEE_RULE_ID,ASSESSED_AMOUNT,DUE_DATE) VALUES (?,?,?,?,?,?)", "FEE_ASSESSMENT_ID",
+                    request.feeKey(), request.bankAccountId(), request.loanFacilityId(), request.productFeeRuleId(), request.assessedAmount(), request.dueDate());
+            return Map.of("feeAssessmentId", id, "status", "ASSESSED");
+        } catch (DuplicateKeyException duplicate) {
+            Map<String, Object> committed = existingFee(request);
+            if (committed != null) return committed;
+            throw duplicate;
+        }
+    }
+
+    private Map<String, Object> existingFee(FeeRequest request) {
+        List<Map<String, Object>> old = db.queryForList("SELECT * FROM M05_FEE_ASSESSMENT WHERE FEE_KEY=?", request.feeKey());
+        if (!old.isEmpty()) {
+            if (((BigDecimal) old.get(0).get("ASSESSED_AMOUNT")).compareTo(request.assessedAmount()) != 0 || !java.util.Objects.equals(asLong(old.get(0).get("BANK_ACCOUNT_ID")),request.bankAccountId()) || !java.util.Objects.equals(asLong(old.get(0).get("LOAN_FACILITY_ID")),request.loanFacilityId()) || asLong(old.get(0).get("PRODUCT_FEE_RULE_ID")).longValue()!=request.productFeeRuleId() || !com.moneybags.common.database.BusinessRepository.localDate(old.get(0).get("DUE_DATE")).equals(request.dueDate()))
+                throw new ApiException(HttpStatus.CONFLICT, "FEE_KEY_CONFLICT", "Fee key was reused for another amount");
+            return Map.of("feeAssessmentId", ((Number)old.get(0).get("FEE_ASSESSMENT_ID")).longValue(), "status", old.get(0).get("STATUS"));
+        }
+        return null;
     }
 
     private static Long asLong(Object v){return v instanceof Number n?n.longValue():null;}

@@ -99,11 +99,11 @@ public class LegalHoldRepository {
         var found = jdbc.sql("""
                 SELECT COUNT(*) FROM M09_PRIVACY_LEGAL_HOLD
                  WHERE HOLD_STATUS='ACTIVE'
-                   AND (SUBJECT_EXTERNAL_ID IS NULL OR
-                        (SUBJECT_SERVICE=:subjectService AND SUBJECT_EXTERNAL_ID=:subjectId))
-                   AND (TARGET_EXTERNAL_ID IS NULL OR
-                        (TARGET_SERVICE=:targetService AND TARGET_RESOURCE_TYPE=:resourceType
-                         AND TARGET_EXTERNAL_ID=:resourceId))
+                   AND (SUBJECT_SERVICE IS NULL OR SUBJECT_SERVICE=:subjectService)
+                   AND (SUBJECT_EXTERNAL_ID IS NULL OR SUBJECT_EXTERNAL_ID=:subjectId)
+                   AND (TARGET_SERVICE IS NULL OR TARGET_SERVICE=:targetService)
+                   AND (TARGET_RESOURCE_TYPE IS NULL OR TARGET_RESOURCE_TYPE=:resourceType)
+                   AND (TARGET_EXTERNAL_ID IS NULL OR TARGET_EXTERNAL_ID=:resourceId)
                    AND (RECORD_CATEGORY IS NULL OR RECORD_CATEGORY=:category)
                    AND (:recordAt IS NULL OR RECORD_FROM_AT IS NULL OR RECORD_FROM_AT<=:recordAt)
                    AND (:recordAt IS NULL OR RECORD_TO_AT IS NULL OR RECORD_TO_AT>=:recordAt)

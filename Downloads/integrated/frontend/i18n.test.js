@@ -30,3 +30,12 @@ test('English, Hindi and Kannada keep API values while translating visible label
   assert.equal(kannada.t('View journal'),'ಜರ್ನಲ್ ನೋಡಿ');
   assert.equal(kannada.t('unknown backend phrase'),'unknown backend phrase');
 });
+
+test('new customer navigation, descriptions and welcome templates translate in both languages',async()=>{
+ for(const language of ['hi-IN','kn-IN']){
+  globalThis.localStorage={getItem:()=>language};const {t}=await import('./i18n.js?new-copy-'+language);
+  for(const phrase of ['Home','My accounts','My transactions','Payments','Recipients','My credit cards','My loans','Statements','Exchange rates','Account access key','Explore products','Privacy & consent','Sign-in & security','A good day to move forward.','Send & track money','More ways to bank','See your balances, open an eligible account, or explore fixed deposits.'])assert.notEqual(t(phrase),phrase,language+': '+phrase);
+  const greeting=t('Welcome back, {name}. Your accounts, cards, and next steps, together.');assert.ok(greeting.includes('{name}'));assert.ok(!greeting.startsWith('Welcome back'));
+  assert.equal(t('MB000000001'),'MB000000001');assert.ok(!t('1–60 months').includes('months'));
+ }
+});

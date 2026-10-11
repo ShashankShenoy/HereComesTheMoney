@@ -18,7 +18,7 @@ public final class StatementDocument {
    default->throw new ApiException(HttpStatus.BAD_REQUEST,"FORMAT_INVALID","Choose PDF, CSV or HTML");
   };
  }
- private static String csvCell(Object value){String v=Objects.toString(value,"");if(!(value instanceof Number)&&v.matches("(?s)^[=+@\\t\\r\\n-].*"))v="'"+v;return "\""+v.replace("\"","\"\"")+"\"";}
+ private static String csvCell(Object value){String v=Objects.toString(value,"");if(!(value instanceof Number)&&v.stripLeading().matches("(?s)^[=+@-].*"))v="'"+v;return "\""+v.replace("\"","\"\"")+"\"";}
  private static String csv(StatementView s){
   StringBuilder out=new StringBuilder("\uFEFFStatement,Account,Period start,Period end,Currency,Opening balance,Closing balance\r\n");
   out.append(String.join(",",Arrays.asList(s.statementNumber(),s.accountId(),s.periodStart(),s.periodEnd(),s.currency(),s.openingBalance(),s.closingBalance()).stream().map(StatementDocument::csvCell).toList())).append("\r\nLine,Value date,Booking date,Description,Amount,Running balance\r\n");
@@ -35,7 +35,7 @@ public final class StatementDocument {
  /** Small paginated PDF writer using standard PDF Helvetica. Unicode HTML/CSV are available for every locale. */
  private static byte[] pdf(StatementView s){
   List<String> rows=new ArrayList<>();rows.add("MONEY BAGS - ACCOUNT STATEMENT");rows.add(s.statementNumber()+"   Revision "+s.revision());rows.add("Account "+s.accountId()+"   "+s.periodStart()+" to "+s.periodEnd()+"   "+s.currency());
-  rows.add("Opening: "+s.openingBalance()+"    Closing: "+s.closingBalance());rows.add("");rows.add("VALUE DATE   DESCRIPTION                         AMOUNT        BALANCE");
+  rows.add("Opening: "+Objects.toString(s.openingBalance(),"")+"    Closing: "+Objects.toString(s.closingBalance(),""));rows.add("");rows.add("VALUE DATE   DESCRIPTION                         AMOUNT        BALANCE");
   for(var l:s.lines()){
    if(l.narration().chars().anyMatch(c->c>126))throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,"UNICODE_FORMAT_REQUIRED","Use HTML or CSV for this narration locale; the built-in PDF font supports Latin text only");
    String narration=l.narration().replaceAll("[\\r\\n\\t]"," ");

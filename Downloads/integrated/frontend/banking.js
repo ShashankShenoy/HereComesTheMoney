@@ -1,4 +1,7 @@
+import {workspaceHero,icon,customerPageLabels,customerPageDescriptions} from './design.js';
 import {creditCardsScreen,bindCreditCards} from './credit-cards.js';
+import {customerPaymentsScreen,bindCustomerPayments,paymentStatus} from './customer-payments.js';
+import {customerFxScreen,bindCustomerFx} from './customer-fx.js';
 import {api,getSession,getCustomerHash,setCustomerHash} from './api.js';
 import {esc,table,field,select,badge,errorText,toast,dialog} from './ui.js';
 import {enhanceForms,validateJet,jetReady} from './jet.js';
@@ -25,6 +28,7 @@ let transactionSection='accounts';
 let keyHolderAccountNumber='',keyHolders=null,accountOptions=[],accountOptionsFetchedAt=0,accountOptionsPending=null,accountOptionsActor=null;
 let reserveAccountId='',reserveAccounts=[],reservePosition=null,reserveReconciliation=null,reserveLedger=null,reserveOffset=0;
 let glLedgerAccountId='',glLedger=null,glLedgerJournal=null,glLedgerAccounts=null,glLedgerOffset=0;
+let customerPurposeNotices=[];
 let cashLedgerAccounts=null,cashLedgerError='';
 const transactionReadOperations=new Set(['GET /banking/transactions','GET /banking/transactions/{id}/details','GET /transactions/{id}','GET /banking/gl-accounts/{id}/ledger']);
 function accountHints(id){return '<datalist id="'+id+'">'+accountOptions.map(a=>'<option value="'+esc(a.ACCOUNT_NUMBER)+'">'+esc(a.ACCOUNT_STATUS||'Account')+'</option>').join('')+'</datalist>';}
@@ -36,7 +40,7 @@ function resetAccountOptionsForActor(){
  keyHolderAccountNumber='';keyHolders=null;reserveAccountId='';reserveAccounts=[];reservePosition=null;reserveReconciliation=null;reserveLedger=null;reserveOffset=0;
  glLedgerAccountId='';glLedger=null;glLedgerJournal=null;glLedgerAccounts=null;glLedgerOffset=0;
  cashLedgerAccounts=null;cashLedgerError='';
- selected={};results={};
+ selected={};results={};customerPurposeNotices=[];
 }
 function loadAccountOptions(){
  resetAccountOptionsForActor();
@@ -65,9 +69,9 @@ const displayLabels={ACCOUNT_NUMBER:'Account number',ACCOUNT_STATUS:'Status',CUR
 const label=v=>tField(displayLabels[v]||v.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
 const allow=p=>!p||getSession()?.user?.permissions?.includes(p)||({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]&&getSession()?.user?.permissions?.includes({TELLER_READ:'TELLER_OPERATE',BENEFICIARY_VERIFY:'PAYMENT_CREATE',TREASURY_READ:'TREASURY_RECONCILE'}[p]));
 const checker=()=>getSession()?.user?.roles?.includes('BANK_CHECKER')&&!getSession()?.user?.roles?.includes('BANK_ADMIN');
-const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|payments\/(?:approvals\/[^/]+\/decision|[^/]+\/authorize-simulation)|treasury\/(?:work-items\/[^/]+\/decision|reserve-openings\/[^/]+\/confirm)|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/(?:tills\/[^/]+\/(?:close|replenish)|cash-deliveries\/[^/]+\/confirm)|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
+const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|approvals\/[^/]+\/decision|payments\/[^/]+\/authorize-simulation|treasury\/(?:work-items\/[^/]+\/decision|reserve-openings\/[^/]+\/confirm)|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/(?:tills\/[^/]+\/(?:close|replenish)|cash-deliveries\/[^/]+\/confirm)|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
 const customerWorkflows=new Set([
- 'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers',
+ 'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers/by-number',
  'GET /beneficiaries','POST /beneficiaries',
  'GET /payments','GET /payments/{id}','GET /payments/{id}/history','POST /payments/initiate',
  'GET /banking/facilities','GET /loans/applications/{id}','GET /loans/applications/{id}/offers',
@@ -76,12 +80,23 @@ const customerWorkflows=new Set([
  'POST /reporting/statement-requests','POST /reporting/statement-requests/{id}/cancel',
  'POST /reporting/statement-requests/{id}/process','GET /reporting/statements',
  'GET /reporting/statements/{id}','GET /reporting/statements/{id}/download',
- 'GET /privacy/purposes','GET /privacy/purposes/{id}',
+ 'GET /privacy/purposes/available',
  'GET /privacy/consents/evaluations','GET /privacy/consents/history',
  'POST /privacy/consents/decisions','POST /privacy/consents/withdrawals',
  'GET /currencies','GET /fx/rates','GET /fx/quote'
 ]);
+function workflowAllowed(operation,customer){
+ if(operation.path==='/payments/availability'||operation.path==='/privacy/consents/availability')return false;
+ if(customer){if(operation.path.startsWith('/privacy/consents/')&&operation.method==='POST'&&!allow('PRIVACY_CONSENT_SELF'))return false;return customerWorkflows.has(operation.method+' '+operation.path);}
+ if(/^\/(?:accounts\/self|loans\/my|term-deposits\/my)(?:\/|$)/.test(operation.path))return false;
+ if(operation.path==='/privacy/purposes/available'||operation.path==='/transactions/transfers/by-number')return false;
+ if(operation.path==='/term-deposits'&&operation.method==='POST')return false;
+ if(operation.path==='/term-deposits/{id}'&&operation.method==='GET')return allow('GL_POST');
+ if(operation.path==='/loans/collections')return allow('LOAN_SERVICE');
+ return true;
+}
 const workflowTitles={
+ 'get /privacy/purposes/available':'View available privacy purposes',
  'get /accounts':'List customer accounts','post /accounts':'Open account','get /accounts/{id}':'Account details','get /accounts/by-number/{number}':'Find account by number','get /accounts/{id}/{collection}':'Account records',
  'post /accounts/{id}/activate':'Activate account','post /accounts/{id}/cancel-opening':'Cancel pending opening','post /accounts/{id}/parties':'Add account party','delete /accounts/{id}/parties/{partyId}':'End account party role','put /accounts/{id}/nominees':'Update nominees',
  'post /accounts/{id}/restrictions':'Add account restriction','post /accounts/{id}/restrictions/{restrictionId}/release':'Release account restriction','post /accounts/{id}/limits':'Set account limit','post /accounts/{id}/interest-overrides':'Set interest override','post /accounts/{id}/product-version-adoptions':'Adopt product version',
@@ -99,12 +114,13 @@ const workflowTitles={
  'get /treasury/reserve-accounts':'List reserve accounts','post /treasury/reserve-accounts':'Create a reserve account and zero position',
  'get /treasury/reserve-accounts/{id}/position':'Get reserve position','get /treasury/reserve-accounts/{id}/ledger':'List reserve ledger entries','get /treasury/reserve-accounts/{id}/reconciliation':'Get reserve reconciliation',
  'get /treasury/liquidity-holds':'List liquidity holds','post /treasury/liquidity-holds':'Reserve liquidity','post /treasury/liquidity-holds/{id}/decision':'Decide liquidity hold',
- 'get /treasury/settlement-cycles':'List settlement cycles','post /treasury/settlement-cycles':'Open settlement cycle','get /treasury/settlement-cycles/{id}/items':'List settlement cycle items','post /treasury/settlement-cycles/{id}/items':'Add settlement cycle items','post /treasury/settlement-cycles/{id}/close':'Close settlement cycle',
+ 'get /treasury/settlement-cycles':'List settlement cycles','post /treasury/settlement-cycles':'Open settlement cycle','get /treasury/settlement-cycles/{id}/items':'List settlement cycle items','post /treasury/settlement-cycles/{id}/items':'Add settlement cycle items','post /treasury/settlement-cycles/{id}/close':'Close settlement cycle','post /treasury/settlement-cycles/{id}/finalize':'Finalize individually settled cycle',
  'post /treasury/settlement-evidence':'Record settlement evidence','post /treasury/reserve-movements/confirm':'Confirm reserve movement',
  'get /treasury/reconciliation-exceptions':'List reserve reconciliation exceptions','post /treasury/reconciliation-exceptions':'Open reserve reconciliation exception','post /treasury/reconciliation-exceptions/{id}/resolution':'Resolve reserve reconciliation exception',
  'get /treasury/work-items':'List treasury work items','post /treasury/work-items':'Create treasury work item','post /treasury/work-items/{id}/submit':'Submit treasury work item','post /treasury/work-items/{id}/decision':'Decide treasury work item',
  'get /currencies':'List supported currencies','post /currencies':'Add a supported currency','get /fx/rates':'Review exchange rates','post /fx/rates':'Propose an exchange rate','post /fx/rates/{id}/decision':'Decide an exchange rate','get /fx/quote':'Calculate an indicative quote','get /fx/provider/status':'Check rate provider status','post /fx/provider/refresh':'Request a provider rate',
- 'get /loans/facilities/{id}/disbursements':'List facility disbursements','post /loans/facilities/{id}/disbursements':'Request loan disbursement','post /loans/disbursements/{id}/approve':'Approve loan disbursement','post /loans/facilities/{id}/accruals':'Accrue due loan interest','post /loans/facilities/{id}/repayments':'Apply a due loan repayment','get /loans/collections':'Review overdue installments'
+ 'get /loans/facilities/{id}/disbursements':'List facility disbursements','post /loans/facilities/{id}/disbursements':'Request loan disbursement','post /loans/disbursements/{id}/approve':'Approve loan disbursement','post /loans/facilities/{id}/accruals':'Accrue due loan interest','post /loans/facilities/{id}/repayments':'Apply a due loan repayment','get /loans/collections':'Review overdue installments',
+ 'post /loans/offers/{id}/expire':'Close an expired loan offer'
 };
 async function loadContract(){
  if(contract)return;
@@ -199,7 +215,22 @@ function treasuryPanel(){
  const position=reservePosition?'<div class="stats"><div class="stat"><div class="stat-title">Confirmed balance</div><div class="stat-value">'+esc(formatAmount(reservePosition.confirmedBalance,reservePosition.currency))+'</div></div><div class="stat"><div class="stat-title">Active liquidity holds</div><div class="stat-value">'+esc(formatAmount(reservePosition.activeHoldAmount,reservePosition.currency))+'</div></div><div class="stat"><div class="stat-title">Available reserve</div><div class="stat-value">'+esc(formatAmount(reservePosition.availableBalance,reservePosition.currency))+'</div></div></div><p class="hint"><span>Position as of</span> '+esc(formatDate(reservePosition.asOf))+'</p>':'';
  const recon=reserveReconciliation?'<div class="notice">Reserve mirror reconciliation: <strong>'+esc(reserveReconciliation.isMatched==='Y'?'Matched':'Difference found')+'</strong> · Ledger-derived '+esc(formatAmount(reserveReconciliation.ledgerBalance,reserveReconciliation.currency))+' · Difference '+esc(formatAmount(reserveReconciliation.difference,reserveReconciliation.currency))+'</div>':'';
  const ledger=reserveLedger===null?'<div class="empty">Select a reserve account to view confirmed movements.</div>':reserveLedger.length?table(['Entry','Settlement time','Rail','Direction','Amount','Evidence','GL journal','External reference'],reserveLedger.map(e=>[esc(e.id),esc(formatDate(e.settledAt)),esc(e.railCode),badge(e.movementSide),esc(formatAmount(e.amount,e.currency)),badge(e.evidenceStatus),esc(e.glJournalId),esc(e.externalSettlementRef)])):'<div class="empty">No confirmed reserve movements for this account.</div>';
- return '<section class="panel"><div class="panel-heading"><div><p class="eyebrow">RBI LEDGER</p><h3>Local reserve ledger</h3></div></div><div class="panel-body"><div class="notice">This is the bank’s simulated local mirror of RBI/RTGS reserve movements. It is not a live RBI connection. Confirmed entries are backed by settlement evidence and a Module 5 GL journal.</div>'+(reserveAccounts.length?'<form id="reserve-ledger-form" class="module-search"><label class="field">Reserve account<select name="reserveAccountId" required>'+options+'</select></label><button type="submit" class="btn primary">View reserve</button></form>':'<div class="empty">No reserve account is configured.</div>')+'<p id="reserve-error" class="form-error" role="alert"></p>'+position+(allowed?recon+'<h4>Confirmed movements</h4>'+ledger+(reserveLedger!==null?'<div class="form-actions"><button class="btn small" type="button" data-reserve-page="previous" '+(reserveOffset===0?'disabled':'')+'>Previous</button><span class="muted"><span>Entries</span> '+esc(reserveOffset+1)+'–'+esc(reserveOffset+reserveLedger.length)+'</span><button class="btn small" type="button" data-reserve-page="next" '+(reserveLedger.length<50?'disabled':'')+'>Next</button></div>':''):'<p class="hint">Reserve ledger and reconciliation require Treasury Reconcile access.</p>')+'</div></section>';
+ return '<section class="panel"><div class="panel-heading"><div><p class="eyebrow">RBI LEDGER</p><h3>Local reserve ledger</h3></div></div><div class="panel-body"><div class="notice">This is the bank’s simulated local mirror of RBI/RTGS reserve movements. It is not a live RBI connection. Confirmed entries are backed by settlement evidence and a Module 5 GL journal.</div>'+(reserveAccounts.length?'<form id="reserve-ledger-form" class="module-search"><label class="field">Reserve account<select name="reserveAccountId" required>'+options+'</select></label><button type="submit" class="btn primary">View reserve</button></form>':'<div class="empty">No reserve account is configured.</div>')+'<p id="reserve-error" class="form-error" role="alert"></p>'+position+(allowed?recon+'<h4>Confirmed movements</h4>'+ledger+(reserveLedger!==null?'<div class="form-actions"><button class="btn small" type="button" data-reserve-page="previous" '+(reserveOffset===0?'disabled':'')+'>Previous</button><span class="muted"><span>Entries</span> '+esc(reserveOffset+1)+'–'+esc(reserveOffset+reserveLedger.length)+'</span><button class="btn small" type="button" data-reserve-page="next" '+(reserveLedger.length<50?'disabled':'')+'>Next</button></div>':''):'<p class="hint">Reserve ledger and reconciliation require Treasury Read or Reconcile access.</p>')+'</div></section>';
+}
+function treasuryOperationAllowed(op){
+ const path=op.path,method=op.method;
+ if(!path.startsWith('/treasury/'))return true;
+ if(path==='/treasury/reserve-openings')return method==='GET'?getSession()?.user?.permissions?.includes('TREASURY_READ'):allow('TREASURY_LIQUIDITY_MANAGE')&&allow('GL_ADMIN');
+ if(path.startsWith('/treasury/reserve-openings/'))return allow('TREASURY_WORK_APPROVE');
+ if(method==='GET'){
+  if(path.startsWith('/treasury/liquidity-holds'))return allow('TREASURY_READ')||allow('TREASURY_LIQUIDITY_MANAGE');
+  if(path==='/treasury/reserve-accounts'||path==='/treasury/reserve-accounts/{id}'||path==='/treasury/reserve-accounts/{id}/position')return allow('TREASURY_READ')||allow('TREASURY_LIQUIDITY_MANAGE');
+  if(path==='/treasury/work-items/{id}')return allow('TREASURY_READ')||allow('TREASURY_WORK_APPROVE');
+  return allow('TREASURY_READ');
+ }
+ if(path==='/treasury/work-items/{id}/decision')return allow('TREASURY_WORK_APPROVE')||allow('TREASURY_RECONCILE');
+ if(path==='/treasury/reserve-accounts'||path.startsWith('/treasury/liquidity-holds'))return allow('TREASURY_LIQUIDITY_MANAGE');
+ return allow('TREASURY_RECONCILE');
 }
 function defaults(name,s){
  const n=name.split('.').pop();
@@ -213,6 +244,19 @@ function inputs(schema,prefix='',required=[],depth=0){
  return Object.entries(schema.properties||{}).map(([name,raw])=>{
   const s=resolve(raw),key=prefix+name,req=required.includes(name);
   if(s.readOnly)return '';
+  if(active==='privacy'&&getSession()?.user?.userType==='CUSTOMER'&&!prefix){
+   const consent=operations.find(o=>o.id===selected[active])?.path.startsWith('/privacy/consents/');
+   if(consent){
+    const current=operations.find(o=>o.id===selected[active]);
+    const purposes=current.method==='POST'?customerPurposeNotices.filter(p=>p.legalBasisCode==='CONSENT'):customerPurposeNotices;
+    if(name==='subjectService'||name==='channelCode')return '<input type="hidden" name="'+esc(key)+'" value="'+(name==='subjectService'?'CIF':'WEB')+'">';
+    if(name==='subjectExternalId'){const cifs=getSession().user.cifIds||[];return cifs.length===1?'<input type="hidden" name="'+esc(key)+'" value="'+esc(cifs[0])+'">':select('Your linked profile',key,cifs.map(cif=>({value:cif,label:cif})),cifs[0]||'',true);}
+    if(name==='purposeCode')return select('Privacy choice',key,purposes.map(p=>({value:p.code,label:p.name})),purposes[0]?.code||'',true);
+    if(name==='noticeSha256')return '<input type="hidden" name="'+esc(key)+'" value="'+esc(purposes[0]?.noticeSha256||'')+'">';
+    if(name==='decision')return select('Your choice',key,[{value:'GRANTED',label:'Allow optional use'},{value:'DENIED',label:'Do not allow optional use'}],'GRANTED',true);
+    if(['sourceConsentId','effectiveAt','expiresAt','evidenceUri','evidenceSha256'].includes(name))return '';
+   }
+  }
   if(!prefix&&name==='cashGlId'&&active==='teller'&&operations.find(o=>o.id===selected[active])?.path==='/teller/tills'){
    if(cashLedgerAccounts?.length===1){const account=cashLedgerAccounts[0];return '<input type="hidden" name="cashGlId" value="'+esc(account.GL_ACCOUNT_ID)+'"><div class="field"><span>Cash ledger account</span><strong>'+esc(account.GL_NAME)+' ('+esc(account.GL_CODE)+')</strong><small>Selected automatically for this till.</small></div>';}
    return select('Cash ledger account',key,[{value:'',label:'Choose a cash ledger account'},...(cashLedgerAccounts||[]).map(account=>({value:String(account.GL_ACCOUNT_ID),label:account.GL_NAME+' ('+account.GL_CODE+')'}))],'',true);
@@ -271,19 +315,27 @@ export async function bankingScreen(page){
  resetAccountOptionsForActor();
  active=page;const config=bankingPages[page];
  const customer=getSession().user.userType==='CUSTOMER';
- const head='<div class="page-heading"><div><p class="eyebrow">'+(customer?'YOUR BANKING':'BANKING OPERATIONS')+'</p><h1>'+esc(config.title)+'</h1><p>'+esc(customer&&page==='accounts'?'View your accounts and open an eligible savings or current account.':config.intro)+'</p></div></div>';
+ const head='<div class="page-heading"><div><p class="eyebrow">'+(customer?'YOUR BANKING':'BANKING OPERATIONS')+'</p><h1>'+esc(customer?customerPageLabels[page]||config.title:config.title)+'</h1><p>'+esc(customer?customerPageDescriptions[page]||config.intro:config.intro)+'</p></div></div>';
  if(page==='creditCards')return head+await creditCardsScreen(renderApp);
+ if(page==='payments'&&customer)return head+await customerPaymentsScreen();
+ if(page==='currency'&&customer)return head+await customerFxScreen();
  if(page==='customerAccess')return customer
   ?head+'<section class="panel"><div class="panel-heading"><h3>Your account access key</h3></div><div class="panel-body"><div class="notice">Your sign-in already lets you view transactions for accounts linked to you. You do not need a key for your own details.</div><p>If an authorized bank officer needs to view your account details, you can generate a new key and give it to them privately. The previous key stops working immediately. An existing key cannot be displayed again.</p><button type="button" class="btn primary" data-bank-rotate>Generate a new account-holder key</button><div id="hash-result" role="status" aria-live="polite"></div></div></section>'
   :staffAccessPage(head);
  if(page==='banking'){
-  const [d,self,selfService]=await Promise.all([api('/banking/overview'),customer?api('/banking/my-dashboard'):Promise.resolve(null),customer?api('/auth/signup-availability'):Promise.resolve(null)]);
+  const [d,self,selfService,extras]=await Promise.all([api('/banking/overview'),customer?api('/banking/my-dashboard'):Promise.resolve(null),customer?api('/auth/signup-availability'):Promise.resolve(null),customer?Promise.allSettled([allow('CC_READ')?api('/credit-cards'):Promise.resolve([]),allow('PAYMENT_READ')?api('/payments'):Promise.resolve([])]):Promise.resolve([])]);
   const accounts=self?.accounts||[];
-  const balanceCards=accounts.map(a=>'<div class="stat"><div class="stat-title">Account ending '+esc(a.accountEnding)+' · '+esc(a.status)+'</div><div class="stat-value amount-value">'+(a.posted===undefined?'Balance unavailable':esc(formatAmount(a.posted,a.currency)))+'</div><small>Available balance: '+(a.spendable===undefined?'—':esc(formatAmount(a.spendable,a.currency)))+'</small></div>').join('');
+  const cards=extras[0]?.status==='fulfilled'?extras[0].value:[];
+  const payments=extras[1]?.status==='fulfilled'?extras[1].value:[];
+  const balanceCards=accounts.map(a=>'<div class="stat"><div class="stat-title">'+esc(t('Account ending'))+' '+esc(a.accountEnding)+' · '+esc(a.status)+'</div><div class="stat-value amount-value">'+(a.posted===undefined?t('Balance unavailable'):esc(formatAmount(a.posted,a.currency)))+'</div><small>'+esc(t('Available balance'))+': '+(a.spendable===undefined?'—':esc(formatAmount(a.spendable,a.currency)))+'</small></div>').join('');
   const recent=accounts.flatMap(a=>(a.recentTransactions||[]).map(t=>({...t,accountEnding:a.accountEnding}))).sort((a,b)=>b.transactionId-a.transactionId).slice(0,10);
   const customerSummary=customer?'<section class="panel"><div class="panel-heading"><h3>Your accounts</h3><span class="muted">Based on your signed-in identity</span></div><div class="panel-body">'+(accounts.length?'<div class="stats">'+balanceCards+'</div>':'<div class="empty">'+(selfService.enabled?'You do not have an account yet. Browse eligible products to open one.':'You do not have an account yet. Contact the bank to open one.')+'</div>')+(selfService.enabled?'<button class="btn primary" data-action="nav" data-id="accounts" type="button">'+(accounts.length?'Open another account':'Open an account')+'</button>':'')+(self.truncated?'<p class="hint">Showing the first 20 accounts.</p>':'')+'<h3>Recent transactions</h3>'+(recent.length?table(['Account','Transaction','Type','Amount','Status'],recent.map(t=>[esc(t.accountEnding),esc(t.transactionId),esc(t.type),'<span class="amount-value">'+esc(formatAmount(t.amount,t.currency))+'</span>',badge(t.status)])):'<div class="empty">No transactions yet.</div>')+'</div></section>':'';
+  const cardSummary=customer&&allow('CC_READ')?'<section class="panel"><div class="panel-heading"><h3>Your credit cards</h3><button type="button" class="btn small" data-action="nav" data-id="creditCards">View cards</button></div><div class="panel-body">'+(extras[0]?.status==='rejected'?'<div class="notice">Card information is temporarily unavailable.</div>':table(['Card','Status','Outstanding'],cards.slice(0,3).map(c=>[esc(c.PRODUCT_NAME)+' · •••• '+esc(c.DISPLAY_ENDING),badge(c.STATUS),esc(formatAmount(c.OUTSTANDING_BALANCE,'INR'))]),'No credit cards yet'))+'</div></section>':'';
+  const paymentSummary=customer&&allow('PAYMENT_READ')?'<section class="panel"><div class="panel-heading"><h3>Recent payment requests</h3><button type="button" class="btn small" data-action="nav" data-id="payments">Send or track money</button></div><div class="panel-body">'+(extras[1]?.status==='rejected'?'<div class="notice">Payment status is temporarily unavailable.</div>':table(['Reference','Amount','Progress'],payments.slice(0,5).map(p=>[esc(p.paymentId),esc(formatAmount(p.amount,'INR')),esc(paymentStatus(p.status))]),'No payment requests yet'))+'</div></section>':'';
+  const customerActivity=cardSummary||paymentSummary?'<div class="split">'+cardSummary+paymentSummary+'</div>':'';
   const metrics=[['customers','Customers'],['accounts','Accounts'],['transactions','Posted transactions'],['pendingPayments','Pending payments'],['pendingLoans','Pending loan applications']].filter(([key])=>typeof d[key]==='number');
-  return head+customerSummary+'<section aria-label="Key figures"><div class="section-heading-row"><h2 class="section-heading">Current position</h2><span class="overview-mode">'+esc(d.mode)+'</span></div><div class="stats">'+metrics.map(([key,title])=>'<div class="stat"><div class="stat-title">'+title+'</div><div class="stat-value">'+Number(d[key]).toLocaleString('en-IN')+'</div></div>').join('')+'</div></section><section aria-label="Operational areas"><h2 class="section-heading">Operational areas</h2><div class="module-grid">'+Object.entries(bankingPages).filter(([k,v])=>!['banking','customerAccess'].includes(k)&&allow(v.permission)).map(([k,v])=>'<button class="module-card" data-action="nav" data-id="'+k+'"><span class="module-icon" aria-hidden="true">'+v.icon+'</span><strong>'+esc(v.title)+'</strong><span>'+esc(v.intro)+'</span><b>Open '+esc(v.title)+' →</b></button>').join('')+'</div></section>';
+  const metricCards=metrics.map(([key,title])=>'<div class="stat"><div class="stat-title">'+title+'</div><div class="stat-value">'+Number(d[key]).toLocaleString('en-IN')+'</div></div>').join('');
+  return workspaceHero(getSession().user,allow)+customerSummary+customerActivity+(customer?'':'<section aria-label="Key figures"><div class="section-heading-row"><h2 class="section-heading">Current position</h2><span class="overview-mode">'+esc(d.mode)+'</span></div><div class="stats">'+metricCards+'</div></section>')+'<section aria-label="Banking areas"><h2 class="section-heading">'+(customer?'More ways to bank':'Your banking tools')+'</h2><div class="module-grid">'+Object.entries(bankingPages).filter(([k,v])=>!['banking','customerAccess'].includes(k)&&(allow(v.permission)||(k==='treasury'&&allow('TREASURY_LIQUIDITY_MANAGE')))).map(([k,v])=>'<button class="module-card" data-action="nav" data-id="'+k+'"><span class="module-icon" aria-hidden="true">'+icon(k)+'</span><strong>'+esc(customer?customerPageLabels[k]||v.title:v.title)+'</strong><span>'+esc(customer?customerPageDescriptions[k]||v.intro:v.intro)+'</span><b>Open '+esc(customer?customerPageLabels[k]||v.title:v.title)+' →</b></button>').join('')+'</div></section>';
  }
  if(page==='accounts'&&customer)return head+await customerAccountsScreen();
   if(page==='loans'&&customer)return head+await customerLoansScreen()+'<h2 class="section-heading">More loan operations</h2>'+await bankingOperationsScreen(page,config,customer,'');
@@ -297,18 +349,29 @@ export async function bankingScreen(page){
  if(page==='treasury'){
   reserveAccounts=await api('/treasury/reserve-accounts');
   if(reserveAccounts.length&&!reserveAccountId)await loadReserve(reserveAccounts[0].id);
-  if(!allow('TREASURY_LIQUIDITY_MANAGE')&&!checker())return head+treasuryPanel();
+  if(!allow('TREASURY_LIQUIDITY_MANAGE')&&!allow('TREASURY_RECONCILE')&&!checker())return head+treasuryPanel();
  }
   return bankingOperationsScreen(page,config,customer,head);
 }
 async function bankingOperationsScreen(page,config,customer,head){
  await loadContract();
+ let availabilityNotice='',paymentEnabled=true,consentEnabled=true;
+ if(page==='payments'){
+  try{paymentEnabled=(await api('/payments/availability')).initiationEnabled===true;}
+  catch(error){paymentEnabled=false;availabilityNotice='<div class="notice" role="alert">'+esc(errorText(error))+'</div>';}
+  if(!paymentEnabled)availabilityNotice+='<div class="notice">Payment simulation is disabled. Existing payment records remain available. Live payment networks are not connected.</div>';
+ }
+ if(page==='privacy'&&customer){
+  try{consentEnabled=(await api('/privacy/consents/availability')).decisionsEnabled===true;}
+  catch(error){consentEnabled=false;availabilityNotice='<div class="notice" role="alert">'+esc(errorText(error))+'</div>';}
+  if(!consentEnabled)availabilityNotice+='<div class="notice">Changes to privacy preferences are temporarily unavailable. Contact the bank. You can still read notices and review saved choices.</div>';
+ }
  const adminAccounts=page==='accounts'&&getSession()?.user?.roles?.includes('BANK_ADMIN');
- const choices=operations.filter(o=>config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&(!customer||customerWorkflows.has(o.method+' '+o.path))&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&!(adminAccounts&&o.method==='GET'&&o.path==='/accounts/by-number/{number}')&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path))&&!(page==='loans'&&!customer&&o.path==='/loans/offers/{id}/accept'));
- const initial={accounts:'/banking/accounts',transactions:'/banking/transactions',teller:'/teller/tills',beneficiaries:'/beneficiaries',payments:'/payments',treasury:'/treasury/reserve-accounts',loans:'/banking/facilities',currency:'/fx/rates',privacy:'/privacy/purposes'}[page];
+ const choices=operations.filter(o=>(paymentEnabled||!(o.method==='POST'&&/^\/payments\/(?:initiate|\{id\}\/(?:authorize-simulation|simulate-outcome))$/.test(o.path)))&&(consentEnabled||!(o.method==='POST'&&o.path.startsWith('/privacy/consents/')))&&config.prefix.some(p=>o.path===p||o.path.startsWith(p.endsWith('/')?p:p+'/'))&&workflowAllowed(o,customer)&&(page!=='transactions'||!transactionReadOperations.has(o.method+' '+o.path))&&!(adminAccounts&&o.method==='GET'&&o.path==='/accounts/by-number/{number}')&&(!checker()||o.method==='GET'||o.method==='POST'&&checkerDecisionPath.test(o.path))&&!(page==='loans'&&!customer&&o.path==='/loans/offers/{id}/accept')&&(page!=='treasury'||treasuryOperationAllowed(o)));
+ const initial={accounts:'/banking/accounts',transactions:'/banking/transactions',teller:'/teller/tills',beneficiaries:'/beneficiaries',payments:'/payments',treasury:'/treasury/reserve-accounts',loans:'/banking/facilities',currency:'/fx/rates',privacy:customer?'/privacy/purposes/available':'/privacy/purposes'}[page];
  const op=choices.find(o=>o.id===selected[page])||choices.find(o=>o.method==='GET'&&o.path===initial)||choices.find(o=>o.method==='GET'&&!o.path.includes('{'))||choices[0];
  if(!op){const empty='<div class="notice">No workflow is available in this deployment.</div>';return head+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',empty):empty);}
- const firstLoad=!selected[page];selected[page]=op.id;
+ const firstLoad=!selected[page];selected[page]=op.id;let initialError='';
  if(page==='teller'&&op.path==='/teller/tills'&&op.method==='POST'&&cashLedgerAccounts===null){
   try{
    try{cashLedgerAccounts=await api('/teller/cash-ledger-accounts');}
@@ -321,7 +384,10 @@ async function bankingOperationsScreen(page,config,customer,head){
   }
   catch(error){cashLedgerAccounts=null;cashLedgerError=errorText(error);}
  }
- if(firstLoad&&initial&&op.path===initial){try{results[page]=await api(initial);}catch{results[page]=null;}}
+ if(page==='privacy'&&customer){
+  try{customerPurposeNotices=await api('/privacy/purposes/available');if(op.path===initial)results[page]=customerPurposeNotices;}
+  catch(error){customerPurposeNotices=[];results[page]=null;initialError=errorText(error);}
+ }else if(firstLoad&&initial&&op.path===initial){try{results[page]=await api(initial);}catch(error){results[page]=null;initialError=errorText(error);}}
  const schema=schemaFor(op);
  const simpleInquiry=op.method==='GET'&&!Object.keys(schema.properties).length;
  const operationList=(items,group)=>items.length?'<div class="operation-group"><p class="operation-group-title">'+group+'</p>'+items.map(item=>'<button type="button" class="operation-choice '+(item.id===op.id?'active':'')+'" data-bank-operation="'+esc(item.id)+'" '+(item.id===op.id?'aria-current="true"':'')+'><span class="operation-choice-label">'+esc(item.title)+'</span></button>').join('')+'</div>':'';
@@ -335,12 +401,21 @@ async function bankingOperationsScreen(page,config,customer,head){
  const vaultNotice=page==='teller'&&op.path==='/teller/vaults'&&op.method==='POST'?'<div class="notice">For a new empty vault, enter counted cash 0. Select a dedicated active cash asset GL that has no postings or till assignment. The subsequent RBI cash delivery funds it.</div>':'';
  const reserveOpeningNotice=page==='treasury'&&op.path.startsWith('/treasury/reserve-openings')&&op.method==='POST'?'<div class="notice">Synthetic demo opening: a bank administrator records the opening capital evidence. A different checker confirms it. Confirmation posts a balanced reserve asset and capital journal and creates the first entry in the local RBI mirror. No RBI network or physical cash movement occurs at this step.</div>':'';
  const replenishNotice=page==='teller'&&op.path.endsWith('/replenish')&&op.method==='POST'?'<div class="notice">A second authorized person counts cash moved from the branch vault into this open till. The vault decreases and the till increases; the RBI reserve does not move again.</div>':'';
- const formPanel='<section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'INQUIRY':'MAINTENANCE')+'</p><h3>'+esc(op.title)+'</h3></div></div><div class="panel-body"><p class="hint">'+esc(op.description||'Complete the fields below. Your access is checked when you submit.')+'</p>'+cashLedgerNotice+tillOpeningNotice+deliveryNotice+vaultNotice+reserveOpeningNotice+replenishNotice+'<form id="bank-workflow"><div class="grid2">'+inputs(schema,'',schema.required)+'</div><p class="form-error" role="alert"></p><div class="form-actions"><button type="submit" class="btn primary" '+(noCashLedger?'disabled':'')+'>'+(op.method==='GET'?'View records':'Submit operation')+'</button></div></form></div></section>';
- const resultPanel='<section class="panel result-panel" '+(op.method!=='GET'&&!results[page]?'hidden':'')+'><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'RECORDS':'TRANSACTION OUTCOME')+'</p><h3>'+esc(op.method==='GET'?op.title:'Operation result')+'</h3></div>'+(simpleInquiry?'<button class="btn small" id="bank-refresh" type="button">Refresh</button>':'<span class="muted">'+esc(op.title)+'</span>')+'</div><div class="panel-body" id="bank-result">'+(results[page]?renderRows(results[page]):'<div class="empty"><h3>No result to display</h3><p>Run the selected operation to view its result.</p></div>')+'</div></section>';
+ const privacyReview=customer&&page==='privacy'&&op.path.endsWith('/decisions')?'<div class="span2"><div id="customer-notice-review"></div><label><input type="checkbox" name="noticeReviewed" required> I have read the privacy notice.</label></div>':'';
+ const formPanel='<section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'INQUIRY':'MAINTENANCE')+'</p><h3>'+esc(op.title)+'</h3></div></div><div class="panel-body"><p class="hint">'+esc(op.description||'Complete the fields below. Your access is checked when you submit.')+'</p>'+cashLedgerNotice+tillOpeningNotice+deliveryNotice+vaultNotice+reserveOpeningNotice+replenishNotice+'<form id="bank-workflow"><div class="grid2">'+inputs(schema,'',schema.required)+privacyReview+'</div><p class="form-error" role="alert"></p><div class="form-actions"><button type="submit" class="btn primary" '+(noCashLedger?'disabled':'')+'>'+(op.method==='GET'?'View records':'Submit operation')+'</button></div></form></div></section>';
+ const resultPanel='<section class="panel result-panel" '+(op.method!=='GET'&&!results[page]?'hidden':'')+'><div class="panel-heading"><div><p class="eyebrow">'+(op.method==='GET'?'RECORDS':'TRANSACTION OUTCOME')+'</p><h3>'+esc(op.method==='GET'?op.title:'Operation result')+'</h3></div>'+(simpleInquiry?'<button class="btn small" id="bank-refresh" type="button">Refresh</button>':'<span class="muted">'+esc(op.title)+'</span>')+'</div><div class="panel-body" id="bank-result">'+(initialError?'<p class="error-panel" role="alert">'+esc(initialError)+'</p>':results[page]?renderOperationResult(op,results[page]):'<div class="empty"><h3>No result to display</h3><p>Run the selected operation to view its result.</p></div>')+'</div></section>';
  const main=simpleInquiry?resultPanel:op.method==='GET'&&results[page]?resultPanel+formPanel:formPanel+resultPanel;
  const layout='<div class="operation-layout">'+catalog+'<div class="operation-main">'+main+'</div></div>';
-  const loanGuide=page==='loans'&&!customer?'<section class="panel"><div class="panel-heading"><h3>Loan workflow</h3></div><div class="panel-body"><p>Review the application, record assessment, have a different checker decide, issue the offer, let the customer accept it, verify the signed document, then convert and disburse.</p></div></section>':'';
-  return head+loanGuide+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',layout):page==='treasury'?treasuryPanel():'')+(page==='transactions'?'':layout);
+  const loanGuide=page==='loans'&&!customer?'<section class="panel"><div class="panel-heading"><h3>Loan workflow</h3></div><div class="panel-body"><p>Review the application, record assessment, have a different checker decide, issue the offer, let the customer accept it, verify the signed document, then convert and disburse. Close offers that expire without acceptance.</p></div></section>':'';
+  return head+availabilityNotice+loanGuide+(page==='transactions'?transactionTabs()+transactionTabPanel('operations',layout):page==='treasury'?treasuryPanel():'')+(page==='transactions'?'':layout);
+}
+function privacyNoticeLink(purpose){
+ try{const url=new URL(purpose.noticeUri);if(!['http:','https:'].includes(url.protocol))return '';return '<a href="'+esc(url.href)+'" target="_blank" rel="noopener noreferrer">'+esc(t('Read privacy notice'))+'</a>';}catch{return '';}
+}
+function renderOperationResult(op,value){
+ if(getSession()?.user?.userType==='CUSTOMER'&&op.method==='GET'&&op.path==='/reporting/statement-requests')return table(['Period','Format','Status','Download'],value.map(r=>[esc(formatDate(r.periodStart))+' – '+esc(formatDate(r.periodEnd)),esc(r.format),badge(r.status),r.status==='COMPLETED'&&r.statementId?['PDF','CSV','HTML'].map(format=>'<button type="button" class="btn small" data-customer-statement-download="'+esc(r.statementId)+'" data-format="'+format+'">'+format+'</button>').join(' '):'<span class="muted">'+esc(t('Not available'))+'</span>']),'No statement requests yet.',{mobileCards:true});
+ if(getSession()?.user?.userType==='CUSTOMER'&&op.path==='/privacy/purposes/available')return table(['Privacy choice','Notice version','Privacy notice'],value.map(p=>[esc(p.name),esc(p.version),privacyNoticeLink(p)||esc(t('Notice unavailable'))]),'No approved privacy notices are available yet.');
+ return renderRows(value);
 }
 async function loadReserve(id,offset=0){
  const [position,reconciliation,ledger]=await Promise.all([
@@ -352,6 +427,7 @@ async function loadReserve(id,offset=0){
  reservePosition=position;reserveReconciliation=reconciliation;reserveLedger=ledger;
 }
 async function customerAccountsScreen(){
+ const accountTable=(headers,rows,empty)=>table(headers,rows,empty,{mobileCards:true});
  const [accounts,availability,offerGroups,termGroups,termDeposits,facilities]=await Promise.all([
   api('/banking/accounts'),
   api('/auth/signup-availability'),
@@ -361,32 +437,33 @@ async function customerAccountsScreen(){
   api('/banking/facilities').catch(()=>[])
  ]);
  const offers=offerGroups.flatMap(group=>(group.offers||[]).filter(o=>['SAVINGS','CURRENT'].includes(o.product.PRODUCT_TYPE)).map(o=>({...o,cifId:group.cifId})));
- const existing=table(['Account','Product','Status','Action'],accounts.map(a=>[
+ const existing=accountTable(['Account','Product','Status','Action'],accounts.map(a=>[
   esc(a.ACCOUNT_NUMBER),esc(a.PRODUCT_NAME||a.PRODUCT_TYPE||a.CURRENCY_CODE),badge(a.ACCOUNT_STATUS),
   '<button class="btn small" type="button" data-customer-details="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'" data-product-name="'+esc(a.PRODUCT_NAME||a.PRODUCT_TYPE)+'" data-product-type="'+esc(a.PRODUCT_TYPE)+'">Details</button> '+
-  (availability.enabled&&a.ACCOUNT_STATUS==='PENDING_OPEN'&&a.CREATED_BY_USER_ID===getSession().user.userId?'<button class="btn small" type="button" data-customer-activate="'+esc(a.ACCOUNT_ID)+'">Try activation</button>':'')+
+  (a.ACCOUNT_STATUS==='PENDING_OPEN'&&a.CREATED_BY_USER_ID===getSession().user.userId?'<button class="btn small" type="button" data-customer-activate="'+esc(a.ACCOUNT_ID)+'">Try activation</button>':'')+
   (a.PRODUCT_TYPE==='SAVINGS'?'<button class="btn small" type="button" data-customer-interest="'+esc(a.ACCOUNT_ID)+'">Interest credits</button>':'')+
-  (a.ACCOUNT_OPERATION_MODE==='SELF_OPERATED'&&a.PRIMARY_CIF_ID&&getSession().user.cifIds.includes(a.PRIMARY_CIF_ID)&&['ACTIVE','DORMANT'].includes(a.ACCOUNT_STATUS)?' <button class="btn small" type="button" data-customer-nominees="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Nominees</button>':'')+
+  (a.ACCOUNT_OPERATION_MODE==='SELF_OPERATED'&&a.PRIMARY_CIF_ID&&getSession().user.cifIds.includes(a.PRIMARY_CIF_ID)&&['PENDING_OPEN','ACTIVE','DORMANT'].includes(a.ACCOUNT_STATUS)?' <button class="btn small" type="button" data-customer-nominees="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Nominees</button>':'')+
   (a.ACCOUNT_OPERATION_MODE==='SELF_OPERATED'&&a.PRIMARY_CIF_ID&&getSession().user.cifIds.includes(a.PRIMARY_CIF_ID)&&['ACTIVE','DORMANT'].includes(a.ACCOUNT_STATUS)?' <button class="btn small" type="button" data-customer-close="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Request closure</button>':'')+
   (a.ACCOUNT_STATUS==='ACTIVE'?' <button class="btn small" type="button" data-customer-limit="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Request limit change</button>':'')+
   (!['CANCELLED','CLOSED'].includes(a.ACCOUNT_STATUS)?' <button class="btn small" type="button" data-customer-issue="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Report issue</button>':'')+
   (a.ACCOUNT_OPERATION_MODE==='SELF_OPERATED'&&a.PRIMARY_CIF_ID&&getSession().user.cifIds.includes(a.PRIMARY_CIF_ID)&&a.ACCOUNT_STATUS==='ACTIVE'?' <button class="btn small" type="button" data-customer-safety="'+esc(a.ACCOUNT_ID)+'" data-account-number="'+esc(a.ACCOUNT_NUMBER)+'">Freeze / block debits</button>':'')+
   (a.ACCOUNT_STATUS==='CLOSING'?'<span class="muted">Closure pending bank review</span>':'')||'—'
  ]),'No accounts yet. Choose an eligible product below.');
- const available=!availability.enabled?'<div class="notice">Account opening is handled by a bank officer in this deployment.</div>':offerGroups.some(g=>g.offers===null)?'<div class="notice">Product offers are unavailable for your current access. Contact the bank to review your customer role.</div>':offers.length?table(['Product','Type','Version','Action'],offers.map(o=>[
+ const available=!availability.enabled?'<div class="notice">Account opening is handled by a bank officer in this deployment.</div>':offerGroups.some(g=>g.offers===null)?'<div class="notice">Product offers are unavailable for your current access. Contact the bank to review your customer role.</div>':offers.length?accountTable(['Product','Type','Version','Opening terms','Action'],offers.map(o=>[
   esc(o.product.PRODUCT_NAME),esc(o.product.PRODUCT_TYPE),esc(o.version.VERSION_NO),
+  'Minimum '+esc(formatAmount(o.rules?.account?.[0]?.MIN_OPENING_BALANCE??0,'INR'))+(o.rules?.account?.[0]?.NOMINEE_REQUIRED==='Y'?' · Nominee required':''),
   '<button class="btn small primary" type="button" data-customer-open="'+esc(o.cifId)+'" data-product="'+esc(o.product.PRODUCT_ID)+'" data-version="'+esc(o.version.PRODUCT_VERSION_ID)+'" data-product-name="'+esc(o.product.PRODUCT_NAME)+'">Open account</button>'
  ])):'<div class="empty">No eligible savings or current account products are available for your profile. Contact the bank to make a product available.</div>';
  const fixedOffers=termGroups.flatMap(group=>(group.offers||[]).filter(o=>o.product.PRODUCT_TYPE==='DEPOSIT'&&o.rules?.term?.length).map(o=>({...o,cifId:group.cifId})));
  const activeFunding=accounts.filter(a=>a.ACCOUNT_STATUS==='ACTIVE'&&['SAVINGS','CURRENT'].includes(a.PRODUCT_TYPE)&&a.CURRENCY_CODE==='INR');
  const fixedRows=termDeposits===null?'<div class="notice">Fixed deposits are not available until the deposit migration is installed.</div>':
-  table(['Deposit ID','Product','Principal','Rate','Term','Maturity','Status','Action'],termDeposits.map(t=>[esc(t.TERM_DEPOSIT_ID),esc(t.PRODUCT_NAME),esc(formatAmount(t.PRINCIPAL,'INR')),esc(t.ANNUAL_RATE_PCT)+'%',esc(t.TENURE_MONTHS)+' months',esc(formatDate(t.MATURITY_DATE)),badge(t.STATUS),'<button class="btn small" type="button" data-customer-term-details="'+esc(t.TERM_DEPOSIT_ID)+'">Details</button>']),'You have no fixed deposits yet.');
- const linkedLoans=table(['Facility','Branch','Status','Action'],facilities.map(f=>[
+  accountTable(['Deposit ID','Product','Principal','Rate','Term','Maturity','Status','Action'],termDeposits.map(t=>[esc(t.TERM_DEPOSIT_ID),esc(t.PRODUCT_NAME),esc(formatAmount(t.PRINCIPAL,'INR')),esc(t.ANNUAL_RATE_PCT)+'%',esc(t.TENURE_MONTHS)+' months',esc(formatDate(t.MATURITY_DATE)),badge(t.STATUS),'<button class="btn small" type="button" data-customer-term-details="'+esc(t.TERM_DEPOSIT_ID)+'">Details</button>']),'You have no fixed deposits yet.');
+ const linkedLoans=accountTable(['Facility','Branch','Status','Action'],facilities.map(f=>[
   esc(f.FACILITY_NUMBER),esc(f.BRANCH_CODE),badge(f.STATUS),
   '<button class="btn small" type="button" data-customer-linked-loan="'+esc(f.FACILITY_ID)+'">Details</button>'
  ]),'You have no linked loan facilities yet.');
  const fixedProducts=termDeposits===null?'<div class="notice">Fixed deposit opening is not enabled yet.</div>':termGroups.some(g=>g.offers===null)?'<div class="notice">Fixed deposit offers are unavailable for your profile.</div>':
-  fixedOffers.length?table(['Product','Rate','Amount range','Term','Action'],fixedOffers.map(o=>{
+  fixedOffers.length?accountTable(['Product','Rate','Amount range','Term','Action'],fixedOffers.map(o=>{
    const rule=o.rules.term[0],interest=o.rules.interest?.[0]||{};
    return [esc(o.product.PRODUCT_NAME),esc(interest.FIXED_RATE_PCT)+'%',
     esc(formatAmount(rule.MIN_DEPOSIT_AMOUNT,'INR'))+' – '+esc(formatAmount(rule.MAX_DEPOSIT_AMOUNT,'INR')),
@@ -471,12 +548,13 @@ async function customerLoansScreen(){
  const canApply=allow('LOAN_APPLY');
  const productRows=products.map(o=>{
   const rule=o.rules?.loan?.[0]||{};
-  const interest=o.rules?.interest?.find(r=>r.INTEREST_TYPE==='FIXED')||{};
+  const interest=o.rules?.interest?.find(r=>r.INTEREST_TYPE==='FIXED'&&['SIMPLE','REDUCING_BALANCE'].includes(r.INTEREST_METHOD)&&r.COMPOUND_FREQUENCY==='NONE'&&r.PAYOUT_FREQUENCY==='MONTHLY'&&r.ROUNDING_MODE==='HALF_EVEN'&&['ACT/365','ACT_365','ACTUAL_365','30/360'].includes(r.DAY_COUNT_BASIS))||{};
+  const serviceable=['FIXED','BOTH'].includes(rule.ALLOWED_INTEREST_TYPE)&&rule.REPAYMENT_FREQUENCY==='MONTHLY'&&rule.AMORTIZATION_METHOD==='REDUCING_BALANCE'&&['SINGLE','BOTH'].includes(rule.DISBURSEMENT_MODE)&&Number(rule.GRACE_DAYS||0)===0&&['SIMPLE','REDUCING_BALANCE'].includes(interest.INTEREST_METHOD)&&interest.COMPOUND_FREQUENCY==='NONE'&&interest.PAYOUT_FREQUENCY==='MONTHLY'&&interest.ROUNDING_MODE==='HALF_EVEN'&&['ACT/365','ACT_365','ACTUAL_365','30/360'].includes(interest.DAY_COUNT_BASIS)&&Number(rule.MIN_TENURE_MONTHS)<=600;
   const amount=rule.MIN_LOAN_AMOUNT==null?'—':esc(formatAmount(rule.MIN_LOAN_AMOUNT,'INR'))+' – '+esc(formatAmount(rule.MAX_LOAN_AMOUNT,'INR'));
   const tenure=rule.MIN_TENURE_MONTHS==null?'—':esc(rule.MIN_TENURE_MONTHS)+'–'+esc(rule.MAX_TENURE_MONTHS)+' months';
   const rate=interest.FIXED_RATE_PCT==null?'—':esc(interest.FIXED_RATE_PCT)+'%';
   return [esc(o.product.PRODUCT_NAME),esc(o.version.VERSION_NO),amount,tenure,rate,
-   canApply?'<button class="btn small primary" type="button" data-customer-loan-apply="'+esc(o.cifId)+'" data-product="'+esc(o.product.PRODUCT_ID)+'" data-version="'+esc(o.version.PRODUCT_VERSION_ID)+'" data-product-name="'+esc(o.product.PRODUCT_NAME)+'" data-loan-category="'+esc(rule.LOAN_CATEGORY||'PERSONAL')+'" data-min-amount="'+esc(rule.MIN_LOAN_AMOUNT||'')+'" data-max-amount="'+esc(rule.MAX_LOAN_AMOUNT||'')+'" data-min-tenure="'+esc(rule.MIN_TENURE_MONTHS||'')+'" data-max-tenure="'+esc(rule.MAX_TENURE_MONTHS||'')+'">Apply for a loan</button>':'—'];
+   canApply&&serviceable?'<button class="btn small primary" type="button" data-customer-loan-apply="'+esc(o.cifId)+'" data-product="'+esc(o.product.PRODUCT_ID)+'" data-version="'+esc(o.version.PRODUCT_VERSION_ID)+'" data-product-name="'+esc(o.product.PRODUCT_NAME)+'" data-loan-category="'+esc(rule.LOAN_CATEGORY||'PERSONAL')+'" data-min-amount="'+esc(rule.MIN_LOAN_AMOUNT||'')+'" data-max-amount="'+esc(rule.MAX_LOAN_AMOUNT||'')+'" data-min-tenure="'+esc(rule.MIN_TENURE_MONTHS||'')+'" data-max-tenure="'+esc(Math.min(Number(rule.MAX_TENURE_MONTHS)||600,600))+'">Apply for a loan</button>':canApply?'Contact the bank for this loan':'—'];
  });
  const offerStatus=offerGroups.some(g=>g.offers===null)?'<div class="notice">Loan products could not be loaded. Contact the bank if this continues.</div>':
   !canApply?'<div class="notice">Loan applications are not enabled for your customer role yet. Contact the bank.</div>':
@@ -539,6 +617,8 @@ function bindTransactionForms(){
 }
 export function bindBankingForms(){
  bindCreditCards(renderApp);
+ bindCustomerPayments(renderApp);
+ bindCustomerFx();
  bindTransactionForms();
  bindGlLedgerForms();
  const tabs=[...document.querySelectorAll('[data-transaction-tab]')];
@@ -555,15 +635,24 @@ export function bindBankingForms(){
  const search=document.querySelector('#operation-search');
  if(search)search.addEventListener('input',()=>{let visible=0;document.querySelectorAll('.operation-group').forEach(group=>{let count=0;group.querySelectorAll('.operation-choice').forEach(button=>{button.hidden=!button.textContent.toLowerCase().includes(search.value.trim().toLowerCase());if(!button.hidden)count++;});group.hidden=count===0;visible+=count;});document.querySelector('.operation-empty').hidden=visible>0;});
  const refresh=document.querySelector('#bank-refresh');
- if(refresh)refresh.addEventListener('click',async()=>{refresh.disabled=true;try{const op=operations.find(item=>item.id===selected[active]);results[active]=await api(op.path);document.querySelector('#bank-result').innerHTML=renderRows(results[active]);}catch(error){toast(errorText(error),true);}finally{refresh.disabled=false;}});
+ if(refresh)refresh.addEventListener('click',async()=>{refresh.disabled=true;try{const op=operations.find(item=>item.id===selected[active]);results[active]=await api(op.path);document.querySelector('#bank-result').innerHTML=renderOperationResult(op,results[active]);}catch(error){toast(errorText(error),true);}finally{refresh.disabled=false;}});
  const form=document.querySelector('#bank-workflow');
  if(form)form.dataset.requestKey=crypto.randomUUID();
+ if(form&&active==='privacy'&&getSession()?.user?.userType==='CUSTOMER'){
+  const purpose=form.querySelector('[name=purposeCode]'),notice=form.querySelector('[name=noticeSha256]'),review=form.querySelector('#customer-notice-review');
+  const update=()=>{const selected=customerPurposeNotices.find(p=>p.code===purpose?.value);if(notice)notice.value=selected?.noticeSha256||'';if(review)review.innerHTML=selected?privacyNoticeLink(selected)||'<p class="notice">'+esc(t('Notice unavailable'))+'</p>':'';const checked=form.querySelector('[name=noticeReviewed]');if(checked)checked.checked=false;};
+  purpose?.addEventListener('change',update);update();
+ }
  if(form)form.onsubmit=async e=>{
   e.preventDefault();if(!await validateJet(form))return;
   const button=form.querySelector('[type=submit]');button.disabled=true;const err=form.querySelector('.form-error');err.textContent='';
   try{
    const op=operations.find(o=>o.id===selected[active]),data=new FormData(form),schema=schemaFor(op);
    const values=await resolveAccountNumbers(collect(schema,data));
+   if(active==='privacy'&&getSession()?.user?.userType==='CUSTOMER'&&op.path.endsWith('/decisions')){
+    if(data.get('noticeReviewed')!=='on')throw new Error(t('Read the privacy notice before saving your choice.'));
+    if(!/^[0-9a-f]{64}$/i.test(String(data.get('noticeSha256')||'')))throw new Error(t('The approved notice is unavailable. Refresh this page or contact the bank.'));
+   }
    if(op.path.startsWith('/accounts/{id}'))values.id=await legacyAccountId(String(values.id||'').trim());
    let path=op.path;const query=new URLSearchParams();
    for(const p of op.parameters||[]){
@@ -576,7 +665,7 @@ export function bindBankingForms(){
    if(op.method==='POST'&&op.path==='/teller/vaults')cashLedgerAccounts=null;
    results[active]=response??{message:'Operation completed'};
    document.querySelector('.result-panel').hidden=false;
-   document.querySelector('#bank-result').innerHTML=renderRows(results[active]);
+   document.querySelector('#bank-result').innerHTML=renderOperationResult(op,results[active]);
    if(op.method!=='GET')toast('Operation completed');
   }catch(error){err.textContent=errorText(error);}finally{button.disabled=false;}
  };
@@ -585,6 +674,10 @@ export function bindBankingForms(){
  holderform?.querySelector('input[name="accountNumber"]')?.addEventListener('focus',loadAccountOptions,{once:true});
 }
 document.addEventListener('click',async e=>{
+ const statementDownload=e.target.closest('[data-customer-statement-download]');if(statementDownload){
+  statementDownload.disabled=true;try{await api('/reporting/statements/'+encodeURIComponent(statementDownload.dataset.customerStatementDownload)+'/download?format='+encodeURIComponent(statementDownload.dataset.format));}
+  catch(error){toast(errorText(error),true);}finally{statementDownload.disabled=false;}return;
+ }
  const accountDetails=e.target.closest('[data-customer-details]');if(accountDetails){
   accountDetails.disabled=true;try{await showCustomerAccountDetails(accountDetails);}
   catch(error){toast(errorText(error),true);}finally{accountDetails.disabled=false;}return;
@@ -650,17 +743,17 @@ document.addEventListener('click',async e=>{
     '</div><button type="button" class="btn small" data-remove-nominee>Remove nominee</button></div>';};
    const requestId=crypto.randomUUID();
    dialog('Nominees for '+nomineesButton.dataset.accountNumber,
-    rows+'<p class="hint">Saving replaces the full nominee list for this account. Shares must total 100%.</p><div id="nominee-editor">'+
+    rows+'<p class="hint">Saving replaces the full nominee list. Shares must total 100% when nominees are present. Some products require a nominee before activation.</p><div id="nominee-editor">'+
     (existing.length?existing.map(row).join(''):row())+'</div><button type="button" class="btn small" id="add-nominee">Add nominee</button>',async data=>{
      const nodes=[...document.querySelectorAll('#nominee-editor [data-nominee-key]')];
-     if(!nodes.length||nodes.length>5)throw new Error('Enter between one and five nominees.');
+     if(nodes.length>5)throw new Error('Enter no more than five nominees.');
      const nominees=nodes.map(node=>{const prefix='nominee.'+node.dataset.nomineeKey+'.';
       const value=name=>String(data.get(prefix+name)||'').trim();
       return {name:value('name'),relationship:value('relationship'),sharePercentage:value('sharePercentage'),
        dateOfBirth:value('dateOfBirth')||null,mobileNumber:value('mobileNumber')||null,
        guardianName:value('guardianName')||null,guardianRelationship:value('guardianRelationship')||null};});
      const shareUnits=nominees.map(n=>/^\d{1,3}(?:\.\d{1,2})?$/.test(n.sharePercentage)?Math.round(Number(n.sharePercentage)*100):NaN);
-     if(shareUnits.some(n=>!Number.isInteger(n)||n<=0)||shareUnits.reduce((sum,n)=>sum+n,0)!==10000)
+     if(nodes.length&&(shareUnits.some(n=>!Number.isInteger(n)||n<=0)||shareUnits.reduce((sum,n)=>sum+n,0)!==10000))
       throw new Error('Nominee shares must total exactly 100%.');
      await api('/accounts/self/'+nomineesButton.dataset.customerNominees+'/nominees',{method:'PUT',body:{requestId,nominees}});
      toast('Nominees saved.');await renderApp();return true;
@@ -733,25 +826,26 @@ document.addEventListener('click',async e=>{
     api('/loans/applications/'+id),api('/loans/applications/'+id+'/offers'),api('/banking/accounts')
    ]);
    const issued=items.filter(o=>o.STATUS==='ISSUED'&&(!o.EXPIRES_AT||Date.parse(o.EXPIRES_AT)>Date.now()));
-   const ownAccounts=accounts.filter(a=>a.PRIMARY_CIF_ID===application.cifId&&a.ACCOUNT_STATUS==='ACTIVE'&&a.CURRENCY_CODE==='INR');
-   const rows=items.map(o=>[esc(o.OFFER_NUMBER),badge(o.STATUS),esc(formatAmount(o.SANCTIONED_AMOUNT,'INR')),esc(o.SANCTIONED_TENURE_MONTHS)+' months',esc(formatDecimal(o.ANNUAL_RATE_PCT))+'%',esc(formatDate(o.EXPIRES_AT)),
-    issued.some(x=>x.OFFER_ID===o.OFFER_ID)?'<button class="btn small primary" type="button" data-customer-loan-accept="'+esc(o.OFFER_ID)+'" data-application="'+esc(id)+'">Accept offer</button>':'—']);
+   const ownAccounts=accounts.filter(a=>a.PRIMARY_CIF_ID===application.cifId&&a.ACCOUNT_STATUS==='ACTIVE'&&a.CURRENCY_CODE==='INR'&&['SELF_OPERATED','ANYONE'].includes(a.ACCOUNT_OPERATION_MODE));
+   const rows=items.map(o=>[esc(o.OFFER_NUMBER),badge(o.STATUS==='ISSUED'&&o.EXPIRES_AT&&Date.parse(o.EXPIRES_AT)<=Date.now()?'EXPIRED':o.STATUS),esc(formatAmount(o.SANCTIONED_AMOUNT,'INR')),esc(o.SANCTIONED_TENURE_MONTHS)+' months',esc(formatDecimal(o.ANNUAL_RATE_PCT))+'%',esc(formatDate(o.EXPIRES_AT)),
+    (issued.some(x=>x.OFFER_ID===o.OFFER_ID)||o.STATUS==='ACCEPTED'&&application.status==='ACCEPTED')?'<button class="btn small primary" type="button" data-customer-loan-accept="'+esc(o.OFFER_ID)+'" data-application="'+esc(id)+'">'+(o.STATUS==='ACCEPTED'?'Change accounts':'Accept offer')+'</button>':'—']);
    dialog('Offers for '+application.number,table(['Offer','Status','Approved amount','Term','Annual rate','Expires','Action'],rows,'No offer has been issued yet. The bank must assess and approve your application first.')+
-    (issued.length&&!ownAccounts.length?'<p class="notice">Open and activate an INR account in your name before accepting an offer.</p>':''));
+    ((issued.length||items.some(o=>o.STATUS==='ACCEPTED'&&application.status==='ACCEPTED'))&&!ownAccounts.length?'<p class="notice">Open and activate an INR account in your name before choosing loan accounts.</p>':'')+
+    (items.some(o=>o.STATUS==='ISSUED'&&o.EXPIRES_AT&&Date.parse(o.EXPIRES_AT)<=Date.now())?'<p class="notice">This offer has expired. You can submit a new application.</p>':''));
   }catch(error){toast(errorText(error),true);}finally{offers.disabled=false;}return;
  }
  const accept=e.target.closest('[data-customer-loan-accept]');if(accept){
   const offerId=Number(accept.dataset.customerLoanAccept),applicationId=Number(accept.dataset.application);
   try{
    const [application,accounts,offers]=await Promise.all([api('/loans/applications/'+applicationId),api('/banking/accounts'),api('/loans/applications/'+applicationId+'/offers')]);
-   const offer=offers.find(o=>Number(o.OFFER_ID)===offerId&&o.STATUS==='ISSUED'&&(!o.EXPIRES_AT||Date.parse(o.EXPIRES_AT)>Date.now()));
+   const offer=offers.find(o=>Number(o.OFFER_ID)===offerId&&(o.STATUS==='ISSUED'&&(!o.EXPIRES_AT||Date.parse(o.EXPIRES_AT)>Date.now())||o.STATUS==='ACCEPTED'&&application.status==='ACCEPTED'));
    if(!offer)throw new Error('This offer is no longer available. Reopen the offers list.');
-   const own=accounts.filter(a=>a.PRIMARY_CIF_ID===application.cifId&&a.ACCOUNT_STATUS==='ACTIVE'&&a.CURRENCY_CODE==='INR');
+   const own=accounts.filter(a=>a.PRIMARY_CIF_ID===application.cifId&&a.ACCOUNT_STATUS==='ACTIVE'&&a.CURRENCY_CODE==='INR'&&['SELF_OPERATED','ANYONE'].includes(a.ACCOUNT_OPERATION_MODE));
    if(!own.length)throw new Error('Open and activate an INR account in your name before accepting this offer.');
    const options=own.map(a=>({value:String(a.ACCOUNT_ID),label:a.ACCOUNT_NUMBER}));
-   dialog('Accept loan offer', '<p class="hint">Offer '+esc(offer.OFFER_NUMBER)+': '+esc(formatAmount(offer.SANCTIONED_AMOUNT,'INR'))+' for '+esc(offer.SANCTIONED_TENURE_MONTHS)+' months at '+esc(formatDecimal(offer.ANNUAL_RATE_PCT))+'% annual interest. Choose where the loan will be paid and which account will repay it.</p><div class="grid2">'+select('Disbursement account','disbursementAccountId',options)+select('Repayment account','repaymentAccountId',options)+'</div>',async data=>{
+   dialog(offer.STATUS==='ACCEPTED'?'Change loan accounts':'Accept loan offer', '<p class="hint">Offer '+esc(offer.OFFER_NUMBER)+': '+esc(formatAmount(offer.SANCTIONED_AMOUNT,'INR'))+' for '+esc(offer.SANCTIONED_TENURE_MONTHS)+' months at '+esc(formatDecimal(offer.ANNUAL_RATE_PCT))+'% annual interest. Choose where the loan will be paid and which account will repay it.</p><div class="grid2">'+select('Disbursement account','disbursementAccountId',options)+select('Repayment account','repaymentAccountId',options)+'</div>',async data=>{
     await api('/loans/offers/'+offerId+'/accept',{method:'POST',body:{disbursementAccountId:Number(data.get('disbursementAccountId')),repaymentAccountId:Number(data.get('repaymentAccountId'))}});
-    toast('Offer accepted. The bank will complete documentation and disbursement.');await renderApp();return true;
+    toast(offer.STATUS==='ACCEPTED'?'Loan accounts updated.':'Offer accepted. The bank will complete documentation and disbursement.');await renderApp();return true;
    });
   }catch(error){toast(errorText(error),true);}return;
  }

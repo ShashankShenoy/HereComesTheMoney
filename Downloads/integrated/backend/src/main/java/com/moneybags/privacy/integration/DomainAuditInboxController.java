@@ -33,7 +33,8 @@ public class DomainAuditInboxController {
     @Operation(summary = "Consume a source audit event through the Module 9 inbox")
     public Map<String, String> receive(@Valid @RequestBody DomainEvent event) {
         if (!event.eventId().equals(event.audit().sourceEventId())
-                || !event.sourceService().equals(event.audit().sourceService())) {
+                || !event.sourceService().equals(event.audit().sourceService())
+                || !event.eventType().equals(event.audit().eventType())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INBOX_SOURCE_MISMATCH",
                     "Envelope and audit source identifiers must match.");
         }
@@ -42,7 +43,10 @@ public class DomainAuditInboxController {
                  WHERE SOURCE_SERVICE=:source AND EVENT_ID=:id
                 """).param("source", event.sourceService()).param("id", event.eventId())
                 .query((rs, n) -> rs.getObject(1)).optional();
-        if (received.isPresent()) return Map.of("status", "DUPLICATE");
+        if (received.isPresent()) {
+            audit.ingest(event.audit());
+            return Map.of("status", "DUPLICATE");
+        }
         jdbc.sql("""
                 INSERT INTO M09_PRIVACY_INBOX_EVENT
                 (EVENT_ID,SOURCE_SERVICE,EVENT_TYPE,RECEIVED_AT)

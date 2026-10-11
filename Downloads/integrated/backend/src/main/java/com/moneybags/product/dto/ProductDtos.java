@@ -80,6 +80,7 @@ public final class ProductDtos {
     @NotBlank @Size(max = 40) String channel,
     OffsetDateTime at,
     @DecimalMin("0") BigDecimal openingAmount,
+    @DecimalMin("0") BigDecimal depositAmount,
     @DecimalMin("0") BigDecimal loanAmount,
     @Min(1) Integer tenureMonths
   ) {}

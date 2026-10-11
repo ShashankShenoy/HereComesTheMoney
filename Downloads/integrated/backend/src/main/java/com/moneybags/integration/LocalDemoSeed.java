@@ -26,6 +26,14 @@ public class LocalDemoSeed implements ApplicationRunner {
   String role=db.queryForObject("SELECT ROLE_ID FROM M01_IAM_ROLE WHERE ROLE_CODE='BANK_ADMIN'",String.class);
   String checkerRole=db.queryForObject("SELECT ROLE_ID FROM M01_IAM_ROLE WHERE ROLE_CODE=?",String.class,com.moneybags.iam.service.BankRolePolicy.CHECKER);
   String checker=user("checker","EMPLOYEE",checkerRole,"GLOBAL");
+  // Synthetic approved policy lets the local consent journey retain its audit evidence.
+  db.update("""
+   INSERT INTO M09_PRIVACY_RETENTION_SCHEDULE
+    (RETENTION_SCHEDULE_ID,OWNING_SERVICE,RECORD_CATEGORY,POLICY_VERSION,
+     RETENTION_START_EVENT,RETENTION_MONTHS,DISPOSAL_ACTION,STATUS,EFFECTIVE_FROM,
+     APPROVED_BY,APPROVED_AT,CREATED_BY)
+   VALUES (?,'M09_PRIVACY','AUDIT_EVENT',1,'OCCURRED_AT',12,'DELETE','ACTIVE',?,?,?,?)
+   """,UUID.randomUUID().toString(),OffsetDateTime.now().minusDays(1),checker,OffsetDateTime.now(),admin);
   String customerRole=UUID.randomUUID().toString();
   db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,'RETAIL_CUSTOMER','Retail customer','ACTIVE','N')",customerRole);
   for(String code:List.of("ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE","STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW","FX_READ","LOAN_READ","LOAN_APPLY","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY"))

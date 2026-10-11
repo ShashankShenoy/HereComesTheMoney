@@ -50,7 +50,8 @@ public class EvidenceExportController {
                 .param("key", ctx.idempotencyKey()).query(String.class).optional();
         if (prior.isPresent()) {
             var existing = get(prior.get());
-            if (!java.util.Objects.equals(existing.caseId(), input.caseId())
+            if (!java.util.Objects.equals(existing.requestedBy(), ctx.actorId())
+                    || !java.util.Objects.equals(existing.caseId(), input.caseId())
                     || !existing.reason().equals(input.reason())) {
                 throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
                         "Idempotency key belongs to a different export request.");
@@ -153,10 +154,11 @@ public class EvidenceExportController {
 
     public record ExportChanged(String id, String caseId, String status) {}
 
-    public record ExportRequest(String caseId, @NotBlank @Size(max=500) String reason) {}
-    public record PackageReference(@NotBlank String manifestUri,
+    public record ExportRequest(@NotBlank @Size(max=36) String caseId,
+                                @NotBlank @Size(max=500) String reason) {}
+    public record PackageReference(@NotBlank @Size(max=1000) String manifestUri,
                                    @NotBlank @Pattern(regexp="[0-9a-fA-F]{64}") String manifestSha256,
-                                   @NotBlank String packageUri,
+                                   @NotBlank @Size(max=1000) String packageUri,
                                    @NotBlank @Pattern(regexp="[0-9a-fA-F]{64}") String packageSha256,
                                    @NotNull OffsetDateTime expiresAt) {}
     public record EvidenceExport(String id, String caseId, String reference, String status,

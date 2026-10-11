@@ -32,10 +32,18 @@ public class LegalHoldService {
         var existing = repository.findByIdempotencyKey(context.idempotencyKey());
         if (existing.isPresent()) {
             var prior = existing.get();
-            if (!Objects.equals(prior.authorityReference(), command.authorityReference())
+            if (!Objects.equals(prior.createdBy(), context.actorId())
+                    || !Objects.equals(prior.authorityReference(), command.authorityReference())
+                    || !Objects.equals(prior.reason(), command.reason())
+                    || !Objects.equals(prior.subjectService(), command.subjectService())
                     || !Objects.equals(prior.subjectExternalId(), command.subjectExternalId())
+                    || !Objects.equals(prior.targetService(), command.targetService())
+                    || !Objects.equals(prior.targetResourceType(), command.targetResourceType())
                     || !Objects.equals(prior.targetExternalId(), command.targetExternalId())
-                    || !Objects.equals(prior.recordCategory(), command.recordCategory())) {
+                    || !Objects.equals(prior.recordCategory(), command.recordCategory())
+                    || !Objects.equals(prior.recordFromAt(), command.recordFromAt())
+                    || !Objects.equals(prior.recordToAt(), command.recordToAt())
+                    || !Objects.equals(prior.reviewDueAt(), command.reviewDueAt())) {
                 throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
                         "Idempotency key belongs to a different hold request.");
             }
@@ -44,6 +52,17 @@ public class LegalHoldService {
         if (command.subjectExternalId() == null && command.targetExternalId() == null
                 && command.recordCategory() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "HOLD_SCOPE_REQUIRED", "Specify subject, resource or category.");
+        }
+        if (command.recordFromAt() != null && command.recordToAt() != null
+                && command.recordToAt().isBefore(command.recordFromAt())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "HOLD_RANGE_INVALID", "Hold record range is invalid.");
+        }
+        if ((command.subjectExternalId() != null && command.subjectService() == null)
+                || (command.targetResourceType() != null && command.targetService() == null)
+                || (command.targetExternalId() != null
+                    && (command.targetService() == null || command.targetResourceType() == null))) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "HOLD_SCOPE_INVALID",
+                    "Scoped identifiers require their owning service and resource type.");
         }
         var id = UUID.randomUUID().toString();
         var hold = new LegalHold(id, "HOLD-" + id.substring(0, 8).toUpperCase(),
@@ -101,7 +120,14 @@ public class LegalHoldService {
     /** Lists the hold approval and review queue. */
     @Transactional(readOnly = true)
     public PageResponse<LegalHold> list(String status, int page, int size) {
-        return new PageResponse<>(repository.findAll(status, page * size, size), page, size, repository.count(status));
+        return new PageResponse<>(repository.findAll(status, pageOffset(page, size), size), page, size, repository.count(status));
+    }
+
+    private int pageOffset(int page, int size) {
+        try { return Math.multiplyExact(page, size); }
+        catch (ArithmeticException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_OUT_OF_RANGE", "Requested page is too large.");
+        }
     }
 
     private void conflict() {

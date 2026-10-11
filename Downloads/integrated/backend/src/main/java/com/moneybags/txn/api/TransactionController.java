@@ -36,6 +36,14 @@ public class TransactionController {
         return banking.transfer(request);
     }
 
+    /** Resolves account numbers inside the authorized transfer, without exposing recipient details. */
+    @Operation(summary = "Send an internal transfer by account number")
+    @PostMapping("/transfers/by-number")
+    @PreAuthorize("hasAuthority('SCOPE_m05.transfer')")
+    public TransactionView transferByNumber(@Valid @RequestBody Contracts.NumberTransferRequest request) {
+        return banking.transferByNumber(request);
+    }
+
     /** Reads a Module 5 transaction and its first linked journal. */
     @Operation(summary = "Get a transaction")
     @GetMapping("/{id}")

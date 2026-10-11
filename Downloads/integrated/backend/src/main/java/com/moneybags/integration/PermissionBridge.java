@@ -24,7 +24,8 @@ public final class PermissionBridge {
  Map.entry("PAYMENT_CREATE",List.of("SCOPE_M06_PAYMENT_WRITE","SCOPE_M06_MAKER")),
  Map.entry("PAYMENT_APPROVE",List.of("SCOPE_M06_CHECKER")),
  Map.entry("PAYMENT_OPERATE",List.of("SCOPE_M06_OPERATIONS")),
- Map.entry("PAYMENT_RECONCILE",List.of("SCOPE_M06_RECONCILE")));
+ Map.entry("PAYMENT_RECONCILE",List.of("SCOPE_M06_RECONCILE")),
+ Map.entry("TREASURY_RECONCILE",List.of("SCOPE_M06_TREASURY")));
  public static List<SimpleGrantedAuthority> authorities(UserPrincipal user) {
  var result=new ArrayList<SimpleGrantedAuthority>();
  user.permissions().forEach(p->ALIASES.getOrDefault(p,List.of()).stream().filter(a->!a.startsWith("ROLE_ACCOUNT_")||!"CUSTOMER".equals(user.userType())).forEach(a->result.add(new SimpleGrantedAuthority(a))));

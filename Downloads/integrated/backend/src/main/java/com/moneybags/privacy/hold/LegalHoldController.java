@@ -77,11 +77,11 @@ public class LegalHoldController {
         return service.evaluate(input.toTarget());
     }
 
-    public record HoldRequest(@NotBlank String authorityReference,
-                              @NotBlank String reason, String subjectService,
-                              String subjectExternalId, String targetService,
-                              String targetResourceType, String targetExternalId,
-                              String recordCategory, OffsetDateTime recordFromAt,
+    public record HoldRequest(@NotBlank @Size(max=200) String authorityReference,
+                              @NotBlank String reason, @Size(max=120) String subjectService,
+                              @Size(max=100) String subjectExternalId, @Size(max=120) String targetService,
+                              @Size(max=80) String targetResourceType, @Size(max=100) String targetExternalId,
+                              @Size(max=100) String recordCategory, OffsetDateTime recordFromAt,
                               OffsetDateTime recordToAt, @NotNull OffsetDateTime reviewDueAt) {
         LegalHoldService.CreateHold toCommand() {
             return new LegalHoldService.CreateHold(authorityReference, reason, subjectService,
@@ -90,7 +90,7 @@ public class LegalHoldController {
         }
     }
 
-    public record ReleaseRequest(@NotBlank String authorityReference) {}
+    public record ReleaseRequest(@NotBlank @Size(max=200) String authorityReference) {}
 
     public record HoldTargetRequest(String subjectService, String subjectExternalId,
                                     @NotBlank String targetService, @NotBlank String resourceType,

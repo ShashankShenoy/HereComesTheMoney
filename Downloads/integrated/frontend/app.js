@@ -1,3 +1,4 @@
+import {publicHeader,publicStory,publicProducts,customerPageLabels,entryContext,workspacePath,workspaceRole,icon,accessHeader,accessStory,accessHelp} from './design.js';
 import {bankingPages,bankingScreen,configureBanking,bindBankingForms} from './banking.js';
 import {api,login,logout,refresh,getSession,saveSession} from './api.js';
 import {esc,date,badge,field,select,reason,table,action,dialog,closeDialog,toast,errorText} from './ui.js';
@@ -16,6 +17,7 @@ watchTranslations();
 const state={page:'banking',users:[],roles:[],permissions:[],requests:[],menus:[],userPage:0,search:'',status:'',detail:null,roleDetail:null,requestDetail:null,render:0};
 const titles={dashboard:'Overview',users:'Users',roles:'Roles & permissions',access:'Access requests',audit:'Audit trail',security:'My security',customers:'Customers & KYC',products:'Product master',assistant:'Ask Moneybags'};
 Object.entries(bankingPages).forEach(([k,v])=>titles[k]=v.title);
+const displayTitle=page=>getSession()?.user?.userType==='CUSTOMER'?(customerPageLabels[page]||titles[page]):titles[page];
 const icons={dashboard:'▦',users:'♙',roles:'◇',access:'⇄',audit:'≡',security:'⌑',customers:'♧',products:'▣',assistant:'✦'};
 Object.entries(bankingPages).forEach(([k,v])=>icons[k]=v.icon);
 const can=permission=>getSession()?.user?.permissions?.includes(permission);
@@ -28,18 +30,39 @@ const tags=values=>values.map(v=>`<span class="tag">${esc(v)}</span>`).join('')|
 const router=await new Promise((resolve,reject)=>window.require(['ojs/ojcorerouter','ojs/ojurlparamadapter'],(CoreRouter,UrlParamAdapter)=>resolve(new CoreRouter([{path:'',redirect:'banking'},...Object.keys(titles).map(path=>({path}))],{urlAdapter:new UrlParamAdapter()})),reject));
 router.currentState.subscribe(({state:route})=>{if(!route)return;state.page=route.path==='assistant'?'banking':route.path;if(route.path==='assistant')openAssistant();if(document.querySelector('#content'))render();});
 await router.sync();
+const requestedProduct=entryContext(location.pathname,location.search).product;
+if(requestedProduct&&!getSession())state.page=requestedProduct;
 const head=(title,subtitle,button='')=>`<div class="page-heading"><div><p class="eyebrow">IDENTITY & ACCESS</p><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${button}</div>`;
 const panel=(title,body,buttons='')=>`<section class="panel"><div class="panel-heading"><h3>${esc(title)}</h3>${buttons}</div>${body}</section>`;
 const detail=(name,value)=>`<div><dt>${esc(name)}</dt><dd>${esc(value??'—')}</dd></div>`;
 function signIn(message=''){
   if(!getSession())resetAssistant();
-  root.innerHTML=`<main class="login-layout"><section class="login-story"><div class="login-language">${languagePicker()}</div><div class="logo"><img src="/favicon.svg" alt="">Moneybags</div><div class="login-story-main"><p class="eyebrow">INTEGRATED BANKING</p><h1>Banking workspace</h1><p>Controlled access to customer, account, payment, lending, and administrative operations.</p><div class="login-features"><span>Role-based access</span><span>Independent review</span><span>Audit history</span></div></div><div class="login-story-footer">MONEYBAGS &nbsp; / &nbsp; AUTHORIZED ACCESS</div></section><section class="login-form-side"><div class="login-card"><p class="eyebrow">MONEYBAGS</p><h2>Sign in</h2><p>Enter your credentials to access the banking workspace.</p><form id="login-form"><label class="field">Username<input name="username" autocomplete="username" required maxlength="120" placeholder="Enter your username"></label><label class="field">Password<input name="password" type="password" autocomplete="current-password" required maxlength="72" placeholder="Enter your password"></label><label class="field">Authenticator code <span class="muted">Optional unless MFA is enabled</span><input name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="Six-digit code"></label><p class="form-error" role="alert">${esc(message)}</p><button class="btn primary" type="submit">Sign in</button></form><div class="login-note">Use your issued credentials. Contact your administrator if you need access.</div><button class="btn signup-link" id="signup-link" type="button" hidden>Create a customer account</button></div></section></main>`;
+  const entry=entryContext(location.pathname,location.search);
+  const signedOut=message==='You have signed out.';
+  const formTitle=entry.employee?'Employee sign-in':'Customer sign-in';
+  const header=entry.compact?accessHeader(entry.employee):publicHeader();
+  const story=entry.compact?accessStory(entry.employee,entry.product):publicStory();
+  root.innerHTML=`<a class="skip-link" href="#login-form">Skip to sign in</a>${header}<main class="login-layout ${entry.compact?'access-layout':''} ${entry.employee?'employee-layout':''}"><section class="login-story">${story}</section><section class="login-form-side"><div class="login-card"><p class="eyebrow">${entry.employee?'AUTHORIZED BANK STAFF':'PERSONAL BANKING'}</p><h2>${formTitle}</h2><p>${entry.employee?'Use your bank-issued username and password. Your account determines your role and available work.':'Welcome back. Access your accounts and continue your plans.'}</p>${signedOut?'<p class="signed-out-note" role="status">You have signed out.</p>':''}<form id="login-form"><label class="field">Username<input name="username" autocomplete="username" required maxlength="120" placeholder="Enter your username"></label><label class="field">Password<input name="password" type="password" autocomplete="current-password" required maxlength="72" placeholder="Enter your password"></label><details class="login-mfa"><summary>I use an authenticator</summary><label class="field">Authenticator code<input name="otp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="Six-digit code"></label><p>Enter the current six-digit code from your authenticator app.</p></details><p class="form-error" role="alert">${signedOut?'':esc(message)}</p><button class="btn primary" type="submit">${entry.employee?'Sign in to workspace':'Sign in'}</button></form>${accessHelp(entry.employee)}${entry.employee?'<div class="login-note">Customer accounts belong in personal banking. <a href="/login">Go to customer sign-in →</a></div>':'<div class="login-note"><span id="signup-status">Checking customer sign-up availability…</span><button class="btn signup-link" id="signup-link" type="button" hidden>Create a customer account</button><a class="employee-entry-link" href="/employee/login">Bank employee? Sign in here →</a></div>'}</div></section></main><div class="login-language-bar">${languagePicker()}</div>${entry.compact?'<footer class="entry-footer"><a href="/">Back to Moneybags</a><span>'+ (entry.employee?'Employee access is managed by your bank.':'Products and eligibility depend on your banking profile.')+'</span></footer>':publicProducts()}`;
   localize(root);
   document.querySelector('#login-form').onsubmit=async event=>{
-    event.preventDefault();if(!await validateJet(event.target))return;const button=event.target.querySelector('button');button.disabled=true;
-    const values=new FormData(event.target);try{await login(values.get('username').trim(),values.get('password'),values.get('otp'));await start();}catch(error){event.target.querySelector('.form-error').textContent=errorText(error);}finally{button.disabled=false;}
+    event.preventDefault();if(!await validateJet(event.target))return;
+    const form=event.target,button=form.querySelector('button'),label=button.textContent;
+    button.disabled=true;button.textContent=t('Signing in…');form.setAttribute('aria-busy','true');form.querySelector('.form-error').textContent='';
+    const values=new FormData(form);
+    try{await login(values.get('username').trim(),values.get('password'),values.get('otp'));await start();}
+    catch(error){
+      form.querySelector('.form-error').textContent=errorText(error);
+      if(error.code?.startsWith('MFA_')){form.querySelector('.login-mfa').open=true;form.querySelector('.login-mfa input:not([hidden])')?.focus();}
+    }finally{button.disabled=false;button.textContent=label;form.removeAttribute('aria-busy');}
   };
-  api('/auth/signup-availability').then(value=>{const link=document.querySelector('#signup-link');if(link&&value.enabled){link.hidden=false;link.onclick=showSignup;}}).catch(()=>{});
+  if(!entry.employee){
+    const link=document.querySelector('#signup-link'),status=document.querySelector('#signup-status');
+    api('/auth/signup-availability').then(value=>{
+      if(!link.isConnected)return;
+      status.textContent=value.enabled?'New to Moneybags? Start with a customer profile.':'Online sign-up is unavailable. Contact your bank to open a customer profile.';
+      if(value.enabled){link.hidden=false;link.onclick=showSignup;}
+    }).catch(()=>{if(status.isConnected)status.textContent='Sign-up availability could not be checked. Try again later or contact your bank.';});
+  }
   enhanceForms(root).catch(error=>toast(errorText(error),true));
 }
 function showSignup(){
@@ -64,26 +87,37 @@ function shell(){
   if(user.userType!=='CUSTOMER'&&can('CIF_READ')&&!nav.some(n=>n.page==='customers'))nav.push({page:'customers',label:'Customers & KYC'});
   if(can('PRODUCT_READ')&&!nav.some(n=>n.page==='products'))nav.push({page:'products',label:'Product master'});
   nav=nav.filter(n=>n.page!=='assistant'&&(user.userType!=='CUSTOMER'||n.page!=='treasury'));
-  for(const [page,config] of Object.entries(bankingPages))if((page==='treasury'?user.userType!=='CUSTOMER':page==='customerAccess'||!config.permission||can(config.permission))&&!nav.some(n=>n.page===page))nav.push({page,label:config.title});
+  for(const [page,config] of Object.entries(bankingPages))if((page==='treasury'?user.userType!=='CUSTOMER':page==='customerAccess'||page==='beneficiaries'&&can('PAYMENT_CREATE')||!config.permission||can(config.permission))&&!nav.some(n=>n.page===page))nav.push({page,label:config.title});
   const navigationOrder=['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','creditCards','loans','treasury','statements','currency','customers','products','privacy','dashboard','users','roles','access','audit','security'];
   nav.sort((a,b)=>navigationOrder.indexOf(a.page)-navigationOrder.indexOf(b.page));
   if(!nav.some(n=>n.page===state.page))state.page=nav[0]?.page||'security';
-  const navigationSections=[
+  const navigationSections=user.userType==='CUSTOMER'?[['Everyday banking',['banking','accounts','transactions','payments','beneficiaries','creditCards','loans','statements','currency']],['Explore & manage',['products','privacy','customerAccess','security']]]:[
     ['Banking',['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','creditCards','loans','treasury','statements','currency']],
     ['Customers and products',['customers','products','privacy']],
     ['Administration',['dashboard','users','roles','access','audit','security']]
   ];
   const navHtml=navigationSections.map(([section,pages])=>{
     const entries=nav.filter(n=>pages.includes(n.page));
-    return entries.length?`<div class="nav-section"><p class="nav-heading">${section}</p>${entries.map(n=>`<button data-action="nav" data-id="${esc(n.page)}" class="${state.page===n.page?'active':''}" ${state.page===n.page?'aria-current="page"':''}><span>${esc(user.userType==='CUSTOMER'&&n.page==='products'?'Available products':titles[n.page]||n.label)}</span></button>`).join('')}</div>`:'';
+    return entries.length?`<div class="nav-section"><p class="nav-heading">${section}</p>${entries.map(n=>`<button data-action="nav" data-id="${esc(n.page)}" class="${state.page===n.page?'active':''}" ${state.page===n.page?'aria-current="page"':''}><span class="nav-glyph">${icon(n.page)}</span><span>${esc(displayTitle(n.page)||n.label)}</span></button>`).join('')}</div>`:'';
   }).join('');
-  root.innerHTML=`<div class="layout"><aside class="sidebar"><div class="logo"><img src="/favicon.svg" alt="">Moneybags</div><p class="eyebrow">BANKING WORKSPACE</p><nav class="nav" aria-label="Main navigation">${navHtml}</nav><div class="sidebar-foot"><strong>Moneybags</strong><br>Integrated banking workspace</div></aside><main class="main"><header class="topbar"><div class="breadcrumb">Workspace &nbsp; / &nbsp; <strong id="crumb">${esc(user.userType==='CUSTOMER'&&state.page==='products'?'Available products':titles[state.page])}</strong></div><div class="identity">${languagePicker()}<span class="avatar">${esc(user.username.slice(0,2).toUpperCase())}</span><div><div class="identity-name">${esc(user.username)}</div><div class="identity-role">${esc(user.userType)} · ${esc(user.roles[0]||'No role assigned')}</div></div>${action('Sign out','logout','','btn small')}</div></header><div class="content" id="content"></div></main></div>${assistantWidget()}`;
+  root.innerHTML=`<div class="layout"><aside class="sidebar" id="workspace-navigation"><button type="button" class="menu-toggle" aria-expanded="false" aria-controls="workspace-menu">Menu</button><div class="logo"><img src="/favicon.svg" alt="">Moneybags</div><p class="eyebrow">${user.userType==='CUSTOMER'?'PERSONAL BANKING':'EMPLOYEE WORKSPACE'}</p><label class="nav-search"><span class="sr-only">Find a page</span><input type="search" id="navigation-search" placeholder="Find a page…" autocomplete="off" aria-controls="workspace-menu"></label><p class="nav-empty" hidden>No pages found.</p><nav class="nav" id="workspace-menu" aria-label="Main navigation">${navHtml}</nav><div class="sidebar-foot"><strong>Moneybags</strong><br>Integrated banking workspace</div></aside><main class="main"><header class="topbar"><div class="breadcrumb">Workspace &nbsp; / &nbsp; <strong id="crumb">${esc(displayTitle(state.page))}</strong></div><div class="identity">${languagePicker()}<span class="avatar">${esc(user.username.slice(0,2).toUpperCase())}</span><div><div class="identity-name">${esc(user.username)}</div><div class="identity-role">${esc(workspaceRole(user))}</div></div>${action('Sign out','logout','','btn small')}</div></header><div class="content" id="content" tabindex="-1"></div></main></div>${assistantWidget()}`;
   localize(root);
   bindAssistant();
 }
 async function start(){
   if(!getSession()){signIn();return;}
-  try{const user=await api('/auth/me');saveSession({...getSession(),user});state.menus=await api('/iam/menus');if(!can('IAM_USER_READ')&&state.page==='dashboard')state.page='banking';shell();await render();}
+  try{
+    const user=await api('/auth/me');saveSession({...getSession(),user});
+    const entry=entryContext(location.pathname,location.search),employee=user.userType!=='CUSTOMER';
+    const switched=entry.employee!==employee;
+    if(switched)state.page='banking';
+    const query=new URLSearchParams(location.search);query.delete('product');
+    history.replaceState(null,'',workspacePath(user.userType)+(query.size?'?'+query.toString():''));
+    state.menus=await api('/iam/menus');
+    if(!can('IAM_USER_READ')&&state.page==='dashboard')state.page='banking';
+    await router.go({path:state.page});shell();await render();
+    if(switched)toast(employee?'Your account has opened the employee workspace.':'Your account has opened personal banking.');
+  }
   catch(error){if(!getSession())signIn(error.message);else{shell();document.querySelector('#content').innerHTML=`<div class="panel error-panel">${esc(errorText(error))}${action('Try again','retry')}</div>`;}}
 }
 async function catalog(){
@@ -93,7 +127,7 @@ async function render(){
   if(!getSession())return;
   const serial=++state.render;const content=document.querySelector('#content');if(!content)return;
   await disposeJet(content);
-  document.querySelectorAll('.nav button').forEach(b=>{const active=b.dataset.id===state.page;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});document.querySelector('#crumb').textContent=getSession().user.userType==='CUSTOMER'&&state.page==='products'?'Available products':titles[state.page];
+  document.querySelectorAll('.nav button').forEach(b=>{const active=b.dataset.id===state.page;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});document.querySelector('#crumb').textContent=displayTitle(state.page);
   content.innerHTML='<div class="loading">Loading your workspace…</div>';
   try{let html;if(bankingPages[state.page])html=await bankingScreen(state.page);else switch(state.page){case'dashboard':html=await overview();break;case'users':html=await users();break;case'roles':html=await roles();break;case'access':html=await access();break;case'audit':html=await audit();break;case'customers':html=await customersScreen();break;case'products':html=await productsScreen();break;default:html=await security();}if(serial!==state.render||!getSession())return;await disposeJet(content);content.innerHTML=html;localize(content);bindForms();bindDomainForms();bindBankingForms();await enhanceForms(content);}
   catch(error){if(serial!==state.render||!getSession())return;content.innerHTML=`<section class="panel"><div class="error-panel">${esc(errorText(error))}</div><div class="panel-body">${action('Retry','reload')}</div></section>`;}
@@ -207,9 +241,9 @@ function bindForms(){
 document.addEventListener('click',async event=>{
   const button=event.target.closest('[data-action]');if(!button||button.disabled)return;const {action:type,id}=button.dataset;button.disabled=true;
   try{switch(type){
-    case'nav':await router.go({path:id});break;
+    case'nav':await router.go({path:id});document.querySelector('.sidebar')?.classList.remove('mobile-open');document.querySelector('.menu-toggle')?.setAttribute('aria-expanded','false');break;
     case'reload':await render();break;case'retry':await start();break;
-    case'logout':await logout();closeDialog();signIn();break;
+    case'logout':await logout();closeDialog();state.page='banking';await router.go({path:'banking'});signIn('You have signed out.');break;
     case'new-user':await newUser();break;case'new-checker':await newUser(true);break;
     case'user-prev':state.userPage--;await render();break;case'user-next':state.userPage++;await render();break;
     case'user-detail':await userDetail(id);break;case'user-status':statusDialog();break;case'user-reset':resetDialog();break;case'new-link':newLink();break;
@@ -220,7 +254,7 @@ document.addEventListener('click',async event=>{
     case'new-access':await accessDialog();break;case'new-access-user':await accessDialog(id);break;case'request-revoke':await accessDialog('',state.detail.assignments.find(a=>a.assignmentId===id));break;case'request-detail':await requestDetail(id);break;
     case'approve':case'reject':{const r=state.requestDetail.request;await api(`/iam/access-requests/${id}/decision`,{method:'POST',body:{rowVersion:r.rowVersion,decision:type==='approve'?'APPROVED':'REJECTED'}});closeDialog();toast(type==='approve'?'Access request approved.':'Access request rejected.');await render();break;}
     case'own-session':case'admin-session':{const current=id===getSession().accessToken;dialog('Revoke session',`<p class="hint">${current?'This will sign you out of the current session.':'This ends the selected device session immediately.'}</p>`,async()=>{await api(type==='own-session'?`/auth/sessions/${id}`:`/iam/users/${button.dataset.user}/sessions/${id}`,{method:'DELETE'});if(current){saveSession(null);signIn('Session revoked. Sign in again.');}else{toast('Session revoked.');await render();}});break;}
-    case'refresh-session':await refresh();toast('Session refreshed; refresh token rotated.');await render();break;
+    case'refresh-session':await refresh();state.menus=await api('/iam/menus');shell();await render();toast('Session refreshed; refresh token rotated.');break;
     case'enroll-factor':await enrollFactor();break;case'step-up':stepUp();break;case'revoke-factor':revokeFactor(id);break;
     case'manage-menus':await manageMenus();break;case'new-menu':menuDialog();break;case'edit-menu':menuDialog(id);break;
   }}catch(error){toast(errorText(error),true);}finally{button.disabled=false;}
@@ -230,3 +264,29 @@ configureDomains(render);
 configureBanking(render);
 await start();
 
+
+// Navigation discovery retains the same permission-filtered pages and route actions.
+document.addEventListener('input',event=>{
+  if(event.target.id!=='navigation-search')return;
+  const query=event.target.value.trim().toLocaleLowerCase();
+  let count=0;
+  document.querySelectorAll('.nav-section').forEach(section=>{
+    let visible=0;
+    section.querySelectorAll('button').forEach(button=>{
+      button.hidden=!button.textContent.toLocaleLowerCase().includes(query);
+      if(!button.hidden){visible++;count++;}
+    });
+    section.hidden=!visible;
+  });
+  document.querySelector('.nav-empty').hidden=count>0;
+});
+document.addEventListener('click',event=>{
+  const button=event.target.closest('.menu-toggle');if(!button)return;
+  const open=document.querySelector('.sidebar').classList.toggle('mobile-open');
+  button.setAttribute('aria-expanded',String(open));
+});
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape')return;
+  const sidebar=document.querySelector('.sidebar.mobile-open');
+  if(sidebar){sidebar.classList.remove('mobile-open');const toggle=sidebar.querySelector('.menu-toggle');toggle.setAttribute('aria-expanded','false');toggle.focus();}
+});

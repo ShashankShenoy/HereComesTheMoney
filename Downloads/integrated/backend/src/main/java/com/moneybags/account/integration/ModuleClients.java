@@ -5,6 +5,7 @@ import com.moneybags.common.database.BusinessRepository;
 import com.moneybags.iam.dto.IamDtos.AuthorizationInput;
 import com.moneybags.iam.service.AccessDecisionService;
 import com.moneybags.integration.CurrentActor;
+import com.moneybags.cif.service.CustomerFactsPort;
 import com.moneybags.product.service.ProductDefinitionsPort;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,13 +19,15 @@ public class ModuleClients {
  private final BusinessRepository db;
  private final AccessDecisionService access;
  private final ProductDefinitionsPort products;
+ private final CustomerFactsPort customerFacts;
  private final boolean depositInterestEnabled;
- public ModuleClients(BusinessRepository db,AccessDecisionService access,ProductDefinitionsPort products,
+ public ModuleClients(BusinessRepository db,AccessDecisionService access,ProductDefinitionsPort products,CustomerFactsPort customerFacts,
                       @Value("${moneybags.deposit-interest.enabled:false}") boolean depositInterestEnabled) {
-  this.db=db;this.access=access;this.products=products;this.depositInterestEnabled=depositInterestEnabled;
+  this.db=db;this.access=access;this.products=products;this.customerFacts=customerFacts;this.depositInterestEnabled=depositInterestEnabled;
  }
  public record CustomerDecision(String decisionRef,String status,String kycStatus,Boolean minor,String homeBranch) {}
- public record ProductDecision(String decisionRef,String productType,String currency,String versionState,String ruleSetHash,BigDecimal minimumOpeningBalance) {}
+ public record AccountTerms(BigDecimal minimumOpeningBalance,boolean minorAllowed,boolean jointAllowed,long maxHolders,boolean nomineeRequired) {}
+ public record ProductDecision(String decisionRef,String productType,String currency,String versionState,String ruleSetHash,AccountTerms accountTerms) {}
  public record IamDecision(String decisionRef,boolean allowed) {}
  public record Clearance(boolean cleared,String reference,String reason) {}
  public record Treatment(boolean allowed,Boolean consentRequired,String reference) {}
@@ -34,7 +37,7 @@ public class ModuleClients {
   var c=db.one("SELECT C.STATUS,C.KYC_STATUS,C.HOME_BRANCH_REF,P.DATE_OF_BIRTH,P.PARTY_TYPE FROM M02_CIF_CUSTOMER C JOIN M02_CIF_PARTY P ON P.PARTY_ID=C.PARTY_ID WHERE C.CIF_ID=?",cif);
   LocalDate dob=BusinessRepository.localDate(c.get("DATE_OF_BIRTH"));
   Boolean minor="ORGANIZATION".equals(c.get("PARTY_TYPE"))?false:dob==null?null:dob.plusYears(18).isAfter(LocalDate.now(ZoneId.of("Asia/Kolkata")));
-  return new CustomerDecision(ref(),(String)c.get("STATUS"),(String)c.get("KYC_STATUS"),minor,(String)c.get("HOME_BRANCH_REF"));
+  return new CustomerDecision(ref(),(String)c.get("STATUS"),customerFacts.facts(cif).kycStatus(),minor,(String)c.get("HOME_BRANCH_REF"));
  }
  @SuppressWarnings("unchecked")
  public ProductDecision product(long product,long version,String branch,String cif){
@@ -44,8 +47,12 @@ public class ModuleClients {
   var p=(Map<String,Object>)definition.get("product");var v=(Map<String,Object>)definition.get("version");
   if(((Number)v.get("PRODUCT_VERSION_ID")).longValue()!=version) throw new ApiException(HttpStatus.CONFLICT,"VERSION_MISMATCH","Selected version is not effective");
   products.requireCustomerEligible(BigDecimal.valueOf(product),BigDecimal.valueOf(version),cif,evaluatedAt);
-  var rule=db.one("SELECT MIN_OPENING_BALANCE FROM M03_PM_ACCOUNT_RULE WHERE PRODUCT_VERSION_ID=?",version);
-  return new ProductDecision(ref(),(String)p.get("PRODUCT_TYPE"),(String)p.get("CURRENCY_CODE"),(String)v.get("VERSION_STATE"),(String)v.get("RULE_SET_HASH"),(BigDecimal)rule.get("MIN_OPENING_BALANCE"));
+  return new ProductDecision(ref(),(String)p.get("PRODUCT_TYPE"),(String)p.get("CURRENCY_CODE"),(String)v.get("VERSION_STATE"),(String)v.get("RULE_SET_HASH"),accountTerms(version));
+ }
+ public AccountTerms accountTerms(long version){
+  var rule=db.one("SELECT MIN_OPENING_BALANCE,MINOR_ALLOWED,JOINT_ALLOWED,MAX_HOLDERS,NOMINEE_REQUIRED FROM M03_PM_ACCOUNT_RULE WHERE PRODUCT_VERSION_ID=?",version);
+  return new AccountTerms((BigDecimal)rule.get("MIN_OPENING_BALANCE"),"Y".equals(rule.get("MINOR_ALLOWED")),
+   "Y".equals(rule.get("JOINT_ALLOWED")),((Number)rule.get("MAX_HOLDERS")).longValue(),"Y".equals(rule.get("NOMINEE_REQUIRED")));
  }
  public IamDecision opening(String branch,String cif,String product){
   var result=access.evaluate(CurrentActor.get(),new AuthorizationInput("ACCOUNT_OPEN",branch,null,cif,product,"INR",null,null,null,null));
@@ -68,8 +75,11 @@ public class ModuleClients {
  }
  public PolicyDecision limit(long version,Long rule,Long override,String operation,String period,BigDecimal amount){
   if(override!=null)return policy(version,"LIMIT",override,amount);
-  var rows=db.rows("SELECT MAX_AMOUNT FROM M03_PM_LIMIT_RULE WHERE PRODUCT_VERSION_ID=? AND LIMIT_RULE_ID=? AND OPERATION_CODE=? AND PERIOD_CODE=?",version,rule,operation,period);
-  return new PolicyDecision(rows.size()==1&&amount.signum()>=0&&(rows.get(0).get("MAX_AMOUNT")==null||amount.compareTo((BigDecimal)rows.get(0).get("MAX_AMOUNT"))<=0),ref());
+  var rows=db.rows("SELECT MIN_AMOUNT,MAX_AMOUNT,CURRENCY_CODE FROM M03_PM_LIMIT_RULE WHERE PRODUCT_VERSION_ID=? AND LIMIT_RULE_ID=? AND OPERATION_CODE=? AND PERIOD_CODE=?",version,rule,operation,period);
+  return new PolicyDecision(rows.size()==1&&amount.signum()>=0&&
+   (rows.get(0).get("MIN_AMOUNT")==null||amount.compareTo((BigDecimal)rows.get(0).get("MIN_AMOUNT"))>=0)&&
+   (rows.get(0).get("MAX_AMOUNT")==null||amount.compareTo((BigDecimal)rows.get(0).get("MAX_AMOUNT"))<=0)&&
+   (rows.get(0).get("CURRENCY_CODE")==null||"INR".equals(rows.get(0).get("CURRENCY_CODE"))),ref());
  }
  public Clearance openingFunding(long id,BigDecimal min){
   return clear(db.count("SELECT COUNT(*) FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=? AND POSTED_BALANCE>=?",id,min)>0);

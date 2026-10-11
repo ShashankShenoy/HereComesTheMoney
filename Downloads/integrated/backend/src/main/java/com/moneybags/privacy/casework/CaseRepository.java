@@ -67,6 +67,11 @@ public class CaseRepository {
         return id.flatMap(this::findById);
     }
 
+    public Optional<String> creatorByIdempotencyKey(String key) {
+        return jdbc.sql("SELECT CREATED_BY FROM M09_PRIVACY_COMPLIANCE_CASE WHERE IDEMPOTENCY_KEY=:key")
+                .param("key", key).query(String.class).optional();
+    }
+
     /** Lists cases for the operational queue. */
     public List<ComplianceCase> findAll(String status, int offset, int size) {
         return jdbc.sql("""
@@ -91,6 +96,7 @@ public class CaseRepository {
                        CASE_STATUS='IN_REVIEW', UPDATED_AT=SYSTIMESTAMP, UPDATED_BY=:reviewer,
                        VERSION_NO=VERSION_NO+1
                  WHERE COMPLIANCE_CASE_ID=:id AND CASE_STATUS='IDENTITY_PENDING' AND VERSION_NO=:version
+                   AND CREATED_BY<>:reviewer
                 """).param("reviewer", reviewer).param("id", id).param("version", expectedVersion).update();
     }
 

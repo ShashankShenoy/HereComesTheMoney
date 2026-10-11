@@ -79,6 +79,18 @@ public class PaymentRepository {
                 : jdbc.query("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE STATUS=? ORDER BY UPDATED_AT DESC FETCH FIRST 100 ROWS ONLY", this::payment, status);
     }
 
+    /** Customer payment history is limited to instructions created by that sign-in. */
+    public List<Contracts.Payment> listForOriginator(String originatorId, String status) {
+        return status == null || status.isBlank()
+                ? jdbc.query("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE ORIGINATOR_ID=? ORDER BY UPDATED_AT DESC FETCH FIRST 100 ROWS ONLY", this::payment, originatorId)
+                : jdbc.query("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE ORIGINATOR_ID=? AND STATUS=? ORDER BY UPDATED_AT DESC FETCH FIRST 100 ROWS ONLY", this::payment, originatorId, status);
+    }
+
+    public boolean belongsToOriginator(long paymentId, String originatorId) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=? AND ORIGINATOR_ID=?", Integer.class, paymentId, originatorId);
+        return count != null && count > 0;
+    }
+
     /** Returns the existing request scope to distinguish a safe replay from a conflicting key. */
     public List<ExistingRequest> existing(String originator, String channel, String key) {
         return jdbc.query("SELECT PAYMENT_ID, REQUEST_HASH FROM M06_PAYMENT_INSTRUCTION WHERE ORIGINATOR_ID=? AND CHANNEL_CODE=? AND REQUEST_KEY=?",

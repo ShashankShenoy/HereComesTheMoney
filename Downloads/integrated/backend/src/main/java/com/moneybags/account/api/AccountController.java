@@ -199,6 +199,10 @@ public class AccountController {
     public ResponseEntity<Void> decideMajority(@PathVariable long id, @Valid @RequestBody MajorityDecision request) {
         service.decideMajority(id, request); return ResponseEntity.noContent().build();
     }
-    private CommandResult synchronize(CommandResult result) { bridge.apply(result.accountId());return new CommandResult(result.accountId(),"APPLIED",result.requestId(),result.controlVersion()); }
+    private CommandResult synchronize(CommandResult result) {
+        if ("FAILED".equals(result.status())) return result;
+        bridge.apply(result.accountId());
+        return new CommandResult(result.accountId(),"APPLIED",result.requestId(),result.controlVersion());
+    }
     public record MajorityStart(@NotBlank String requestId, @NotNull OffsetDateTime dueAt) { }
 }

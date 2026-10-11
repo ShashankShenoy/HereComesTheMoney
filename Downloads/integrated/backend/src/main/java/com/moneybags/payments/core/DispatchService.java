@@ -48,11 +48,21 @@ public class DispatchService {
     public Map<String, Object> attempt(long dispatchId, Contracts.DispatchAttempt request) {
         Map<String, Object> dispatch = jdbc.queryForMap("SELECT DISPATCH_ID,PAYMENT_ID,DISPATCH_STATUS,ATTEMPT_COUNT FROM M06_RAIL_DISPATCH WHERE DISPATCH_ID=? FOR UPDATE", dispatchId);
         String current = (String) dispatch.get("DISPATCH_STATUS");
+        long paymentId = ((Number) dispatch.get("PAYMENT_ID")).longValue();
+        String paymentStatus = payments.get(paymentId).status();
+        if (List.of("SETTLED", "REFUNDED", "CANCELLED", "REJECTED").contains(paymentStatus))
+            throw conflict("PAYMENT_FINAL", "A final payment cannot be dispatched again");
         if (current.equals("ACKNOWLEDGED") || current.equals("FAILED")) throw conflict("DISPATCH_CLOSED", "Dispatch has a final outcome");
         if (current.equals("INQUIRY_REQUIRED") && !request.attemptType().equals("INQUIRY"))
             throw conflict("INQUIRY_REQUIRED", "A timed-out send must be investigated before retry");
         if (request.attemptType().equals("SEND") && !current.equals("READY") && !current.equals("SENDING"))
             throw conflict("SEND_NOT_ALLOWED", "Send attempt is not allowed from this dispatch state");
+        if (request.attemptType().equals("SEND") && current.equals("SENDING") && request.outcome().equals("STARTED"))
+            throw conflict("SEND_IN_PROGRESS", "The send attempt is already in progress");
+        if (request.attemptType().equals("INQUIRY") && !List.of("SENT", "INQUIRY_REQUIRED").contains(current))
+            throw conflict("INQUIRY_NOT_ALLOWED", "Inquiry requires a sent or uncertain dispatch");
+        if (request.attemptType().equals("INQUIRY") && request.outcome().equals("STARTED"))
+            throw conflict("INVALID_INQUIRY_OUTCOME", "An inquiry needs an observed result");
         int attemptNo = ((Number) dispatch.get("ATTEMPT_COUNT")).intValue() + 1;
         String next = switch (request.outcome()) {
             case "STARTED" -> "SENDING";
@@ -66,7 +76,6 @@ public class DispatchService {
                 dispatchId, attemptNo, request.attemptType(), request.outcome(), request.transportReference(), request.errorCode(), request.outcome());
         jdbc.update("UPDATE M06_RAIL_DISPATCH SET DISPATCH_STATUS=?,ATTEMPT_COUNT=?,LAST_ATTEMPT_AT=SYSTIMESTAMP,LAST_ERROR_CODE=?,FIRST_DISPATCHED_AT=CASE WHEN ?='SENT' THEN COALESCE(FIRST_DISPATCHED_AT,SYSTIMESTAMP) ELSE FIRST_DISPATCHED_AT END WHERE DISPATCH_ID=?",
                 next, attemptNo, request.errorCode(), request.outcome(), dispatchId);
-        long paymentId = ((Number) dispatch.get("PAYMENT_ID")).longValue();
         events.emit("M06.RailDispatchAttemptRecorded", paymentId, null, Map.of("paymentId", paymentId, "dispatchId", dispatchId, "attemptNo", attemptNo, "outcome", request.outcome()));
         events.audit("RECORD_DISPATCH_ATTEMPT", paymentId, "SUCCESS", request.errorCode());
         return jdbc.queryForMap("SELECT DISPATCH_ID,PAYMENT_ID,DISPATCH_STATUS,ATTEMPT_COUNT,LAST_ATTEMPT_AT,LAST_ERROR_CODE FROM M06_RAIL_DISPATCH WHERE DISPATCH_ID=?", dispatchId);

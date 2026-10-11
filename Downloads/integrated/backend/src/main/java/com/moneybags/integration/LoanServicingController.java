@@ -29,6 +29,8 @@ public class LoanServicingController {
   var f=facility(id,"LOAN_SERVICE");var old=db.rows("SELECT DISBURSEMENT_ID,FACILITY_ID,REQUESTED_BY_USER_ID FROM M08_LOAN_DISBURSEMENT WHERE REQUEST_KEY=?",r.requestKey());
   if(!old.isEmpty()){if(((Number)old.get(0).get("FACILITY_ID")).longValue()!=id||!actor().equals(old.get(0).get("REQUESTED_BY_USER_ID")))throw fail("Idempotency key belongs to another disbursement");return Map.of("disbursementId",old.get(0).get("DISBURSEMENT_ID"));}
   supported(f);if(!"PENDING_DISBURSEMENT".equals(f.get("STATUS")))throw fail("Facility is not pending disbursement");
+  if(db.count("SELECT COUNT(*) FROM M08_LOAN_DISBURSEMENT WHERE FACILITY_ID=?",id)>0)
+   throw fail("A disbursement has already been requested for this facility");
   long d=insert("DISBURSEMENT_ID","INSERT INTO M08_LOAN_DISBURSEMENT(FACILITY_ID,DISBURSEMENT_SEQ_NO,TARGET_ACCOUNT_ID,AMOUNT,VALUE_DATE,REQUEST_KEY,REQUESTED_BY_USER_ID) VALUES (?,1,?,?,?,?,?)",id,f.get("DISBURSEMENT_ACCOUNT_ID"),f.get("PRINCIPAL_AMOUNT"),today(),r.requestKey(),actor());
   audit.audit("LOAN_DISBURSEMENT_REQUESTED","FACILITY",Long.toString(id),"MAKER_SUBMISSION");return Map.of("disbursementId",d,"status","REQUESTED");
  }
@@ -63,9 +65,13 @@ public class LoanServicingController {
   project(id);return posted;
  }
  @PostMapping("/facilities/{id}/repayments") @Transactional public TransactionView repay(@PathVariable long id,@Valid @RequestBody Repay r){
-  var f=facility(id,"LOAN_SERVICE");long account=num(f,"REPAYMENT_ACCOUNT_ID");var a=banking.account("TXN_POST",account);
+  var f=facility(id,"LOAN_SERVICE");supported(f);
   var old=db.rows("SELECT FACILITY_ID,AMOUNT,TXN_ID FROM M08_LOAN_PAYMENT WHERE REQUEST_KEY=?",HexFormat.of().formatHex(CustomerHashService.digest(actor()+":"+r.requestKey())));
   if(!old.isEmpty()){if(num(old.get(0),"FACILITY_ID")!=id||money(old.get(0),"AMOUNT").compareTo(r.amount())!=0)throw fail("Idempotency conflict");return ledger.transaction(num(old.get(0),"TXN_ID"));}
+  if(!Set.of("ACTIVE","DELINQUENT").contains(f.get("STATUS")))throw fail("Facility is not active for repayment");
+  long account=num(f,"REPAYMENT_ACCOUNT_ID");var a=banking.account("TXN_POST",account);
+  if(!"ACTIVE".equals(a.get("LIFECYCLE_STATUS"))||!"ACTIVE".equals(a.get("ACCOUNT_STATUS"))||!f.get("PRIMARY_CIF_ID").equals(a.get("PRIMARY_CIF_ID")))
+   throw fail("Repayment account must be active and owned by the borrower");
   var items=db.rows("SELECT I.* FROM M08_LOAN_SCHEDULE_ITEM I JOIN M08_LOAN_SCHEDULE S ON S.SCHEDULE_ID=I.SCHEDULE_ID WHERE I.FACILITY_ID=? AND S.STATUS='ACTIVE' AND I.DUE_DATE<=? AND I.STATUS IN ('PENDING','PART_PAID','OVERDUE') ORDER BY I.INSTALLMENT_NO",id,today());
   record Allocation(long item,String type,BigDecimal amount){} List<Allocation> allocations=new ArrayList<>();BigDecimal remaining=r.amount();
   for(var item:items){
@@ -82,10 +88,39 @@ public class LoanServicingController {
   long journal=ledger.postJournal(new JournalRequest("loan-repay:"+txn,"LOAN_REPAYMENT",txn,null,null,id,null,null,today(),"Loan repayment",lines),actor()).journalId();posted(txn);
   long payment=insert("LOAN_PAYMENT_ID","INSERT INTO M08_LOAN_PAYMENT(FACILITY_ID,PAYMENT_SOURCE_CODE,SOURCE_ACCOUNT_ID,TXN_ID,GL_JOURNAL_ID,REQUEST_KEY,AMOUNT,VALUE_DATE,BOOKED_AT,STATUS) VALUES (?,'ACCOUNT',?,?,?,?,?,?,SYSTIMESTAMP,'ALLOCATED')",id,account,txn,journal,HexFormat.of().formatHex(CustomerHashService.digest(actor()+":"+r.requestKey())),r.amount(),today());
   int seq=1;for(var allocation:allocations){db.jdbc().update("INSERT INTO M08_LOAN_PAYMENT_ALLOCATION(LOAN_PAYMENT_ID,FACILITY_ID,ALLOCATION_SEQ_NO,SCHEDULE_ITEM_ID,ALLOCATION_TYPE,AMOUNT,ALLOCATION_RULE_CODE) VALUES (?,?,?,?,?,?,'INTEREST_THEN_PRINCIPAL')",payment,id,seq++,allocation.item(),allocation.type(),allocation.amount());db.jdbc().update("UPDATE M08_LOAN_SCHEDULE_ITEM SET "+allocation.type()+"_PAID="+allocation.type()+"_PAID+? WHERE SCHEDULE_ITEM_ID=?",allocation.amount(),allocation.item());}
-  db.jdbc().update("UPDATE M08_LOAN_SCHEDULE_ITEM SET STATUS=CASE WHEN PRINCIPAL_PAID=PRINCIPAL_DUE AND INTEREST_PAID=INTEREST_DUE THEN 'PAID' ELSE 'PART_PAID' END,SETTLED_AT=CASE WHEN PRINCIPAL_PAID=PRINCIPAL_DUE AND INTEREST_PAID=INTEREST_DUE THEN SYSTIMESTAMP ELSE NULL END WHERE FACILITY_ID=? AND PRINCIPAL_PAID+INTEREST_PAID>0",id);
+  db.jdbc().update("UPDATE M08_LOAN_SCHEDULE_ITEM SET STATUS=CASE WHEN PRINCIPAL_PAID+PRINCIPAL_WAIVED=PRINCIPAL_DUE AND INTEREST_PAID+INTEREST_WAIVED=INTEREST_DUE THEN 'PAID' ELSE 'PART_PAID' END,SETTLED_AT=CASE WHEN PRINCIPAL_PAID+PRINCIPAL_WAIVED=PRINCIPAL_DUE AND INTEREST_PAID+INTEREST_WAIVED=INTEREST_DUE THEN SYSTIMESTAMP ELSE NULL END WHERE SCHEDULE_ID IN (SELECT SCHEDULE_ID FROM M08_LOAN_SCHEDULE WHERE FACILITY_ID=? AND STATUS='ACTIVE') AND PRINCIPAL_PAID+INTEREST_PAID>0",id);
   project(id);db.jdbc().update("UPDATE M08_LOAN_FACILITY SET STATUS='CLOSED',CLOSED_AT=SYSTIMESTAMP WHERE FACILITY_ID=? AND PRINCIPAL_OUTSTANDING=0 AND INTEREST_OUTSTANDING=0 AND FEE_OUTSTANDING=0 AND PENALTY_OUTSTANDING=0",id);audit.audit("LOAN_REPAID","FACILITY",Long.toString(id),"LEDGER_POSTED");return ledger.transaction(txn);
  }
- @GetMapping("/collections") public List<Map<String,Object>> collections(){banking.global("LOAN_SERVICE");return db.rows("SELECT F.FACILITY_ID,F.FACILITY_NUMBER,F.BRANCH_CODE,MIN(I.DUE_DATE) OLDEST_UNPAID_DATE,COUNT(*) OVERDUE_INSTALLMENTS FROM M08_LOAN_FACILITY F JOIN M08_LOAN_SCHEDULE S ON S.FACILITY_ID=F.FACILITY_ID JOIN M08_LOAN_SCHEDULE_ITEM I ON I.SCHEDULE_ID=S.SCHEDULE_ID WHERE S.STATUS='ACTIVE' AND I.DUE_DATE<SYSDATE AND I.STATUS IN ('PENDING','PART_PAID','OVERDUE') GROUP BY F.FACILITY_ID,F.FACILITY_NUMBER,F.BRANCH_CODE");}
+ @GetMapping("/collections") public List<Map<String,Object>> collections(){
+  CurrentActor.require("LOAN_SERVICE");
+  List<Map<String,Object>> visible=new ArrayList<>();long offset=0;
+  while(visible.size()<100){
+   var page=db.rows("""
+    SELECT F.FACILITY_ID,F.FACILITY_NUMBER,F.BRANCH_CODE,F.PRIMARY_CIF_ID,
+      MIN(I.DUE_DATE) OLDEST_UNPAID_DATE,COUNT(*) OVERDUE_INSTALLMENTS
+    FROM M08_LOAN_FACILITY F
+    JOIN M08_LOAN_SCHEDULE S ON S.FACILITY_ID=F.FACILITY_ID
+    JOIN M08_LOAN_SCHEDULE_ITEM I ON I.SCHEDULE_ID=S.SCHEDULE_ID
+    WHERE S.STATUS='ACTIVE' AND F.STATUS IN ('ACTIVE','DELINQUENT')
+      AND I.DUE_DATE<? AND I.STATUS IN ('PENDING','PART_PAID','OVERDUE')
+      AND (I.PRINCIPAL_DUE>I.PRINCIPAL_PAID+I.PRINCIPAL_WAIVED
+        OR I.INTEREST_DUE>I.INTEREST_PAID+I.INTEREST_WAIVED
+        OR I.FEE_DUE>I.FEE_PAID+I.FEE_WAIVED
+        OR I.PENALTY_DUE>I.PENALTY_PAID+I.PENALTY_WAIVED)
+    GROUP BY F.FACILITY_ID,F.FACILITY_NUMBER,F.BRANCH_CODE,F.PRIMARY_CIF_ID
+    ORDER BY OLDEST_UNPAID_DATE,F.FACILITY_ID OFFSET ? ROWS FETCH NEXT 100 ROWS ONLY
+    """,today(),offset);
+   for(var row:page){
+    if(access.allowed(CurrentActor.get(),new AuthorizationInput("LOAN_SERVICE",(String)row.get("BRANCH_CODE"),
+       null,(String)row.get("PRIMARY_CIF_ID"),"LOAN","INR",null,null,null,null))){
+     row.remove("PRIMARY_CIF_ID");visible.add(row);
+     if(visible.size()==100)break;
+    }
+   }
+   offset+=page.size();if(page.size()<100)break;
+  }
+  return visible;
+ }
  private Map<String,Object> facility(long id,String permission){var f=db.one("SELECT * FROM M08_LOAN_FACILITY WHERE FACILITY_ID=? FOR UPDATE",id);access.require(CurrentActor.get(),new AuthorizationInput(permission,(String)f.get("BRANCH_CODE"),null,(String)f.get("PRIMARY_CIF_ID"),"LOAN","INR",null,null,null,null));return f;}
  private void supported(Map<String,Object> f){if(!"FIXED".equals(f.get("INTEREST_TYPE"))||!"MONTHLY".equals(f.get("REPAYMENT_FREQUENCY"))||!"SINGLE".equals(f.get("DISBURSEMENT_MODE"))||!"REDUCING_BALANCE".equals(f.get("AMORTIZATION_METHOD")))throw fail("Servicing supports fixed-rate, single-disbursement, monthly reducing-balance loans");}
  private void project(long id){for(String component:List.of("PRINCIPAL","INTEREST","FEE","PENALTY"))db.jdbc().update("UPDATE M08_LOAN_FACILITY SET "+component+"_OUTSTANDING=COALESCE((SELECT RECEIVABLE_BALANCE FROM M05_V_LOAN_RECEIVABLE_POSITION WHERE LOAN_FACILITY_ID=? AND LOAN_COMPONENT_CODE=?),0),FINANCIAL_AS_OF=SYSTIMESTAMP WHERE FACILITY_ID=?",id,component,id);}

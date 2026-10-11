@@ -37,10 +37,22 @@ public class CaseService {
         var existing = repository.findByIdempotencyKey(context.idempotencyKey());
         if (existing.isPresent()) {
             var prior = existing.get();
-            if (prior.type() != command.type()
+            if (repository.creatorByIdempotencyKey(context.idempotencyKey()).filter(context.actorId()::equals).isEmpty()
+                    || prior.type() != command.type()
+                    || prior.priority() != command.priority()
+                    || !Objects.equals(prior.requesterService(), command.requesterService())
+                    || !Objects.equals(prior.requesterExternalId(), command.requesterExternalId())
+                    || !Objects.equals(prior.requesterAuthorityRef(), command.requesterAuthorityRef())
                     || !Objects.equals(prior.subjectService(), command.subjectService())
                     || !Objects.equals(prior.subjectExternalId(), command.subjectExternalId())
-                    || !Objects.equals(prior.reason(), command.reason())) {
+                    || !Objects.equals(prior.purposeId(), command.purposeId())
+                    || !Objects.equals(prior.targetService(), command.targetService())
+                    || !Objects.equals(prior.targetResourceType(), command.targetResourceType())
+                    || !Objects.equals(prior.targetExternalId(), command.targetExternalId())
+                    || !Objects.equals(prior.reason(), command.reason())
+                    || !Objects.equals(prior.dueAt(), command.dueAt())
+                    || !java.util.Set.copyOf(prior.tasks().stream().map(ComplianceCase.CaseTask::targetService).toList())
+                            .equals(java.util.Set.copyOf(routes.stream().map(CaseRoutingPolicy.Route::service).toList()))) {
                 throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
                         "Idempotency key belongs to a different case request.");
             }
@@ -69,7 +81,14 @@ public class CaseService {
     /** Lists the operations queue. */
     @Transactional(readOnly = true)
     public PageResponse<ComplianceCase> list(String status, int page, int size) {
-        return new PageResponse<>(repository.findAll(status, page * size, size), page, size, repository.count(status));
+        return new PageResponse<>(repository.findAll(status, pageOffset(page, size), size), page, size, repository.count(status));
+    }
+
+    private int pageOffset(int page, int size) {
+        try { return Math.multiplyExact(page, size); }
+        catch (ArithmeticException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PAGE_OUT_OF_RANGE", "Requested page is too large.");
+        }
     }
 
     /** Returns a case with all service tasks. */

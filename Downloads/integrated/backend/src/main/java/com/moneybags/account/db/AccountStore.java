@@ -24,10 +24,24 @@ public class AccountStore {
                 .param("id", id).query(this::mapAccount).optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ACCOUNT_NOT_FOUND", "Account not found"));
     }
+    /** Reads Module 4's own ordered projection, which may lag Module 5's live position. */
+    public ProjectionSnapshot projectionSnapshot(long id) {
+        return db.sql("SELECT LEDGER_BALANCE,BLOCKED_BALANCE,LIEN_BALANCE,OVERDRAFT_LIMIT,BALANCE_SOURCE_VERSION FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=:id")
+                .param("id", id).query((rs, ignored) -> new ProjectionSnapshot(
+                        rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3),
+                        rs.getBigDecimal(4), rs.getLong(5))).single();
+    }
+    public record ProjectionSnapshot(BigDecimal ledgerBalance, BigDecimal blockedBalance,
+                                     BigDecimal lienBalance, BigDecimal overdraftLimit, long version) { }
     /** Finds a prior opening so callers can safely retry with the same request ID. */
     public Optional<AccountView> byOpenRequest(String requestId) {
         return db.sql("SELECT * FROM M04_BANK_ACCOUNT WHERE OPEN_REQUEST_ID = :id")
                 .param("id", requestId).query(this::mapAccount).optional();
+    }
+    /** Distinguishes an activation retry from another lifecycle action using its recorded evidence. */
+    public boolean hasActivationEvidence(long accountId, String requestId) {
+        return db.sql("SELECT COUNT(*) FROM M04_ACCOUNT_OPENING_EVIDENCE WHERE ACCOUNT_ID=:a AND ATTEMPT_ID=:r")
+                .param("a", accountId).param("r", requestId + ":activate").query(Long.class).single() > 0;
     }
     public String createdBy(long id) {
         return db.sql("SELECT CREATED_BY_USER_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=:id")
@@ -54,6 +68,11 @@ public class AccountStore {
         if (cif == null) return false;
         return db.sql("SELECT COUNT(*) FROM M04_ACCOUNT_PARTY WHERE ACCOUNT_ID=:a AND CIF_ID=:c AND PARTY_ROLE='PRIMARY_HOLDER' AND IS_ACTIVE='Y' AND EFFECTIVE_FROM<=SYSDATE AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>SYSDATE)")
                 .param("a", accountId).param("c", cif).query(Long.class).single() > 0;
+    }
+    /** Required nominations must exist before opening can activate. */
+    public long activeNomineeCount(long accountId) {
+        return db.sql("SELECT COUNT(*) FROM M04_ACCOUNT_NOMINEE WHERE ACCOUNT_ID=:a AND IS_ACTIVE='Y'")
+                .param("a", accountId).query(Long.class).single();
     }
     /** Checks whether at least one current guardian or joint-holder role exists. */
     public boolean hasActiveRole(long accountId, String role) {

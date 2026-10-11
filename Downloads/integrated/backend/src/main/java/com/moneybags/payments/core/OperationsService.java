@@ -7,6 +7,7 @@ import com.moneybags.payments.api.Contracts;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +35,13 @@ public class OperationsService {
     /** Creates an OPEN batch; the rail and external reference are unique. */
     @Transactional
     public Map<String, Object> createBatch(Contracts.CreateBatch request) {
+        List<Map<String, Object>> existing = jdbc.queryForList("SELECT * FROM M06_CLEARING_BATCH WHERE RAIL_CODE=? AND BATCH_REFERENCE=?",
+                request.railCode(), request.batchReference());
+        if (!existing.isEmpty()) {
+            if (!request.direction().equals(existing.get(0).get("BATCH_DIRECTION")))
+                throw conflict("BATCH_REFERENCE_CONFLICT", "Batch reference was used for another direction");
+            return existing.get(0);
+        }
         jdbc.update("INSERT INTO M06_CLEARING_BATCH (RAIL_CODE,BATCH_REFERENCE,BATCH_STATUS,BATCH_DIRECTION) VALUES (?,?,'OPEN',?)",
                 request.railCode(), request.batchReference(), request.direction());
         return jdbc.queryForMap("SELECT * FROM M06_CLEARING_BATCH WHERE RAIL_CODE=? AND BATCH_REFERENCE=?", request.railCode(), request.batchReference());
@@ -44,6 +52,12 @@ public class OperationsService {
     public Map<String, Object> addBatchItem(long batchId, Contracts.AddBatchItem request) {
         Map<String, Object> batch = jdbc.queryForMap("SELECT * FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=? FOR UPDATE", batchId);
         Contracts.Payment payment = payments.lock(request.paymentId());
+        if (payment.clearingBatchId() != null && payment.clearingBatchId() == batchId) {
+            int replay = count("SELECT COUNT(*) FROM M06_CLEARING_BATCH_ITEM WHERE CLEARING_BATCH_ID=? AND PAYMENT_ID=? AND EXTERNAL_ITEM_REF=?",
+                    batchId, payment.paymentId(), request.externalItemRef());
+            if (replay == 1) return batch(batchId);
+            throw conflict("BATCH_ITEM_CONFLICT", "Payment is already in this batch with different details");
+        }
         if (!"OPEN".equals(batch.get("BATCH_STATUS")) || !payment.railCode().equals(batch.get("RAIL_CODE"))
                 || !List.of("ACCEPTED", "SETTLEMENT_PENDING").contains(payment.status())
                 || payment.clearingBatchId() != null)
@@ -75,12 +89,26 @@ public class OperationsService {
     @Transactional
     public Map<String, Object> linkSettlement(long batchId, Contracts.BatchSettlement request) {
         Map<String, Object> batch = jdbc.queryForMap("SELECT * FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=? FOR UPDATE", batchId);
+        if ("SETTLED".equals(batch.get("BATCH_STATUS")) && batch.get("SETTLEMENT_CYCLE_ID") != null
+                && ((Number) batch.get("SETTLEMENT_CYCLE_ID")).longValue() == request.settlementCycleId()) return batch;
         if (!List.of("CLOSED", "SUBMITTED", "SETTLEMENT_PENDING").contains(batch.get("BATCH_STATUS")))
             throw conflict("BATCH_NOT_CLOSED", "Batch must be closed before settlement linking");
+        if (batch.get("SETTLEMENT_CYCLE_ID") != null
+                && ((Number) batch.get("SETTLEMENT_CYCLE_ID")).longValue() != request.settlementCycleId())
+            throw conflict("SETTLEMENT_CYCLE_CONFLICT", "Batch is already linked to another cycle");
         List<Map<String, Object>> cycles = jdbc.queryForList("SELECT SETTLEMENT_CYCLE_ID,STATUS FROM M07_SETTLEMENT_CYCLE WHERE SETTLEMENT_CYCLE_ID=? AND CLEARING_BATCH_ID=? AND RAIL_CODE=? AND GROSS_OUT_AMOUNT=? AND GROSS_IN_AMOUNT=?",
                 request.settlementCycleId(), batchId, batch.get("RAIL_CODE"), batch.get("GROSS_OUT_AMOUNT"), batch.get("GROSS_IN_AMOUNT"));
         if (cycles.size() != 1) throw conflict("SETTLEMENT_CYCLE_MISMATCH", "Module 7 cycle does not match this clearing batch");
-        String status = "SETTLED".equals(cycles.get(0).get("STATUS")) ? "SETTLED" : "SETTLEMENT_PENDING";
+        if (!List.of("CLOSED", "SUBMITTED", "SETTLEMENT_PENDING", "SETTLED").contains(cycles.get(0).get("STATUS")))
+            throw conflict("SETTLEMENT_CYCLE_NOT_READY", "Module 7 cycle is not ready to link");
+        if (count("SELECT COUNT(*) FROM M06_CLEARING_BATCH_ITEM b LEFT JOIN M07_SETTLEMENT_CYCLE_ITEM c ON c.SETTLEMENT_CYCLE_ID=? AND c.PAYMENT_ID=b.PAYMENT_ID AND c.DIRECTION=b.MOVEMENT_SIDE AND c.AMOUNT=b.AMOUNT AND c.ITEM_STATUS NOT IN ('EXCLUDED','EXCEPTION') WHERE b.CLEARING_BATCH_ID=? AND c.PAYMENT_ID IS NULL",
+                request.settlementCycleId(), batchId) != 0
+                || count("SELECT COUNT(*) FROM M07_SETTLEMENT_CYCLE_ITEM c LEFT JOIN M06_CLEARING_BATCH_ITEM b ON b.CLEARING_BATCH_ID=? AND b.PAYMENT_ID=c.PAYMENT_ID AND b.MOVEMENT_SIDE=c.DIRECTION AND b.AMOUNT=c.AMOUNT WHERE c.SETTLEMENT_CYCLE_ID=? AND b.PAYMENT_ID IS NULL",
+                        batchId, request.settlementCycleId()) != 0)
+            throw conflict("SETTLEMENT_ITEMS_MISMATCH", "Cycle and batch must contain the same payments and amounts");
+        boolean paymentsSettled = count(
+                "SELECT COUNT(*) FROM M06_CLEARING_BATCH_ITEM item JOIN M06_PAYMENT_INSTRUCTION payment ON payment.PAYMENT_ID=item.PAYMENT_ID WHERE item.CLEARING_BATCH_ID=? AND payment.STATUS<>'SETTLED'", batchId) == 0;
+        String status = "SETTLED".equals(cycles.get(0).get("STATUS")) && paymentsSettled ? "SETTLED" : "SETTLEMENT_PENDING";
         jdbc.update("UPDATE M06_CLEARING_BATCH SET SETTLEMENT_CYCLE_ID=?,BATCH_STATUS=?,SETTLED_AT=CASE WHEN ?='SETTLED' THEN SYSTIMESTAMP ELSE NULL END WHERE CLEARING_BATCH_ID=?",
                 request.settlementCycleId(), status, status, batchId);
         jdbc.update("UPDATE M06_PAYMENT_INSTRUCTION SET SETTLEMENT_CYCLE_ID=? WHERE CLEARING_BATCH_ID=?",
@@ -114,7 +142,7 @@ public class OperationsService {
         Contracts.Payment payment = payments.lock(paymentId);
         long version = jdbc.query("SELECT CHECK_VERSION FROM M06_PAYMENT_RECONCILIATION WHERE PAYMENT_ID=? FOR UPDATE",
                 (rs, row) -> rs.getLong(1), paymentId).stream().findFirst().orElse(0L) + 1;
-        Long customerJournal = payment.direction().equals("OUTBOUND") ? request.customerJournalId() : request.customerJournalId();
+        Long customerJournal = request.customerJournalId();
         boolean customer = journalMatches(paymentId, customerJournal, payment.amount(), "PAYMENT_PROVISIONAL");
         boolean suspense = !suspenseGlCode.isBlank() && customerJournal != null && count(
                 "SELECT COUNT(*) FROM M05_GL_POSTING p JOIN M05_GL_ACCOUNT a ON a.GL_ACCOUNT_ID=p.GL_ACCOUNT_ID WHERE p.JOURNAL_ID=? AND a.GL_CODE=? AND p.AMOUNT=?",
@@ -126,13 +154,24 @@ public class OperationsService {
                 "SELECT COUNT(*) FROM M06_RAIL_STATUS_EVIDENCE WHERE EVIDENCE_ID=? AND PAYMENT_ID=? AND RAIL_STATUS='SETTLED'",
                 request.railEvidenceId(), paymentId) == 1;
         boolean reserve = request.treasuryEntryId() != null && count(
-                "SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER t JOIN M07_SETTLEMENT_EVIDENCE e ON e.EVIDENCE_ID=t.EVIDENCE_ID AND e.RESERVE_ACCOUNT_ID=t.RESERVE_ACCOUNT_ID JOIN M06_PAYMENT_INSTRUCTION i ON i.PAYMENT_ID=t.PAYMENT_ID WHERE t.TREASURY_ENTRY_ID=? AND t.PAYMENT_ID=? AND t.AMOUNT=? AND t.RAIL_CODE=i.RAIL_CODE AND t.MOVEMENT_SIDE=CASE WHEN i.PAYMENT_DIRECTION='OUTBOUND' THEN 'OUT' ELSE 'IN' END AND e.EVIDENCE_STATUS='VERIFIED' AND t.EXTERNAL_SETTLEMENT_REF=?",
-                request.treasuryEntryId(), paymentId, payment.amount(), request.externalSettlementRef()) == 1;
+                "SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER t JOIN M07_SETTLEMENT_EVIDENCE e ON e.EVIDENCE_ID=t.EVIDENCE_ID AND e.RESERVE_ACCOUNT_ID=t.RESERVE_ACCOUNT_ID JOIN M06_PAYMENT_INSTRUCTION i ON i.PAYMENT_ID=t.PAYMENT_ID WHERE t.TREASURY_ENTRY_ID=? AND t.PAYMENT_ID=? AND t.AMOUNT=? AND t.RAIL_CODE=i.RAIL_CODE AND t.MOVEMENT_SIDE=CASE WHEN i.PAYMENT_DIRECTION='OUTBOUND' THEN 'OUT' ELSE 'IN' END AND e.EVIDENCE_STATUS='VERIFIED' AND t.EXTERNAL_SETTLEMENT_REF=? AND (i.PAYMENT_DIRECTION='INBOUND' OR t.GL_JOURNAL_ID=?)",
+                request.treasuryEntryId(), paymentId, payment.amount(), request.externalSettlementRef(), request.settlementJournalId()) == 1;
+        boolean finality = "SETTLED".equals(payment.status());
+        boolean settlementJournal = payment.direction().equals("INBOUND") || request.settlementJournalId() != null && count(
+                "SELECT COUNT(*) FROM M05_GL_JOURNAL j JOIN M05_V_GL_JOURNAL_CONTROL c ON c.JOURNAL_ID=j.JOURNAL_ID WHERE j.JOURNAL_ID=? AND j.PAYMENT_ID=? AND j.JOURNAL_TYPE='SETTLEMENT' AND c.IS_BALANCED='Y' AND EXISTS (SELECT 1 FROM M05_GL_POSTING p JOIN M05_GL_POSTING original ON original.GL_ACCOUNT_ID=p.GL_ACCOUNT_ID JOIN M05_GL_JOURNAL source ON source.JOURNAL_ID=original.JOURNAL_ID WHERE p.JOURNAL_ID=j.JOURNAL_ID AND p.ENTRY_SIDE='DR' AND p.AMOUNT=? AND original.BANK_ACCOUNT_ID IS NULL AND original.ENTRY_SIDE='CR' AND original.AMOUNT=p.AMOUNT AND source.PAYMENT_ID=j.PAYMENT_ID AND source.JOURNAL_TYPE='PAYMENT_PROVISIONAL')",
+                request.settlementJournalId(), paymentId, payment.amount()) == 1;
+        boolean cycle = request.settlementCycleId() == null ? payment.settlementCycleId() == null
+                : request.settlementCycleId().equals(payment.settlementCycleId()) && count(
+                        "SELECT COUNT(*) FROM M07_SETTLEMENT_CYCLE WHERE SETTLEMENT_CYCLE_ID=? AND CLEARING_BATCH_ID=? AND STATUS='SETTLED'",
+                        request.settlementCycleId(), payment.clearingBatchId()) == 1;
+        boolean noRefund = request.refundJournalId() == null;
         boolean amount = payment.amount().compareTo(request.reconciledAmount()) == 0;
-        String result = suspenseGlCode.isBlank() ? "EXCEPTION" : customer && suspense && rail && reserve && amount ? "MATCHED" : "MISMATCH";
+        String result = suspenseGlCode.isBlank() ? "EXCEPTION" : customer && suspense && rail && reserve && amount
+                && finality && settlementJournal && cycle && noRefund ? "MATCHED" : "MISMATCH";
         String detail = json(Map.of("customerPostingMatch", customer, "suspenseMatch", suspense,
                 "railEvidenceMatch", rail, "reserveMatch", reserve, "amountMatch", amount,
-                "suspenseConfigurationPresent", !suspenseGlCode.isBlank()));
+                "suspenseConfigurationPresent", !suspenseGlCode.isBlank(), "paymentFinal", finality,
+                "settlementJournalMatch", settlementJournal, "settlementCycleMatch", cycle, "noRefund", noRefund));
         jdbc.update("INSERT INTO M06_PAYMENT_RECONCILIATION_RUN (PAYMENT_ID,CHECK_VERSION,RESULT_STATUS,CUSTOMER_POSTING_MATCH,SUSPENSE_MATCH,RAIL_EVIDENCE_MATCH,RESERVE_MATCH,DETAIL_JSON) VALUES (?,?,?,?,?,?,?,?)",
                 paymentId, version, result, flag(customer), flag(suspense), flag(rail), flag(reserve), detail);
         int updated = jdbc.update("UPDATE M06_PAYMENT_RECONCILIATION SET RECONCILIATION_STATUS=?,CUSTOMER_JOURNAL_ID=?,REFUND_JOURNAL_ID=?,SETTLEMENT_JOURNAL_ID=?,RAIL_EVIDENCE_ID=?,TREASURY_ENTRY_ID=?,SETTLEMENT_CYCLE_ID=?,EXTERNAL_SETTLEMENT_REF=?,RECONCILED_AMOUNT=?,CHECK_VERSION=?,LAST_CHECKED_AT=SYSTIMESTAMP,RECONCILED_AT=CASE WHEN ?='MATCHED' THEN SYSTIMESTAMP ELSE NULL END WHERE PAYMENT_ID=?",
@@ -199,6 +238,17 @@ public class OperationsService {
         payments.get(request.paymentId());
         if (request.exceptionId() != null && count("SELECT COUNT(*) FROM M06_RECONCILIATION_EXCEPTION WHERE EXCEPTION_ID=? AND PAYMENT_ID=?", request.exceptionId(), request.paymentId()) != 1)
             throw conflict("EXCEPTION_SCOPE_MISMATCH", "Exception does not belong to this payment");
+        List<Map<String, Object>> existing = jdbc.queryForList("SELECT * FROM M06_PAYMENT_APPROVAL WHERE APPROVAL_KEY=?", request.approvalKey());
+        if (!existing.isEmpty()) {
+            Map<String, Object> prior = existing.get(0);
+            if (((Number) prior.get("PAYMENT_ID")).longValue() != request.paymentId()
+                    || !Objects.equals(prior.get("EXCEPTION_ID") == null ? null : ((Number) prior.get("EXCEPTION_ID")).longValue(), request.exceptionId())
+                    || !Objects.equals(prior.get("ACTION_CODE"), request.actionCode())
+                    || !Objects.equals(prior.get("REASON_TEXT"), request.reasonText())
+                    || !Objects.equals(prior.get("MAKER_ID"), Actor.id()))
+                throw conflict("APPROVAL_KEY_CONFLICT", "Approval key was used for different details");
+            return prior;
+        }
         jdbc.update("INSERT INTO M06_PAYMENT_APPROVAL (APPROVAL_KEY,PAYMENT_ID,EXCEPTION_ID,ACTION_CODE,MAKER_ID,REASON_TEXT) VALUES (?,?,?,?,?,?)",
                 request.approvalKey(), request.paymentId(), request.exceptionId(), request.actionCode(), Actor.id(), request.reasonText());
         return jdbc.queryForMap("SELECT * FROM M06_PAYMENT_APPROVAL WHERE APPROVAL_KEY=?", request.approvalKey());
@@ -208,7 +258,10 @@ public class OperationsService {
     @Transactional
     public Map<String, Object> decideApproval(long approvalId, Contracts.ApprovalDecision request) {
         Map<String, Object> prior = jdbc.queryForMap("SELECT * FROM M06_PAYMENT_APPROVAL WHERE APPROVAL_ID=? FOR UPDATE", approvalId);
-        if (!"PENDING".equals(prior.get("STATUS"))) throw conflict("APPROVAL_DECIDED", "Approval is no longer pending");
+        if (!"PENDING".equals(prior.get("STATUS"))) {
+            if (request.decision().equals(prior.get("STATUS")) && Actor.id().equals(prior.get("CHECKER_ID"))) return prior;
+            throw conflict("APPROVAL_DECIDED", "Approval is no longer pending");
+        }
         if (Actor.id().equals(prior.get("MAKER_ID"))) throw conflict("MAKER_CHECKER_CONFLICT", "Maker cannot check their own request");
         jdbc.update("UPDATE M06_PAYMENT_APPROVAL SET STATUS=?,CHECKER_ID=?,DECIDED_AT=SYSTIMESTAMP WHERE APPROVAL_ID=?",
                 request.decision(), Actor.id(), approvalId);

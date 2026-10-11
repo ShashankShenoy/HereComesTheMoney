@@ -18,10 +18,26 @@ import java.util.List;
 public class ConsentController {
     private final ConsentService service;
     private final RequestContextResolver contexts;
+    private final com.moneybags.privacy.audit.AuditRetentionPolicy retention;
 
-    public ConsentController(ConsentService service, RequestContextResolver contexts) {
+    public ConsentController(ConsentService service, RequestContextResolver contexts,
+                             com.moneybags.privacy.audit.AuditRetentionPolicy retention) {
         this.service = service;
         this.contexts = contexts;
+        this.retention = retention;
+    }
+
+    /** Reports whether decisions can be recorded under an effective approved audit policy. */
+    @GetMapping("/availability")
+    @PreAuthorize("hasAnyAuthority('PRIVACY_CONSENT_VIEW','PRIVACY_CONSENT_SELF','PRIVACY_CONSENT_CAPTURE')")
+    public java.util.Map<String, Boolean> availability() {
+        try {
+            retention.until(OffsetDateTime.now());
+            return java.util.Map.of("decisionsEnabled", true);
+        } catch (com.moneybags.privacy.common.ApiException error) {
+            if (!"AUDIT_RETENTION_POLICY_MISSING".equals(error.code())) throw error;
+            return java.util.Map.of("decisionsEnabled", false);
+        }
     }
 
     /** Captures a grant or denial with identity, notice and idempotency evidence. */
@@ -85,9 +101,9 @@ public class ConsentController {
     }
 
     public record WithdrawalRequest(
-            @NotBlank String subjectService, @NotBlank String subjectExternalId,
-            @NotBlank String purposeCode, @NotBlank String channelCode,
-            String evidenceUri, @Pattern(regexp="[0-9a-fA-F]{64}") String evidenceSha256) {
+            @NotBlank @Size(max=120) String subjectService, @NotBlank @Size(max=100) String subjectExternalId,
+            @NotBlank @Size(max=80) String purposeCode, @NotBlank @Size(max=50) String channelCode,
+            @Size(max=1000) String evidenceUri, @Pattern(regexp="[0-9a-fA-F]{64}") String evidenceSha256) {
         ConsentService.WithdrawConsent toCommand() {
             return new ConsentService.WithdrawConsent(subjectService, subjectExternalId, purposeCode,
                     channelCode, evidenceUri, evidenceSha256);

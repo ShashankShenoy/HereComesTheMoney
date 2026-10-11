@@ -24,7 +24,7 @@ public final class Models {
             String addressLine1, String addressLine2, String city, String state,
             String postalCode, @NotNull @DecimalMin("0.01") @DecimalMax("100.00") BigDecimal sharePercentage,
             String guardianName, String guardianRelationship) { }
-    public record ReplaceNominees(@NotBlank @Size(max=60) String requestId, @NotEmpty @Valid List<NomineeInput> nominees) { }
+    public record ReplaceNominees(@NotBlank @Size(max=60) String requestId, @NotNull @Valid List<NomineeInput> nominees) { }
     public record RestrictionCommand(@NotBlank @Size(max=60) String requestId, @NotBlank String type,
             @Digits(integer=16,fraction=2) BigDecimal amount, @NotBlank String reasonCode, String remarks,
             String sourceSystem, String sourceReference, OffsetDateTime endsAt) { }
@@ -34,7 +34,7 @@ public final class Models {
             @NotBlank String operationCode, String channelCode, @NotBlank String periodCode,
             @NotBlank String resetRuleCode, @NotBlank String timeZoneId,
             @NotNull @DecimalMin("0.00") @Digits(integer=16,fraction=2) BigDecimal amount, Long productLimitRuleId,
-            Long overridePolicyId, String effectiveFrom, String effectiveTo, String approvedByUserId) { }
+            Long overridePolicyId, @NotBlank String effectiveFrom, String effectiveTo, String approvedByUserId) { }
     public record SelfLimitRequest(@NotBlank @Size(max=60) String requestId,
             @NotBlank String operationCode, @NotBlank String periodCode,
             @NotNull @DecimalMin("0.01") @Digits(integer=16,fraction=2) BigDecimal requestedAmount,

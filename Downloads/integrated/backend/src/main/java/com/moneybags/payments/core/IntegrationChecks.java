@@ -2,6 +2,7 @@ package com.moneybags.payments.core;
 
 import com.moneybags.payments.api.ApiException;
 import com.moneybags.payments.api.Contracts;
+import com.moneybags.cif.service.CustomerFactsPort;
 import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -33,30 +34,38 @@ public interface IntegrationChecks {
 @Component
 final class SharedOracleIntegrationChecks implements IntegrationChecks {
     private final JdbcTemplate jdbc;
+    private final CustomerFactsPort customerFacts;
 
     /** Receives the read-only query gateway. */
-    SharedOracleIntegrationChecks(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    SharedOracleIntegrationChecks(JdbcTemplate jdbc, CustomerFactsPort customerFacts) { this.jdbc = jdbc; this.customerFacts = customerFacts; }
 
     /** Applies conservative local authorization; complex Module 3 predicates need a policy service. */
     @Override
     public void authorize(Contracts.Payment payment, String channel, Long accountId, String cifId) {
         if (accountId == null || cifId == null) throw conflict("PARTY_REQUIRED", "Account and CIF are required");
         List<java.util.Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT a.ACCOUNT_STATUS,a.PRIMARY_CIF_ID,a.PRODUCT_VERSION_ID,c.STATUS CIF_STATUS,c.KYC_STATUS,f.DEBIT_STATUS,f.CREDIT_STATUS,v.VERSION_STATE,v.DEFAULT_TXN_ACTION FROM M04_BANK_ACCOUNT a JOIN M02_CIF_CUSTOMER c ON c.CIF_ID=a.PRIMARY_CIF_ID JOIN M03_PM_PRODUCT_VERSION v ON v.PRODUCT_VERSION_ID=a.PRODUCT_VERSION_ID JOIN M05_POSTING_FENCE f ON f.BANK_ACCOUNT_ID=a.ACCOUNT_ID WHERE a.ACCOUNT_ID=? AND a.PRIMARY_CIF_ID=? AND v.EFFECTIVE_FROM_AT<=SYSTIMESTAMP AND (v.EFFECTIVE_TO_AT IS NULL OR v.EFFECTIVE_TO_AT>SYSTIMESTAMP)", accountId, cifId);
+                "SELECT a.ACCOUNT_STATUS,a.PRIMARY_CIF_ID,a.PRODUCT_VERSION_ID,c.STATUS CIF_STATUS,f.DEBIT_STATUS,f.CREDIT_STATUS,p.STATUS PRODUCT_STATUS,v.VERSION_STATE,v.DEFAULT_TXN_ACTION FROM M04_BANK_ACCOUNT a JOIN M02_CIF_CUSTOMER c ON c.CIF_ID=a.PRIMARY_CIF_ID JOIN M03_PM_PRODUCT p ON p.PRODUCT_ID=a.PRODUCT_ID JOIN M03_PM_PRODUCT_VERSION v ON v.PRODUCT_VERSION_ID=a.PRODUCT_VERSION_ID JOIN M05_POSTING_FENCE f ON f.BANK_ACCOUNT_ID=a.ACCOUNT_ID WHERE a.ACCOUNT_ID=? AND a.PRIMARY_CIF_ID=?", accountId, cifId);
         if (rows.size() != 1) throw conflict("ACCOUNT_NOT_ELIGIBLE", "Account, customer or product version is unavailable");
         var row = rows.get(0);
         String side = payment.direction().equals("OUTBOUND") ? "DEBIT_STATUS" : "CREDIT_STATUS";
         if (!"ACTIVE".equals(row.get("ACCOUNT_STATUS")) || !"ACTIVE".equals(row.get("CIF_STATUS"))
-                || !"VERIFIED".equals(row.get("KYC_STATUS")) || !"ACTIVE".equals(row.get("VERSION_STATE"))
+                || !"VERIFIED".equals(customerFacts.facts(cifId).kycStatus())
+                || !java.util.Set.of("ACTIVE", "RETIRED").contains(row.get("PRODUCT_STATUS"))
+                || !java.util.Set.of("ACTIVE", "RETIRED").contains(row.get("VERSION_STATE"))
                 || !"OPEN".equals(row.get(side)))
             throw conflict("ACCOUNT_NOT_ELIGIBLE", "Customer, account, product or posting fence is not active");
-        Integer complex = jdbc.queryForObject("SELECT COUNT(*) FROM M03_PM_TRANSACTION_RULE WHERE PRODUCT_VERSION_ID=? AND OPERATION_CODE='PAYMENT' AND DIRECTION_CODE=? AND (CHANNEL_CODE IS NULL OR CHANNEL_CODE=?) AND (COUNTERPARTY_CODE IS NOT NULL OR GEOGRAPHY_CODE IS NOT NULL OR TIME_WINDOW_CODE IS NOT NULL)",
-                Integer.class, row.get("PRODUCT_VERSION_ID"), payment.direction(), channel);
+        String direction = switch (payment.direction()) {
+            case "OUTBOUND" -> "DEBIT";
+            case "INBOUND" -> "CREDIT";
+            default -> throw conflict("INVALID_PAYMENT_DIRECTION", "Unsupported payment direction");
+        };
+        Integer complex = jdbc.queryForObject("SELECT COUNT(*) FROM M03_PM_TRANSACTION_RULE WHERE PRODUCT_VERSION_ID=? AND OPERATION_CODE='PAYMENT' AND DIRECTION_CODE IN (?, 'BOTH') AND (CHANNEL_CODE IS NULL OR CHANNEL_CODE=?) AND (COUNTERPARTY_CODE IS NOT NULL OR GEOGRAPHY_CODE IS NOT NULL OR TIME_WINDOW_CODE IS NOT NULL)",
+                Integer.class, row.get("PRODUCT_VERSION_ID"), direction, channel);
         if (complex != null && complex > 0)
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "POLICY_ADAPTER_REQUIRED", "A conditional Module 3 rule requires a policy adapter");
         List<java.util.Map<String, Object>> rules = jdbc.queryForList(
-                "SELECT ACTION_CODE FROM M03_PM_TRANSACTION_RULE WHERE PRODUCT_VERSION_ID=? AND OPERATION_CODE='PAYMENT' AND DIRECTION_CODE=? AND (CHANNEL_CODE IS NULL OR CHANNEL_CODE=?) ORDER BY PRIORITY_NO FETCH FIRST 1 ROWS ONLY",
-                row.get("PRODUCT_VERSION_ID"), payment.direction(), channel);
+                "SELECT ACTION_CODE FROM M03_PM_TRANSACTION_RULE WHERE PRODUCT_VERSION_ID=? AND OPERATION_CODE='PAYMENT' AND DIRECTION_CODE IN (?, 'BOTH') AND (CHANNEL_CODE IS NULL OR CHANNEL_CODE=?) ORDER BY PRIORITY_NO FETCH FIRST 1 ROWS ONLY",
+                row.get("PRODUCT_VERSION_ID"), direction, channel);
         if (!rules.isEmpty()) {
             var rule = rules.get(0);
             if (!"ALLOW".equals(rule.get("ACTION_CODE"))) throw conflict("POLICY_DENIED", "Product rule denies this payment");
@@ -98,8 +107,23 @@ final class SharedOracleIntegrationChecks implements IntegrationChecks {
     /** Confirms a settled reserve movement with verified source evidence. */
     @Override
     public void treasury(long paymentId, long entryId, BigDecimal amount) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER t JOIN M07_SETTLEMENT_EVIDENCE e ON e.EVIDENCE_ID=t.EVIDENCE_ID AND e.RESERVE_ACCOUNT_ID=t.RESERVE_ACCOUNT_ID JOIN M06_PAYMENT_INSTRUCTION i ON i.PAYMENT_ID=t.PAYMENT_ID WHERE t.TREASURY_ENTRY_ID=? AND t.PAYMENT_ID=? AND t.AMOUNT=? AND t.RAIL_CODE=i.RAIL_CODE AND t.MOVEMENT_SIDE=CASE WHEN i.PAYMENT_DIRECTION='OUTBOUND' THEN 'OUT' ELSE 'IN' END AND e.EVIDENCE_STATUS='VERIFIED' AND (i.LIQUIDITY_HOLD_ID IS NULL OR EXISTS (SELECT 1 FROM M07_TREASURY_LIQUIDITY_HOLD h WHERE h.LIQUIDITY_HOLD_ID=i.LIQUIDITY_HOLD_ID AND h.PAYMENT_ID=i.PAYMENT_ID AND h.STATUS='CONSUMED' AND h.CONSUMED_BY_ENTRY_ID=t.TREASURY_ENTRY_ID))", Integer.class,
-                entryId, paymentId, amount);
+        Integer count = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM M07_CENTRAL_TREASURY_LEDGER t
+              JOIN M07_SETTLEMENT_EVIDENCE e ON e.EVIDENCE_ID=t.EVIDENCE_ID AND e.RESERVE_ACCOUNT_ID=t.RESERVE_ACCOUNT_ID
+              JOIN M06_PAYMENT_INSTRUCTION i ON i.PAYMENT_ID=?
+              LEFT JOIN M07_SETTLEMENT_CYCLE_ITEM ci ON ci.SETTLEMENT_CYCLE_ID=t.SETTLEMENT_CYCLE_ID AND ci.PAYMENT_ID=i.PAYMENT_ID
+             WHERE t.TREASURY_ENTRY_ID=? AND i.AMOUNT=? AND t.RAIL_CODE=i.RAIL_CODE
+               AND e.EVIDENCE_STATUS='VERIFIED'
+               AND ((t.PAYMENT_ID=i.PAYMENT_ID AND t.AMOUNT=i.AMOUNT
+                     AND t.MOVEMENT_SIDE=CASE WHEN i.PAYMENT_DIRECTION='OUTBOUND' THEN 'OUT' ELSE 'IN' END)
+                 OR (ci.SETTLEMENT_CYCLE_ITEM_ID IS NOT NULL AND ci.AMOUNT=i.AMOUNT
+                     AND ci.ITEM_STATUS='SETTLED' AND i.SETTLEMENT_CYCLE_ID=t.SETTLEMENT_CYCLE_ID
+                     AND ci.DIRECTION=CASE WHEN i.PAYMENT_DIRECTION='OUTBOUND' THEN 'OUT' ELSE 'IN' END))
+               AND (i.LIQUIDITY_HOLD_ID IS NULL OR EXISTS (SELECT 1 FROM M07_TREASURY_LIQUIDITY_HOLD h
+                    WHERE h.LIQUIDITY_HOLD_ID=i.LIQUIDITY_HOLD_ID AND h.PAYMENT_ID=i.PAYMENT_ID
+                      AND h.STATUS='CONSUMED' AND h.CONSUMED_BY_ENTRY_ID=t.TREASURY_ENTRY_ID))
+            """, Integer.class,
+                paymentId, entryId, amount);
         if (count == null || count != 1) throw conflict("TREASURY_MISMATCH", "Module 7 reserve settlement is unverified or mismatched");
     }
 

@@ -41,7 +41,11 @@ public class DecisionClient {
   }
   // An external delivery address must be verified by an installed delivery adapter.
   if("DELIVERY".equals(q.action())&&!"DOWNLOAD".equals(q.deliveryChannel()))allowed=false;
-  if(q.purposeCode()!=null)allowed&=db.count("SELECT COUNT(*) FROM M09_PRIVACY_PROCESSING_PURPOSE WHERE PURPOSE_CODE=? AND STATUS='ACTIVE'",q.purposeCode())>0;
+  if(q.purposeCode()!=null)allowed&=db.count("""
+      SELECT COUNT(*) FROM M09_PRIVACY_PROCESSING_PURPOSE
+      WHERE PURPOSE_CODE=? AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSTIMESTAMP
+        AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>SYSTIMESTAMP)
+      """,q.purposeCode())>0;
   return new Decision(allowed,UUID.randomUUID().toString(),allowed?null:"STATEMENT_POLICY_DENIED");
  }
  private Decision deny(){return new Decision(false,UUID.randomUUID().toString(),"ACTOR_OR_OWNER_MISMATCH");}

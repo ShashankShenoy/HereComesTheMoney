@@ -19,6 +19,8 @@ public record M02KycCaseRow(
     @DbColumn(name="SUBMITTED_AT", generated=false, identity=false, nullable=true) OffsetDateTime submittedAt,
     @DbColumn(name="DECIDED_AT", generated=false, identity=false, nullable=true) OffsetDateTime decidedAt,
     @DbColumn(name="REVIEW_DUE_AT", generated=false, identity=false, nullable=true) OffsetDateTime reviewDueAt,
+    @DbColumn(name="PROPOSED_SEGMENT_CODE", generated=false, identity=false, nullable=true) String proposedSegmentCode,
+    @DbColumn(name="SEGMENT_CHANGE_PENDING", generated=false, identity=false, nullable=false) String segmentChangePending,
     @DbColumn(name="CREATED_AT", generated=false, identity=false, nullable=false) OffsetDateTime createdAt,
     @DbColumn(name="ROW_VERSION", generated=false, identity=false, nullable=false) Long rowVersion
 ) {}

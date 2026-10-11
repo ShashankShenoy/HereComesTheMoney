@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -44,7 +45,7 @@ public final class TreasuryRequests {
                             @NotBlank @Pattern(regexp="IN|OUT") String direction,
                             @NotNull @DecimalMin(value="0.00", inclusive=false) BigDecimal amount) {}
 
-    public record AddCycleItems(@NotNull @Size(min=1, max=1000) List<CycleItem> items) {}
+    public record AddCycleItems(@NotNull @Size(min=1, max=1000) List<@Valid CycleItem> items) {}
 
     public record SettlementEvidenceCommand(
         @Positive long reserveAccountId, Long paymentId, Long settlementCycleId,

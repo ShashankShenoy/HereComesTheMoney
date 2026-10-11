@@ -26,6 +26,21 @@ public class PurposeRepository {
                 .query(this::map).list();
     }
 
+    /** Selects only the latest currently effective approved version of each purpose. */
+    public List<ProcessingPurpose> findAvailable(OffsetDateTime at) {
+        return jdbc.sql("""
+                SELECT p.* FROM M09_PRIVACY_PROCESSING_PURPOSE p
+                 WHERE p.STATUS='ACTIVE' AND p.EFFECTIVE_FROM<=:at
+                   AND (p.EFFECTIVE_TO IS NULL OR p.EFFECTIVE_TO>:at)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM M09_PRIVACY_PROCESSING_PURPOSE newer
+                        WHERE newer.PURPOSE_CODE=p.PURPOSE_CODE AND newer.STATUS='ACTIVE'
+                          AND newer.PURPOSE_VERSION>p.PURPOSE_VERSION AND newer.EFFECTIVE_FROM<=:at
+                          AND (newer.EFFECTIVE_TO IS NULL OR newer.EFFECTIVE_TO>:at))
+                 ORDER BY p.PURPOSE_CODE
+                """).param("at", at).query(this::map).list();
+    }
+
     /** Counts rows using the same list filter. */
     public long count(String status) {
         return jdbc.sql("SELECT COUNT(*) FROM M09_PRIVACY_PROCESSING_PURPOSE WHERE (:status IS NULL OR STATUS=:status)")

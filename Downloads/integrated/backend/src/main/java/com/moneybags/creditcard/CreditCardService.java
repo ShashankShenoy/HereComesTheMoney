@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moneybags.common.api.BusinessException;
 import com.moneybags.common.database.BusinessRepository;
+import com.moneybags.cif.service.CustomerFactsPort;
 import com.moneybags.iam.dto.IamDtos.AuthorizationInput;
 import com.moneybags.iam.service.AccessDecisionService;
 import com.moneybags.integration.BankingAccess;
@@ -38,14 +39,15 @@ public class CreditCardService {
     private final BankingAccess banking;
     private final LedgerService ledger;
     private final CustomerHashService audit;
+    private final CustomerFactsPort customerFacts;
     private final ObjectMapper json;
     private final Clock clock;
     private final ZoneId businessZone;
 
     public CreditCardService(BusinessRepository db,AccessDecisionService access,BankingAccess banking,
-                             LedgerService ledger,CustomerHashService audit,ObjectMapper json,Clock clock,
+                             LedgerService ledger,CustomerHashService audit,CustomerFactsPort customerFacts,ObjectMapper json,Clock clock,
                              @Value("${moneybags.business-zone:Asia/Kolkata}") String businessZone) {
-        this.db=db;this.access=access;this.banking=banking;this.ledger=ledger;this.audit=audit;this.json=json;this.clock=clock;
+        this.db=db;this.access=access;this.banking=banking;this.ledger=ledger;this.audit=audit;this.customerFacts=customerFacts;this.json=json;this.clock=clock;
         this.businessZone=ZoneId.of(businessZone);
     }
 
@@ -384,8 +386,14 @@ public class CreditCardService {
     }
 
     private void eligible(Map<String,Object> c) {
-        if(!"ACTIVE".equals(c.get("STATUS"))||!"VERIFIED".equals(c.get("KYC_STATUS")))throw conflict("CIF_NOT_ELIGIBLE","An active customer with verified KYC is required");
-        if(c.get("NEXT_REVIEW_DUE_AT")!=null&&!localDate(c.get("NEXT_REVIEW_DUE_AT")).isAfter(today()))throw conflict("KYC_REVIEW_DUE","Complete the customer's KYC review first");
+        var facts=customerFacts.facts(str(c,"CIF_ID"));
+        if(!"ACTIVE".equals(facts.status())||!"VERIFIED".equals(c.get("KYC_STATUS")))
+            throw conflict("CIF_NOT_ELIGIBLE","An active customer with verified KYC is required");
+        if(!"VERIFIED".equals(facts.kycStatus())) {
+            if(c.get("NEXT_REVIEW_DUE_AT") instanceof OffsetDateTime due && !due.isAfter(OffsetDateTime.now(clock)))
+                throw conflict("KYC_REVIEW_DUE","Complete the customer's KYC review first");
+            throw conflict("CIF_NOT_ELIGIBLE","An active customer with current verified KYC is required");
+        }
         var party=db.one("SELECT PARTY_TYPE,DATE_OF_BIRTH FROM M02_CIF_PARTY WHERE PARTY_ID=?",c.get("PARTY_ID"));
         LocalDate born=localDate(party.get("DATE_OF_BIRTH"));
         if(!"INDIVIDUAL".equals(party.get("PARTY_TYPE"))||born==null||born.plusYears(18).isAfter(today()))throw conflict("ADULT_INDIVIDUAL_REQUIRED","This credit card is available to adult individual customers");

@@ -7,7 +7,7 @@ if(Test-Path (Join-Path $runtime 'processes.json')){throw 'A run record exists. 
 & (Join-Path $taskRoot 'build-before-start.ps1')
 $jar=Join-Path $taskRoot 'backend/target/moneybags-integrated-1.0.0.jar'
 if(!(Test-Path $jar)){throw 'Maven verify finished without creating the backend JAR.'}
-$backend=Start-Process -FilePath 'java' -ArgumentList @('-Djava.net.preferIPv4Stack=true','-jar',('"'+$jar+'"'),'--spring.profiles.active=local',("--server.port="+$BackendPort)) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'backend.log') -RedirectStandardError (Join-Path $runtime 'backend.err.log') -PassThru
+$backend=Start-Process -FilePath 'java' -ArgumentList @('-Djava.net.preferIPv4Stack=true','-Djava.net.useSystemProxies=true','-jar',('"'+$jar+'"'),'--spring.profiles.active=local',("--server.port="+$BackendPort)) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'backend.log') -RedirectStandardError (Join-Path $runtime 'backend.err.log') -PassThru
 $env:BACKEND_URL="http://127.0.0.1:$BackendPort"
 $env:PORT="$FrontendPort"
 $frontend=Start-Process -FilePath 'node' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend/dist') -RedirectStandardOutput (Join-Path $runtime 'frontend.log') -RedirectStandardError (Join-Path $runtime 'frontend.err.log') -PassThru

@@ -19,6 +19,8 @@ const state = {
   case: null,
   product: null,
   version: null,
+  offerCif: null,
+  offerChannel: null,
   branch: "",
   search: "",
   schema: [],
@@ -42,6 +44,8 @@ function syncUser() {
     case: null,
     product: null,
     version: null,
+    offerCif: null,
+    offerChannel: null,
     branch: "",
     search: "",
     customerDetail: null,
@@ -168,7 +172,7 @@ export async function customersScreen() {
             esc(c.HOME_BRANCH_REF),
             esc(c.SEGMENT_CODE),
             badge(c.STATUS),
-            badge(c.KYC_STATUS),
+            badge(c.EFFECTIVE_KYC_STATUS || c.KYC_STATUS),
             button("View customer", "customer-open", c.CIF_ID),
           ]),
         ),
@@ -182,19 +186,25 @@ async function customerView() {
   const d = await api(`/cif/customers/${state.customer}`);
   state.customerDetail = d;
   const c = d.customer;
+  const hasOpenCase = d.cases.some(k => !["APPROVED", "REJECTED", "EXPIRED"].includes(k.STATUS));
+  const canPropose = c.STATUS !== "CLOSED" && d.cases.some(k =>
+    ["DRAFT", "DOCUMENTS_PENDING", "MORE_INFO_REQUIRED"].includes(k.STATUS) &&
+    k.MAKER_USER_ID === getSession().user.userId);
   const displayName = d.names.find(name => name.NAME_TYPE === "LEGAL" && !name.VALID_TO)?.FULL_NAME || c.CIF_NUMBER;
   let html =
     heading(
       displayName,
       "02",
-      `CIF ${c.CIF_NUMBER} · ${c.STATUS} · KYC ${c.KYC_STATUS} · ${c.HOME_BRANCH_REF}`,
+      `CIF ${c.CIF_NUMBER} · ${c.STATUS} · KYC ${c.EFFECTIVE_KYC_STATUS || c.KYC_STATUS} · ${c.HOME_BRANCH_REF}`,
       button("Back to directory", "customer-back"),
     ) +
+    ((c.EFFECTIVE_KYC_STATUS || c.KYC_STATUS) === "VERIFIED" && c.STATUS === "RESTRICTED" ?
+      '<div class="notice">KYC is verified. A staff member must review the customer restriction before activating the profile.</div>' : "") +
     panel(
       "Customer profile",
       `<div class="panel-body">${details({ ...c, ...d.party })}</div>`,
-      can("CIF_UPDATE")
-        ? `${button("Propose profile change", "profile-edit")}${button("Change status", "customer-status")}`
+      can("CIF_UPDATE") && c.STATUS !== "CLOSED"
+        ? `${canPropose ? button("Propose profile change", "profile-edit") : ""}${button("Change status", "customer-status")}`
         : "",
     ) +
     panel(
@@ -220,7 +230,7 @@ async function customerView() {
           `${esc(date(c.VALID_FROM))}<span class="sub">${esc(date(c.VALID_TO))}</span>`,
         ]),
       ),
-      can("CIF_UPDATE") ? button("Add contact", "contact-new") : "",
+      can("CIF_UPDATE") && canPropose ? button("Add contact", "contact-new") : "",
     ) +
     panel(
       "Identifiers",
@@ -233,7 +243,7 @@ async function customerView() {
           esc(i.EXPIRES_ON),
         ]),
       ),
-      can("CIF_UPDATE") ? button("Add identifier", "identifier-new") : "",
+      can("CIF_UPDATE") && canPropose ? button("Add identifier", "identifier-new") : "",
     ) +
     panel(
       "Addresses",
@@ -246,7 +256,7 @@ async function customerView() {
           esc(a.EVIDENCE_DOCUMENT_ID),
         ]),
       ),
-      can("CIF_UPDATE") ? button("Add address", "address-new") : "",
+      can("CIF_UPDATE") && canPropose ? button("Add address", "address-new") : "",
     ) +
     panel(
       "KYC cases",
@@ -260,7 +270,7 @@ async function customerView() {
           button("Open evidence", "case-open", k.CASE_ID),
         ]),
       ),
-      can("CIF_UPDATE") ? button("Open new case", "case-new") : "",
+      can("CIF_UPDATE") && c.STATUS !== "CLOSED" && !hasOpenCase ? button("Open new case", "case-new") : "",
     ) +
     panel(
       "Consent evidence",
@@ -275,7 +285,7 @@ async function customerView() {
             : "",
         ]),
       ),
-      can("CIF_UPDATE") ? button("Capture consent", "consent-new") : "",
+      can("CIF_UPDATE") && c.STATUS !== "CLOSED" ? button("Capture consent", "consent-new") : "",
     ) +
     panel(
       "Party relationships",
@@ -286,12 +296,12 @@ async function customerView() {
           esc(r.TARGET_PARTY_ID),
           esc(r.OPERATING_AUTHORITY),
           esc(date(r.VALID_TO)),
-          !r.VALID_TO && r.SOURCE_PARTY_ID === c.PARTY_ID && can("CIF_UPDATE")
+          (!r.VALID_TO || new Date(r.VALID_TO) > new Date()) && r.SOURCE_PARTY_ID === c.PARTY_ID && can("CIF_UPDATE")
             ? button("End", "relationship-end", r.RELATIONSHIP_ID)
             : "",
         ]),
       ),
-      can("CIF_UPDATE") ? button("Add relationship", "relationship-new") : "",
+      can("CIF_UPDATE") && c.STATUS !== "CLOSED" ? button("Add relationship", "relationship-new") : "",
     );
   if (state.case) html += await caseView();
   const events = await api(`/cif/customers/${state.customer}/audit`);
@@ -327,6 +337,8 @@ async function caseView() {
     "MORE_INFO_REQUIRED",
   ].includes(k.STATUS);
   const reviewable = ["SUBMITTED", "UNDER_REVIEW"].includes(k.STATUS);
+  const independentReviewer = reviewable && !maker && can("KYC_REVIEW") &&
+    (!k.ASSIGNED_OFFICER_USER_ID || k.ASSIGNED_OFFICER_USER_ID === getSession().user.userId);
   return panel(
     `Evidence · ${k.CASE_TYPE}`,
     `<div class="panel-body">${details(k)}<p class="hint">Identity and address evidence are required for this review. Record the document verification outcome before deciding the case.</p></div>` +
@@ -337,7 +349,7 @@ async function caseView() {
           `${esc(doc.BYTE_SIZE)} bytes<span class="sub">${esc(doc.MIME_TYPE)}</span>`,
           badge(doc.SCAN_STATUS),
           badge(doc.VERIFICATION_STATUS),
-          `${button("Download", "document-download", doc.DOCUMENT_ID)}${reviewable && !maker && can("KYC_REVIEW") ? button("Review evidence", "document-review", doc.DOCUMENT_ID) : ""}`,
+          `${doc.SCAN_STATUS === "CLEAN" || doc.SCAN_STATUS === "PENDING" && independentReviewer ? button("Download", "document-download", doc.DOCUMENT_ID) : ""}${independentReviewer ? button("Review evidence", "document-review", doc.DOCUMENT_ID) : ""}`,
         ]),
       ) +
       table(
@@ -349,25 +361,37 @@ async function caseView() {
           esc(r.REVIEWER_USER_ID),
         ]),
       ),
-    `${editable && maker && can("KYC_UPLOAD") ? button("Upload document", "document-upload") : ""}${editable && maker && can("CIF_UPDATE") ? button("Submit case", "case-submit") : ""}${reviewable && can("KYC_REVIEW") ? button("Assign officer", "case-assign") : ""}${reviewable && !maker && can("KYC_REVIEW") ? button("Decide KYC", "case-review") : ""}`,
+    `${editable && maker && can("KYC_UPLOAD") ? button("Upload document", "document-upload") : ""}${editable && maker && can("CIF_UPDATE") ? button("Submit case", "case-submit") : ""}${reviewable && can("KYC_REVIEW") ? button("Assign officer", "case-assign") : ""}${independentReviewer ? button("Decide KYC", "case-review") : ""}`,
   );
 }
 
 /** Product directory carries explicit branch context so branch-scoped staff do not get global access. */
 export async function productsScreen() {
   syncUser();
-  if (getSession().user.userType === "CUSTOMER")
-    return (
-      heading(
-        "Available products",
-        "03",
-        "Offers use your linked customer profile and current KYC status.",
-      ) +
-      panel(
-        "Discover offers",
-        `<div class="panel-body">${button("Browse my offers", "customer-discover")}<div id="customer-offers"></div></div>`,
-      )
-    );
+  if (getSession().user.userType === "CUSTOMER") {
+    const profiles=getSession().user.cifIds||[];
+    const [offerResults,cardResult]=await Promise.all([
+      Promise.allSettled(profiles.map(async cifId=>({cifId,offers:await api('/products/customer-offers?'+new URLSearchParams({cifId,channel:'WEB',currency:'INR'}))}))),
+      Promise.allSettled([getSession().user.permissions.includes('CC_READ')?api('/credit-cards/products'):Promise.resolve([])]),
+    ]);
+    const offersByProfile=offerResults.filter(result=>result.status==='fulfilled').map(result=>result.value);
+    const cardProducts=cardResult[0].status==='fulfilled'?cardResult[0].value:[];
+    const unavailable=offerResults.some(result=>result.status==='rejected')||cardResult[0].status==='rejected';
+    const bankRows=offersByProfile.flatMap(({cifId,offers})=>offers.map(row=>[
+      `<strong>${esc(row.product.PRODUCT_NAME)}</strong><br><small>${esc(row.product.PRODUCT_CODE)} · ${esc(cifId)}</small>`,
+      esc(row.product.PRODUCT_TYPE),esc(row.product.CURRENCY_CODE),
+      `<button class="btn small" type="button" data-action="nav" data-id="${row.product.PRODUCT_TYPE==='LOAN'?'loans':'accounts'}">Explore</button>`,
+    ]));
+    const cardRows=cardProducts.map(card=>[
+      `<strong>${esc(card.PRODUCT_NAME)}</strong><br><small>${esc(card.PRODUCT_CODE)} · Version ${esc(card.VERSION_NO)}</small>`,
+      'CREDIT CARD','INR',
+      '<button class="btn small" type="button" data-action="nav" data-id="creditCards">View terms and apply</button>',
+    ]);
+    return heading('Available products','03','Accounts, loans, credit cards, and currency services in one place.')+
+      panel('Banking and card products',`<div class="panel-body"><p class="hint">Account and loan offers reflect your linked profile and online eligibility. Credit cards have separate terms and an application review. Ask the bank about products available only in a branch.</p>${unavailable?'<div class="notice">Some product listings are temporarily unavailable. Refresh this page or use the individual product areas.</div>':''}${table(['Product','Type','Currency','Next step'],[...bankRows,...cardRows],'No available products for your linked profiles')}${profiles.length?button('Explore account and loan offers','customer-discover'):'<p>No linked customer profile is available for account and loan offers.</p>'}</div>`)+
+      (getSession().user.permissions.includes('FX_READ')?panel('Currency services',`<div class="panel-body"><p>View supported currencies and indicative exchange-rate calculations. Foreign-currency accounts, conversion orders, and international transfers are not available.</p><button class="btn small" type="button" data-action="nav" data-id="currency">View indicative rates</button></div>`):'')+
+      (getSession().user.permissions.includes('PAYMENT_READ')?panel('Move money',`<div class="panel-body"><p>Use an eligible INR account to create a domestic payment request. This deployment uses local payment simulation and requires independent review.</p><button class="btn small" type="button" data-action="nav" data-id="payments">${getSession().user.permissions.includes('PAYMENT_CREATE')?'Send money':'Track payments'}</button></div>`):'');
+  }
   if (!state.schema.length) state.schema = await api("/products/rule-schema");
   if (state.version) return versionView();
   if (state.product) return productView();
@@ -411,6 +435,7 @@ async function productView() {
   const d = await api(`/products/${state.product}${query()}`);
   state.productDetail = d;
   const p = d.product;
+  const treatmentReady = d.versions.filter(v => v.VERSION_STATE !== "DRAFT").length > 1;
   return organizePanels((
     heading(
       p.PRODUCT_NAME,
@@ -422,7 +447,7 @@ async function productView() {
       "Product identity",
       `<div class="panel-body">${details(p)}</div>`,
       can("PRODUCT_CREATE")
-        ? `${button("New draft", "version-new")}${button("Request lifecycle change", "product-lifecycle")}${button("Propose treatment", "treatment-new")}`
+        ? `${p.STATUS !== "RETIRED" ? button("New draft", "version-new") + button("Request lifecycle change", "product-lifecycle") : ""}${treatmentReady ? button("Propose treatment", "treatment-new") : ""}`
         : "",
     ) +
     panel(
@@ -437,7 +462,7 @@ async function productView() {
           button("View version", "version-open", v.PRODUCT_VERSION_ID),
         ]),
       ),
-      button("Compare versions", "version-compare"),
+      d.versions.length > 1 ? button("Compare versions", "version-compare") : "",
     ) +
     approvalPanel(d.approvals) +
     panel(
@@ -494,8 +519,8 @@ async function versionView() {
     ) +
     panel(
       "Version governance",
-      `<div class="panel-body">${details(v)}<p class="hint">${d.validation.length ? esc(d.validation.join(" · ")) : "Rule completeness checks pass. Approval still checks overlap and current authority."}</p></div>`,
-      `${editable && can("PRODUCT_CREATE") ? button("Edit dates / reason", "version-edit") + button("Submit for approval", "version-submit") : ""}${v.VERSION_STATE === "APPROVED" && can("PRODUCT_APPROVE") ? button("Activate", "version-activate") : ""}${!["DRAFT", "RETIRED"].includes(v.VERSION_STATE) && can("PRODUCT_CREATE") ? button("Request lifecycle change", "version-lifecycle") : ""}`,
+      `<div class="panel-body">${details(v)}<p class="hint">${d.validation.length ? esc(d.validation.join(" · ")) : "Rule completeness checks pass. Activation checks overlap and current authority."}</p></div>`,
+      `${editable && can("PRODUCT_CREATE") ? button("Edit dates / reason", "version-edit") + button("Submit for approval", "version-submit") : ""}${v.VERSION_STATE === "APPROVED" && can("PRODUCT_APPROVE") && v.CREATED_BY_USER_ID !== getSession().user.userId ? button("Activate", "version-activate") : ""}${!["DRAFT", "RETIRED"].includes(v.VERSION_STATE) && can("PRODUCT_CREATE") ? button("Request lifecycle change", "version-lifecycle") : ""}`,
     ) +
     approvalPanel(d.approvals);
   for (const family of state.schema) {
@@ -656,6 +681,9 @@ document.addEventListener("click", async (event) => {
   const c = state.customerDetail?.customer,
     k = state.caseDetail?.case,
     v = state.versionDetail?.version;
+  const pendingCase = state.customerDetail?.cases.find(item =>
+    ["DRAFT", "DOCUMENTS_PENDING", "MORE_INFO_REQUIRED"].includes(item.STATUS) &&
+    item.MAKER_USER_ID === getSession()?.user.userId);
   const customerPath = `/cif/customers/${state.customer}`;
   const save = async (path, body, method = "POST") => {
     await send(path, body, method);
@@ -682,7 +710,7 @@ document.addEventListener("click", async (event) => {
           grid(
             select("Party type", "partyType", ["INDIVIDUAL", "ORGANIZATION"]) +
               field("Legal name", "legalName") +
-              field("Birth date", "dateOfBirth", "date", { required: false }) +
+              field("Birth date", "dateOfBirth", "date") +
               field("Incorporation date", "incorporatedOn", "date", {
                 required: false,
               }) +
@@ -693,23 +721,44 @@ document.addEventListener("click", async (event) => {
               }),
           ),
           async (data) => {
-            const result = await send("/cif/customers", object(data));
+            const input = object(data);
+            if (input.partyType === "INDIVIDUAL") input.incorporatedOn = null;
+            else input.dateOfBirth = null;
+            input.homeBranchRef = input.homeBranchRef?.trim();
+            const result = await send("/cif/customers", input);
             state.customer = result.customer.CIF_ID;
             await repaint();
           },
         );
+        {
+          const form = document.querySelector("#dialog form");
+          const partyType = form.elements.namedItem("partyType");
+          const birth = form.elements.namedItem("dateOfBirth");
+          const incorporated = form.elements.namedItem("incorporatedOn");
+          const syncDates = () => {
+            const individual = partyType.value === "INDIVIDUAL";
+            birth.required = individual;
+            birth.disabled = !individual;
+            birth.closest("label").hidden = !individual;
+            incorporated.required = !individual;
+            incorporated.disabled = individual;
+            incorporated.closest("label").hidden = individual;
+          };
+          partyType.addEventListener("change", syncDates);
+          syncDates();
+        }
         break;
       case "profile-edit":
         dialog(
           "Propose profile revision",
           grid(
             field("Legal name", "legalName", "text", {
-              value: state.customerDetail.names.find((n) => !n.VALID_TO)
+              value: state.customerDetail.names.find((n) => n.NAME_TYPE === "LEGAL" && !n.VALID_TO)
                 ?.FULL_NAME,
             }) +
               field("Segment", "segmentCode", "text", {
                 required: false,
-                value: c.SEGMENT_CODE,
+                value: pendingCase?.SEGMENT_CHANGE_PENDING === "Y" ? pendingCase.PROPOSED_SEGMENT_CODE : c.SEGMENT_CODE,
               }),
           ) + reason(),
           (data) =>
@@ -765,14 +814,12 @@ document.addEventListener("click", async (event) => {
         );
         break;
       case "customer-status":
+        const statusOptions = (c.EFFECTIVE_KYC_STATUS || c.KYC_STATUS) === "VERIFIED" ?
+          ["ACTIVE", "RESTRICTED", "DORMANT", "CLOSED"] : ["RESTRICTED", "DORMANT", "CLOSED"];
+        const selectedStatus = statusOptions.includes(c.STATUS) ? c.STATUS : "";
         dialog(
           "Change customer status",
-          select("Status", "status", [
-            "ACTIVE",
-            "RESTRICTED",
-            "DORMANT",
-            "CLOSED",
-          ]) + reason(),
+          select("Status", "status", [{ value: "", label: "Choose a status" }, ...statusOptions], selectedStatus) + reason(),
           (data) =>
             save(
               customerPath + "/status",
@@ -784,7 +831,9 @@ document.addEventListener("click", async (event) => {
       case "case-new":
         dialog(
           "Open KYC case",
-          select("Type", "caseType", ["ONBOARDING", "PERIODIC", "REMEDIATION"]),
+          select("Type", "caseType", ["ONBOARDING", "PERIODIC", "REMEDIATION"],
+            !state.customerDetail.cases.length ? "ONBOARDING" :
+              c.KYC_STATUS === "VERIFIED" || c.KYC_STATUS === "EXPIRED" ? "PERIODIC" : "REMEDIATION"),
           async (data) => {
             const result = await send(customerPath + "/cases", object(data));
             state.case = result.CASE_ID;
@@ -835,12 +884,16 @@ document.addEventListener("click", async (event) => {
               }) +
               field("Reason code", "reasonCode", "text"),
           ) + field("Review comments", "comments"),
-          (data) =>
-            save(`/cif/cases/${state.case}/review`, {
+          (data) => {
+            const approval = data.get("outcome") === "APPROVE";
+            if (approval && !data.get("reviewDueAt")) throw new Error("Choose a future periodic review date for approval.");
+            return save(`/cif/cases/${state.case}/review`, {
               ...object(data),
-              reviewDueAt: iso(data.get("reviewDueAt")),
+              riskLevel: approval ? data.get("riskLevel") : null,
+              reviewDueAt: approval ? iso(data.get("reviewDueAt")) : null,
               rowVersion: k.ROW_VERSION,
-            }),
+            });
+          },
         );
         break;
       case "document-upload":
@@ -888,7 +941,7 @@ document.addEventListener("click", async (event) => {
         );
         break;
       case "consent-withdraw":
-        dialog("Withdraw consent", reason(), () =>
+        dialog("Withdraw consent", "<p>Withdraw this active consent?</p>", () =>
           save(customerPath + `/consents/${id}`, undefined, "DELETE"),
         );
         break;
@@ -916,7 +969,7 @@ document.addEventListener("click", async (event) => {
         );
         break;
       case "relationship-end":
-        dialog("End relationship", reason(), () =>
+        dialog("End relationship", "<p>End this relationship now?</p>", () =>
           save(customerPath + `/relationships/${id}`, undefined, "DELETE"),
         );
         break;
@@ -954,21 +1007,24 @@ document.addEventListener("click", async (event) => {
                 "DEPOSIT",
                 "LOAN",
               ]) +
-              field("Currency", "currencyCode", "text") +
+              field("Currency", "currencyCode", "text", { value: "INR" }) +
               field("Business owner", "businessOwnerRef", "text") +
               field("Manager", "productManagerRef", "text", {
                 required: false,
               }) +
               field("Support", "supportRef", "text", { required: false }) +
               field("Description", "description", "text", { required: false }) +
-              field("Sales start", "salesStartAt", "datetime-local") +
+              field("Sales start", "salesStartAt", "datetime-local", { value: local() }) +
               field("Sales end", "salesEndAt", "datetime-local", {
                 required: false,
               }),
           ),
           async (data) => {
+            const input = object(data);
             const result = await send("/products" + query(), {
-              ...object(data),
+              ...input,
+              productCode: input.productCode?.trim().toUpperCase(),
+              currencyCode: input.currencyCode?.trim().toUpperCase(),
               salesStartAt: iso(data.get("salesStartAt")),
               salesEndAt: iso(data.get("salesEndAt")),
             });
@@ -1070,9 +1126,13 @@ document.addEventListener("click", async (event) => {
       }
       case "product-lifecycle":
       case "version-lifecycle":
+        {
+        const lifecycleState = action === "version-lifecycle" ? v.VERSION_STATE : state.productDetail.product.STATUS;
+        const actions = lifecycleState === "SUSPENDED" ? ["REACTIVATE", "RETIRE"] :
+          lifecycleState === "ACTIVE" ? ["SUSPEND", "RETIRE"] : ["RETIRE"];
         dialog(
           "Request governed lifecycle change",
-          select("Action", "action", ["SUSPEND", "RETIRE", "REACTIVATE"]) +
+          select("Action", "action", actions) +
             reason(),
           (data) =>
             save(
@@ -1086,13 +1146,18 @@ document.addEventListener("click", async (event) => {
               },
             ),
         );
+        }
         break;
       case "treatment-new":
+        {
+        const choices = state.productDetail.versions
+          .filter(item => item.VERSION_STATE !== "DRAFT")
+          .map(item => ({ value: String(item.PRODUCT_VERSION_ID), label: `v${item.VERSION_NO} · ${item.VERSION_STATE}` }));
         dialog(
           "Propose existing-account treatment",
           grid(
-            field("Source version ID", "sourceVersionId") +
-              field("Target version ID", "targetVersionId") +
+            select("Source version", "sourceVersionId", choices) +
+              select("Target version", "targetVersionId", choices, choices[1]?.value) +
               select("Treatment", "treatmentCode", [
                 "GRANDFATHER",
                 "SCHEDULED",
@@ -1115,6 +1180,7 @@ document.addEventListener("click", async (event) => {
               consentRequired: data.get("consentRequired") === "true",
             }),
         );
+        }
         break;
       case "discover":
         dialog(
@@ -1148,13 +1214,15 @@ document.addEventListener("click", async (event) => {
           "Browse my offers",
           grid(
             select("Linked customer", "cifId", getSession().user.cifIds) +
-              field("Channel", "channel", "text") +
-              field("Currency", "currency", "text"),
+              field("Channel", "channel", "text", { value: "BRANCH" }) +
+              field("Currency", "currency", "text", { value: "INR" }),
           ) + '<div id="offer-result"></div>',
           async (data) => {
             const rows = await api(
               "/products/customer-offers?" + new URLSearchParams(object(data)),
             );
+            state.offerCif = data.get("cifId");
+            state.offerChannel = data.get("channel");
             document.querySelector("#offer-result").innerHTML = table(
               ["Product", "Version", "Type", ""],
               rows.map((r) => [
@@ -1165,6 +1233,7 @@ document.addEventListener("click", async (event) => {
                   "Check eligibility",
                   "customer-eligibility",
                   r.product.PRODUCT_ID,
+                  `data-product-type="${esc(r.product.PRODUCT_TYPE)}"`,
                 ),
               ]),
             );
@@ -1173,24 +1242,28 @@ document.addEventListener("click", async (event) => {
         );
         break;
       case "customer-eligibility":
-        state.product = id;
       case "eligibility":
+        {
+        const selectedProductId = action === "customer-eligibility" ? id : state.product;
+        const productType = action === "customer-eligibility" ? target.dataset.productType :
+          state.productDetail?.product.PRODUCT_TYPE;
+        const amountFields = productType === "LOAN" ?
+          field("Loan amount", "loanAmount", "number", { min: 0, step: "0.01" }) +
+            field("Tenure months", "tenureMonths", "number", { min: 1, step: 1 }) :
+          productType === "DEPOSIT" ?
+            field("Deposit amount", "depositAmount", "number", { min: 0, step: "0.01" }) +
+              field("Tenure months", "tenureMonths", "number", { min: 1, step: 1 }) :
+            field("Opening amount", "openingAmount", "number", { min: 0, step: "0.01", value: 0 });
         dialog(
           "Evaluate authoritative customer facts",
           grid(
-            field("CIF ID", "cifId") +
-              field("Channel", "channel", "text") +
-              field("Opening amount", "openingAmount", "text", {
-                required: false,
-              }) +
-              field("Loan amount", "loanAmount", "text", { required: false }) +
-              field("Tenure months", "tenureMonths", "text", {
-                required: false,
-              }),
+            field("CIF ID", "cifId", "text", { value: action === "customer-eligibility" ? state.offerCif : "" }) +
+              field("Channel", "channel", "text", { value: action === "customer-eligibility" ? state.offerChannel : "BRANCH" }) +
+              amountFields,
           ),
           async (data) => {
             const result = await send(
-              `/products/${state.product}/eligibility`,
+              `/products/${selectedProductId}/eligibility`,
               object(data),
             );
             toast(
@@ -1200,13 +1273,17 @@ document.addEventListener("click", async (event) => {
             );
           },
         );
+        }
         break;
       case "version-compare":
+        {
+        const choices = state.productDetail.versions.map(item =>
+          ({ value: String(item.PRODUCT_VERSION_ID), label: `v${item.VERSION_NO} · ${item.VERSION_STATE}` }));
         dialog(
           "Compare product versions",
           grid(
-            field("Left version ID", "left") +
-              field("Right version ID", "right"),
+            select("Left version", "left", choices) +
+              select("Right version", "right", choices, choices[1]?.value),
           ) + '<div id="comparison-result"></div>',
           async (data) => {
             const result = await api(
@@ -1223,6 +1300,7 @@ document.addEventListener("click", async (event) => {
             return false;
           },
         );
+        }
         break;
     }
   } catch (error) {
@@ -1235,14 +1313,17 @@ document.addEventListener("click", async (event) => {
 /** Common draft editor is shared by initial creation, clone and pre-submission revision. */
 function draftDialog(edit) {
   const v = state.versionDetail?.version;
+  const cloneChoices = state.productDetail?.versions
+    .filter(item => item.VERSION_STATE !== "DRAFT")
+    .map(item => ({ value: String(item.PRODUCT_VERSION_ID), label: `v${item.VERSION_NO} · ${item.VERSION_STATE}` })) || [];
   dialog(
     edit ? "Edit draft revision" : "Create / clone draft",
     grid(
       (edit
         ? ""
-        : field("Clone source version ID", "sourceVersionId", "text", {
-            required: false,
-          })) +
+        : select("Clone source", "sourceVersionId", [
+            { value: "", label: "Start without cloning" }, ...cloneChoices,
+          ], "", false)) +
         field("Effective from", "effectiveFromAt", "datetime-local", {
           value: local(edit ? v.EFFECTIVE_FROM_AT : null),
         }) +

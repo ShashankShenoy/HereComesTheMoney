@@ -1,4 +1,4 @@
-param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild)
+param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild, [bool]$PaymentSimulationEnabled=$true)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $runtime = Join-Path $taskRoot '.runtime'
@@ -75,9 +75,16 @@ function Save-OracleRunRecord {
   $oracleRun | ConvertTo-Json | Set-Content -LiteralPath $record
 }
 try {
+$previousPaymentSimulation = [Environment]::GetEnvironmentVariable('PAYMENT_SIMULATION_ENABLED', 'Process')
+$env:PAYMENT_SIMULATION_ENABLED = $PaymentSimulationEnabled.ToString().ToLowerInvariant() # This launcher is exclusively for the local payment demo.
+try {
 $backendLauncher = Start-Process -FilePath 'java.exe' -ArgumentList @(
   '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp', '-Djava.net.useSystemProxies=true', '-jar', ('"' + $jar + '"'), "--server.port=$BackendPort", '--server.address=127.0.0.1'
 ) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-backend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-backend.err.log') -PassThru
+} finally {
+  if ($null -eq $previousPaymentSimulation) { Remove-Item Env:PAYMENT_SIMULATION_ENABLED -ErrorAction SilentlyContinue }
+  else { $env:PAYMENT_SIMULATION_ENABLED = $previousPaymentSimulation }
+}
 $backendLauncherStartTicks = $backendLauncher.StartTime.ToUniversalTime().Ticks
 Save-OracleRunRecord
 $env:BACKEND_URL = "http://127.0.0.1:$BackendPort"

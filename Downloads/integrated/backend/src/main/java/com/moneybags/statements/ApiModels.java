@@ -9,10 +9,12 @@ import java.util.List;
 /** Wire contracts shared by controllers and upstream adapters. */
 public final class ApiModels {
     private ApiModels() {}
-    public record CreateRequest(@NotNull Long accountId, String customerCifId,
-        @NotBlank String statementType, @NotNull LocalDate periodStart, @NotNull LocalDate periodEnd,
-        String locale, @NotBlank String format, @NotBlank String channel, String purposeCode,
-        String caseReference, String correlationId, String priorStatementId, String correctionReasonCode) {}
+    public record CreateRequest(@NotNull @Min(1) Long accountId, @Size(max=36) String customerCifId,
+        @NotBlank @Size(max=30) String statementType, @NotNull LocalDate periodStart, @NotNull LocalDate periodEnd,
+        @Size(max=20) String locale, @NotBlank @Size(max=12) String format,
+        @NotBlank @Size(max=30) String channel, @Size(max=80) String purposeCode,
+        @Size(max=160) String caseReference, @Size(max=100) String correlationId,
+        @Size(max=36) String priorStatementId, @Size(max=80) String correctionReasonCode) {}
     public record RequestView(String requestId, Long accountId, String status, String statementType,
         LocalDate periodStart, LocalDate periodEnd, String format, String failureCode, String statementId) {}
     public record StatementView(String statementId, String statementNumber, Long accountId,
@@ -22,8 +24,9 @@ public final class ApiModels {
     public record LineView(int lineNo, Long journalId, Long postingId, OffsetDateTime bookedAt,
         LocalDate valueDate, String entryClass, BigDecimal amount, BigDecimal balanceAfter,
         String narration) {}
-    public record DeliveryRequest(@NotBlank String channel, @NotBlank String recipientType,
-        @NotBlank String recipientReferenceHash, @NotBlank String format, String correlationId) {}
+    public record DeliveryRequest(@NotBlank @Size(max=30) String channel, @NotBlank @Size(max=20) String recipientType,
+        @NotBlank @Pattern(regexp="[a-fA-F0-9]{64}") String recipientReferenceHash,
+        @NotBlank @Size(max=12) String format, @Size(max=100) String correlationId) {}
     public record DeliveryView(String deliveryId, String statementId, String status,
         String channel, String format, String renderUri, String failureCode) {}
     public record DeliveryResult(@NotBlank String status, String renderUri, String renderSha256, String failureCode) {}

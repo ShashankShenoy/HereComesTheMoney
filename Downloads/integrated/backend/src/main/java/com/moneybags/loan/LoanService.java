@@ -2,6 +2,7 @@ package com.moneybags.loan;
 
 import tools.jackson.databind.json.JsonMapper;
 import com.moneybags.common.api.*;
+import com.moneybags.cif.service.CustomerFactsPort;
 import com.moneybags.iam.dto.IamDtos.AuthorizationInput;
 import com.moneybags.iam.security.UserPrincipal;
 import com.moneybags.iam.service.AccessDecisionService;
@@ -27,10 +28,11 @@ public class LoanService {
     private final JsonMapper json;
     private final Clock clock;
     private final ProductDefinitionsPort products;
+    private final CustomerFactsPort customerFacts;
 
     public LoanService(JdbcTemplate db, AccessDecisionService access, JsonMapper json, Clock clock,
-                       ProductDefinitionsPort products) {
-        this.db=db; this.access=access; this.json=json; this.clock=clock; this.products=products;
+                       ProductDefinitionsPort products, CustomerFactsPort customerFacts) {
+        this.db=db; this.access=access; this.json=json; this.clock=clock; this.products=products; this.customerFacts=customerFacts;
     }
 
     /** Returns a bounded, branch-scoped operations queue. */
@@ -145,8 +147,8 @@ public class LoanService {
             if(!"SUCCEEDED".equals(replay.get("STATUS")))throw conflict("REQUEST_IN_PROGRESS","Request has not completed");
             return load(Long.parseLong((String)replay.get("RESOURCE_ID")),false);
         }
-        List<Map<String,Object>> customers=db.queryForList("SELECT STATUS,KYC_STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",input.cifId());
-        if(customers.isEmpty()||!"ACTIVE".equals(customers.get(0).get("STATUS"))||!"VERIFIED".equals(customers.get(0).get("KYC_STATUS")))
+        var customer=customerFacts.facts(input.cifId());
+        if(!"ACTIVE".equals(customer.status())||!"VERIFIED".equals(customer.kycStatus()))
             throw conflict("CIF_NOT_ELIGIBLE","Customer must be active with verified KYC");
         List<Map<String,Object>> kyc=db.queryForList("""
             SELECT CASE_ID,DECIDED_AT FROM M02_KYC_CASE WHERE CIF_ID=? AND STATUS='APPROVED' AND DECIDED_AT IS NOT NULL
@@ -155,11 +157,14 @@ public class LoanService {
         if(kyc.isEmpty())throw conflict("KYC_EVIDENCE_REQUIRED","Approved KYC case is required");
         List<Map<String,Object>> rules=db.queryForList("""
             SELECT P.PRODUCT_ID,V.PRODUCT_VERSION_ID,V.RULE_SET_HASH,L.MIN_LOAN_AMOUNT,L.MAX_LOAN_AMOUNT,
-                   L.MIN_TENURE_MONTHS,L.MAX_TENURE_MONTHS
+                   L.MIN_TENURE_MONTHS,L.MAX_TENURE_MONTHS,L.ALLOWED_INTEREST_TYPE,
+                   L.REPAYMENT_FREQUENCY,L.AMORTIZATION_METHOD,L.DISBURSEMENT_MODE,L.GRACE_DAYS
             FROM M03_PM_PRODUCT P JOIN M03_PM_PRODUCT_VERSION V ON V.PRODUCT_ID=P.PRODUCT_ID
             JOIN M03_PM_LOAN_RULE L ON L.PRODUCT_VERSION_ID=V.PRODUCT_VERSION_ID
             WHERE P.PRODUCT_ID=? AND V.PRODUCT_VERSION_ID=? AND P.PRODUCT_TYPE='LOAN'
               AND P.STATUS='ACTIVE' AND V.VERSION_STATE='ACTIVE'
+              AND P.SALES_START_AT<=SYSTIMESTAMP
+              AND (P.SALES_END_AT IS NULL OR P.SALES_END_AT>SYSTIMESTAMP)
               AND V.EFFECTIVE_FROM_AT<=SYSTIMESTAMP
               AND (V.EFFECTIVE_TO_AT IS NULL OR V.EFFECTIVE_TO_AT>SYSTIMESTAMP)
             """,input.productId(),input.productVersionId());
@@ -176,6 +181,21 @@ public class LoanService {
             input.cifId(),OffsetDateTime.now(clock));
         Map<String,Object> rule=rules.get(0);
         if(rule.get("RULE_SET_HASH")==null)throw conflict("PRODUCT_RULE_HASH_MISSING","Product version lacks an approved rule hash");
+        if(input.tenureMonths()>600||!Set.of("FIXED","BOTH").contains(rule.get("ALLOWED_INTEREST_TYPE"))
+            ||!"MONTHLY".equals(rule.get("REPAYMENT_FREQUENCY"))
+            ||!"REDUCING_BALANCE".equals(rule.get("AMORTIZATION_METHOD"))
+            ||!Set.of("SINGLE","BOTH").contains(rule.get("DISBURSEMENT_MODE"))
+            ||((Number)rule.get("GRACE_DAYS")).intValue()!=0)
+            throw conflict("LOAN_PRODUCT_UNSUPPORTED","This loan product needs a servicing workflow that is not configured");
+        Long fixedRules=db.queryForObject("""
+            SELECT COUNT(*) FROM M03_PM_INTEREST_RULE WHERE PRODUCT_VERSION_ID=?
+              AND INTEREST_TYPE='FIXED' AND INTEREST_METHOD IN ('SIMPLE','REDUCING_BALANCE')
+              AND COMPOUND_FREQUENCY='NONE' AND PAYOUT_FREQUENCY='MONTHLY'
+              AND ROUNDING_MODE='HALF_EVEN'
+              AND DAY_COUNT_BASIS IN ('ACT/365','ACT_365','ACTUAL_365','30/360')
+            """,Long.class,input.productVersionId());
+        if(fixedRules==null||fixedRules==0)
+            throw conflict("LOAN_PRODUCT_UNSUPPORTED","This loan product has no supported fixed-rate interest rule");
         if(input.amount().compareTo((BigDecimal)rule.get("MIN_LOAN_AMOUNT"))<0||input.amount().compareTo((BigDecimal)rule.get("MAX_LOAN_AMOUNT"))>0
             ||input.tenureMonths()<((Number)rule.get("MIN_TENURE_MONTHS")).intValue()||input.tenureMonths()>((Number)rule.get("MAX_TENURE_MONTHS")).intValue())
             throw bad("Amount or tenure is outside the product rule");
@@ -329,21 +349,53 @@ public class LoanService {
         return Map.of("offerId",offer,"applicationId",id,"status","ISSUED");
     }
 
+    /** Closes an unaccepted, expired offer so the customer can start a fresh application. */
+    @Transactional
+    public Map<String,Object> expireOffer(UserPrincipal actor,long offerId) {
+        Map<String,Object> offer=one("SELECT APPLICATION_ID,STATUS,EXPIRES_AT FROM M08_LOAN_OFFER WHERE OFFER_ID=? FOR UPDATE",offerId);
+        long appId=((Number)offer.get("APPLICATION_ID")).longValue();
+        Application a=load(appId,true);
+        require(actor,"LOAN_OFFER",a.branchCode(),a.cifId(),null,null,null,null);
+        if("EXPIRED".equals(offer.get("STATUS"))&&"EXPIRED".equals(a.status()))
+            return Map.of("offerId",offerId,"applicationId",appId,"status","EXPIRED");
+        if(!"ISSUED".equals(offer.get("STATUS"))||!"OFFERED".equals(a.status()))
+            throw conflict("INVALID_STATE","Only an unaccepted offer can expire");
+        Long expired=db.queryForObject("SELECT COUNT(*) FROM M08_LOAN_OFFER WHERE OFFER_ID=? AND EXPIRES_AT<=SYSTIMESTAMP",Long.class,offerId);
+        if(expired==null||expired==0)throw conflict("OFFER_NOT_EXPIRED","Offer remains open");
+        db.update("UPDATE M08_LOAN_OFFER SET STATUS='EXPIRED',TERMINATED_AT=SYSTIMESTAMP WHERE OFFER_ID=?",offerId);
+        db.update("UPDATE M08_LOAN_APPLICATION SET STATUS='EXPIRED',TERMINATED_AT=SYSTIMESTAMP,UPDATED_AT=SYSTIMESTAMP WHERE APPLICATION_ID=?",appId);
+        history("OFFER",offerId,"ISSUED","EXPIRED","OFFER_EXPIRED",actor);
+        history("APPLICATION",appId,"OFFERED","EXPIRED","OFFER_EXPIRED",actor);
+        event("LoanOfferExpired",appId,Map.of("applicationId",appId,"offerId",offerId));
+        return Map.of("offerId",offerId,"applicationId",appId,"status","EXPIRED");
+    }
+
     /** Captures customer acceptance against active Module 4 accounts; no disbursement occurs here. */
     @Transactional
     public Map<String,Object> accept(UserPrincipal actor,long offerId,AcceptOffer input) {
         requireCustomer(actor);
-        Map<String,Object> row=one("SELECT APPLICATION_ID,STATUS,EXPIRES_AT FROM M08_LOAN_OFFER WHERE OFFER_ID=? FOR UPDATE",offerId);
+        Map<String,Object> row=one("SELECT APPLICATION_ID,STATUS,EXPIRES_AT,DISBURSEMENT_ACCOUNT_ID,REPAYMENT_ACCOUNT_ID FROM M08_LOAN_OFFER WHERE OFFER_ID=? FOR UPDATE",offerId);
         long appId=((Number)row.get("APPLICATION_ID")).longValue();
         Application a=load(appId,true);
         require(actor,"LOAN_ACCEPT",a.branchCode(),a.cifId(),null,null,null,null);
-        if(!"OFFERED".equals(a.status())||!"ISSUED".equals(row.get("STATUS")))throw conflict("INVALID_STATE","Offer is not open");
-        Long unexpired=db.queryForObject("SELECT COUNT(*) FROM M08_LOAN_OFFER WHERE OFFER_ID=? AND EXPIRES_AT>SYSTIMESTAMP",Long.class,offerId);
-        if(unexpired==null||unexpired==0)throw conflict("OFFER_EXPIRED","Offer has expired");
-        for(long accountId:List.of(input.disbursementAccountId(),input.repaymentAccountId())){
-            List<Map<String,Object>> accounts=db.queryForList("SELECT PRIMARY_CIF_ID,LIFECYCLE_STATUS,CURRENCY_CODE FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",accountId);
-            if(accounts.isEmpty()||!a.cifId().equals(accounts.get(0).get("PRIMARY_CIF_ID"))||!"ACTIVE".equals(accounts.get(0).get("LIFECYCLE_STATUS"))||!"INR".equals(accounts.get(0).get("CURRENCY_CODE")))
-                throw conflict("ACCOUNT_NOT_ELIGIBLE","Both accounts must be active INR accounts owned by the borrower");
+        boolean firstAcceptance="OFFERED".equals(a.status())&&"ISSUED".equals(row.get("STATUS"));
+        boolean accountCorrection="ACCEPTED".equals(a.status())&&"ACCEPTED".equals(row.get("STATUS"));
+        if(!firstAcceptance&&!accountCorrection)throw conflict("INVALID_STATE","Offer is not open for acceptance or account correction");
+        if(firstAcceptance){
+            Long unexpired=db.queryForObject("SELECT COUNT(*) FROM M08_LOAN_OFFER WHERE OFFER_ID=? AND EXPIRES_AT>SYSTIMESTAMP",Long.class,offerId);
+            if(unexpired==null||unexpired==0)throw conflict("OFFER_EXPIRED","Offer has expired");
+        }
+        eligibleAccount(a.cifId(),input.disbursementAccountId());
+        eligibleAccount(a.cifId(),input.repaymentAccountId());
+        if(accountCorrection){
+            if(((Number)row.get("DISBURSEMENT_ACCOUNT_ID")).longValue()==input.disbursementAccountId()
+                &&((Number)row.get("REPAYMENT_ACCOUNT_ID")).longValue()==input.repaymentAccountId())
+                return Map.of("offerId",offerId,"applicationId",appId,"status","ACCEPTED");
+            db.update("UPDATE M08_LOAN_OFFER SET DISBURSEMENT_ACCOUNT_ID=?,REPAYMENT_ACCOUNT_ID=? WHERE OFFER_ID=?",
+                input.disbursementAccountId(),input.repaymentAccountId(),offerId);
+            audit("OFFER_ACCOUNTS_UPDATED","OFFER",offerId,actor);
+            event("LoanOfferAccountsUpdated",appId,Map.of("applicationId",appId,"offerId",offerId));
+            return Map.of("offerId",offerId,"applicationId",appId,"status","ACCEPTED");
         }
         db.update("""
             UPDATE M08_LOAN_OFFER SET STATUS='ACCEPTED',DISBURSEMENT_ACCOUNT_ID=?,REPAYMENT_ACCOUNT_ID=?,
@@ -361,7 +413,7 @@ public class LoanService {
     public Map<String,Object> addDocument(UserPrincipal actor,long applicationId,Document input) {
         Application a=load(applicationId,true);
         require(actor,"LOAN_CREATE",a.branchCode(),a.cifId(),null,null,null,null);
-        if(Set.of("REJECTED","WITHDRAWN","CONVERTED","CANCELLED").contains(a.status()))
+        if(Set.of("REJECTED","WITHDRAWN","EXPIRED","CONVERTED","CANCELLED").contains(a.status()))
             throw conflict("INVALID_STATE","Application no longer accepts documents");
         long id=insert("DOCUMENT_REF_ID","""
             INSERT INTO M08_LOAN_DOCUMENT_REF(APPLICATION_ID,DOCUMENT_TYPE,STORAGE_REFERENCE,CONTENT_HASH)
@@ -376,6 +428,8 @@ public class LoanService {
     @Transactional
     public Map<String,Object> verifyDocument(UserPrincipal actor,long applicationId,long documentId) {
         Application a=load(applicationId,true);
+        if(Set.of("REJECTED","WITHDRAWN","EXPIRED","CONVERTED","CANCELLED").contains(a.status()))
+            throw conflict("INVALID_STATE","Application no longer accepts document verification");
         String maker=db.queryForObject("SELECT CREATED_BY_USER_ID FROM M08_LOAN_APPLICATION WHERE APPLICATION_ID=?",String.class,applicationId);
         require(actor,actor.permissions().contains("LOAN_DOCUMENT_VERIFY")?"LOAN_DOCUMENT_VERIFY":"LOAN_ASSESS",
             a.branchCode(),a.cifId(),null,null,null,maker);
@@ -401,15 +455,21 @@ public class LoanService {
         Application a=load(applicationId,true);
         require(actor,"LOAN_CONVERT",a.branchCode(),a.cifId(),null,null,null,null);
         if(!"ACCEPTED".equals(a.status()))throw conflict("INVALID_STATE","Only an accepted offer can become a facility");
+        Map<String,Object> offer=one("""
+            SELECT OFFER_ID,DECISION_ID,DISBURSEMENT_ACCOUNT_ID,REPAYMENT_ACCOUNT_ID,ISSUED_AT,ACCEPTED_AT FROM M08_LOAN_OFFER
+            WHERE APPLICATION_ID=? AND STATUS='ACCEPTED' FOR UPDATE
+            """,applicationId);
         Long documents=db.queryForObject("""
             SELECT COUNT(*) FROM M08_LOAN_DOCUMENT_REF WHERE APPLICATION_ID=?
               AND DOCUMENT_TYPE='SIGNED_OFFER' AND STATUS='VERIFIED'
-            """,Long.class,applicationId);
-        if(documents==null||documents==0)throw conflict("DOCUMENTS_INCOMPLETE","Verified SIGNED_OFFER document is required");
-        Map<String,Object> offer=one("""
-            SELECT OFFER_ID,DECISION_ID,DISBURSEMENT_ACCOUNT_ID,REPAYMENT_ACCOUNT_ID FROM M08_LOAN_OFFER
-            WHERE APPLICATION_ID=? AND STATUS='ACCEPTED' FOR UPDATE
-            """,applicationId);
+              AND CREATED_AT>? AND VERIFIED_AT>=?
+              AND CREATED_AT>COALESCE((SELECT MAX(OCCURRED_AT) FROM M08_SECURITY_AUDIT_EVENT
+                WHERE ACTION_CODE='OFFER_ACCOUNTS_UPDATED' AND RESOURCE_TYPE='OFFER' AND RESOURCE_ID=?),?)
+            """,Long.class,applicationId,offer.get("ISSUED_AT"),offer.get("ACCEPTED_AT"),
+            String.valueOf(offer.get("OFFER_ID")),offer.get("ACCEPTED_AT"));
+        if(documents==null||documents==0)throw conflict("DOCUMENTS_INCOMPLETE","A signed offer issued for these terms must be verified after acceptance");
+        eligibleAccount(a.cifId(),((Number)offer.get("DISBURSEMENT_ACCOUNT_ID")).longValue());
+        eligibleAccount(a.cifId(),((Number)offer.get("REPAYMENT_ACCOUNT_ID")).longValue());
         Map<String,Object> decision=one("""
             SELECT SANCTIONED_AMOUNT,SANCTIONED_TENURE_MONTHS,ANNUAL_RATE_PCT,FIXED_RATE_PCT,INTEREST_TYPE
             FROM M08_LOAN_DECISION WHERE DECISION_ID=? AND DECISION_CODE='APPROVE'
@@ -418,24 +478,29 @@ public class LoanService {
             SELECT L.DISBURSEMENT_MODE,L.REPAYMENT_FREQUENCY,L.AMORTIZATION_METHOD,I.DAY_COUNT_BASIS
             FROM M03_PM_LOAN_RULE L JOIN M03_PM_INTEREST_RULE I ON I.PRODUCT_VERSION_ID=L.PRODUCT_VERSION_ID
             WHERE L.PRODUCT_VERSION_ID=? AND I.INTEREST_TYPE='FIXED'
+              AND I.INTEREST_METHOD IN ('SIMPLE','REDUCING_BALANCE') AND I.COMPOUND_FREQUENCY='NONE'
+              AND I.PAYOUT_FREQUENCY='MONTHLY' AND I.ROUNDING_MODE='HALF_EVEN'
+              AND I.DAY_COUNT_BASIS IN ('ACT/365','ACT_365','ACTUAL_365','30/360')
             ORDER BY I.INTEREST_RULE_ID FETCH FIRST 1 ROWS ONLY
             """,a.productVersionId());
         if("FLOATING".equals(decision.get("INTEREST_TYPE")))
             throw conflict("RATE_INTEGRATION_REQUIRED","Floating-rate index integration is not configured");
         Long seq=db.queryForObject("SELECT M08_LOAN_FACILITY_NO_SEQ.NEXTVAL FROM DUAL",Long.class);
+        Map<String,Object> applicationTerms=one("SELECT PRODUCT_RULE_SET_HASH,CURRENCY_CODE FROM M08_LOAN_APPLICATION WHERE APPLICATION_ID=?",applicationId);
+        // Oracle's generated-key RETURNING clause requires INSERT VALUES, not INSERT SELECT.
         long facility=insert("FACILITY_ID","""
             INSERT INTO M08_LOAN_FACILITY(FACILITY_NUMBER,APPLICATION_ID,DECISION_ID,OFFER_ID,PRIMARY_CIF_ID,
               PRODUCT_ID,PRODUCT_VERSION_ID,PRODUCT_RULE_SET_HASH,BRANCH_CODE,CURRENCY_CODE,PRINCIPAL_AMOUNT,
               TENURE_MONTHS,DISBURSEMENT_MODE,REPAYMENT_FREQUENCY,AMORTIZATION_METHOD,DAY_COUNT_BASIS,
               INTEREST_TYPE,ANNUAL_RATE_PCT,FIXED_RATE_PCT,DISBURSEMENT_ACCOUNT_ID,REPAYMENT_ACCOUNT_ID)
-            SELECT ?,A.APPLICATION_ID,?,?,A.PRIMARY_CIF_ID,A.PRODUCT_ID,A.PRODUCT_VERSION_ID,A.PRODUCT_RULE_SET_HASH,
-              A.BRANCH_CODE,A.CURRENCY_CODE,?,?,?,?,?,?,?,?,?,?,?
-            FROM M08_LOAN_APPLICATION A WHERE A.APPLICATION_ID=?
-            ""","LNFAC-"+seq,offer.get("DECISION_ID"),offer.get("OFFER_ID"),decision.get("SANCTIONED_AMOUNT"),
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ""","LNFAC-"+seq,applicationId,offer.get("DECISION_ID"),offer.get("OFFER_ID"),a.cifId(),
+            a.productId(),a.productVersionId(),applicationTerms.get("PRODUCT_RULE_SET_HASH"),a.branchCode(),
+            applicationTerms.get("CURRENCY_CODE"),decision.get("SANCTIONED_AMOUNT"),
             decision.get("SANCTIONED_TENURE_MONTHS"),"BOTH".equals(rule.get("DISBURSEMENT_MODE"))?"SINGLE":rule.get("DISBURSEMENT_MODE"),
             rule.get("REPAYMENT_FREQUENCY"),rule.get("AMORTIZATION_METHOD"),rule.get("DAY_COUNT_BASIS"),
             decision.get("INTEREST_TYPE"),decision.get("ANNUAL_RATE_PCT"),decision.get("FIXED_RATE_PCT"),
-            offer.get("DISBURSEMENT_ACCOUNT_ID"),offer.get("REPAYMENT_ACCOUNT_ID"),applicationId);
+            offer.get("DISBURSEMENT_ACCOUNT_ID"),offer.get("REPAYMENT_ACCOUNT_ID"));
         db.update("UPDATE M08_LOAN_APPLICATION SET STATUS='CONVERTED',TERMINATED_AT=SYSTIMESTAMP,UPDATED_AT=SYSTIMESTAMP WHERE APPLICATION_ID=?",applicationId);
         history("FACILITY",facility,null,"PENDING_DISBURSEMENT","FACILITY_CREATED",actor);
         history("APPLICATION",applicationId,"ACCEPTED","CONVERTED","FACILITY_CREATED",actor);
@@ -487,6 +552,20 @@ public class LoanService {
         List<Map<String,Object>> rows=db.queryForList(sql,args);
         if(rows.isEmpty())throw new BusinessException(HttpStatus.NOT_FOUND,"LOAN_NOT_FOUND","Loan resource not found");
         return rows.get(0);
+    }
+
+    /** Accounts chosen for a personal loan must remain directly usable by its borrower. */
+    private void eligibleAccount(String cifId,long accountId) {
+        List<Map<String,Object>> accounts=db.queryForList("""
+            SELECT PRIMARY_CIF_ID,LIFECYCLE_STATUS,ACCOUNT_STATUS,ACCOUNT_OPERATION_MODE,CURRENCY_CODE
+            FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?
+            """,accountId);
+        if(accounts.isEmpty()||!cifId.equals(accounts.get(0).get("PRIMARY_CIF_ID"))
+            ||!"ACTIVE".equals(accounts.get(0).get("LIFECYCLE_STATUS"))
+            ||!"ACTIVE".equals(accounts.get(0).get("ACCOUNT_STATUS"))
+            ||!"INR".equals(accounts.get(0).get("CURRENCY_CODE"))
+            ||!Set.of("SELF_OPERATED","ANYONE").contains(accounts.get(0).get("ACCOUNT_OPERATION_MODE")))
+            throw conflict("ACCOUNT_NOT_ELIGIBLE","Choose active INR borrower accounts that do not require joint or guardian approval");
     }
 
     /** Inserts one Oracle identity row and returns its generated key. */

@@ -143,11 +143,14 @@ public class TellerController {
   var vaults=db.rows("SELECT * FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE=? FOR UPDATE",r.branchCode());
   if(vaults.isEmpty())throw fail("Register counted branch vault cash before opening a till");
   var vault=vaults.get(0);
+  String actor=CurrentActor.get().userId();LocalDate date=LocalDate.now(ZoneId.of("Asia/Kolkata"));
+  var existing=db.rows("SELECT STATUS FROM MBX_TELLER_TILL WHERE TELLER_USER_ID=? AND BUSINESS_DATE=?",actor,date);
+  if(!existing.isEmpty())throw new BusinessException(HttpStatus.CONFLICT,"TILL_ALREADY_EXISTS",
+   "OPEN".equals(existing.get(0).get("STATUS"))?"Your till is already open for today. Use the existing till.":"Your till for today has already been closed. A new till can be opened on the next business day.");
   long vaultGl=((Number)vault.get("VAULT_GL_ID")).longValue();
   if(vaultGl==r.cashGlId())throw fail("Till cash and vault cash need separate GL accounts");
   if(((BigDecimal)vault.get("CASH_BALANCE")).compareTo(OPENING_CASH)<0)throw fail("Branch vault has less than INR 5,000 available for opening the till");
   String id=UUID.randomUUID().toString();
-  String actor=CurrentActor.get().userId();LocalDate date=LocalDate.now(ZoneId.of("Asia/Kolkata"));
   db.jdbc().update("INSERT INTO MBX_TELLER_TILL(TILL_ID,TELLER_USER_ID,BRANCH_CODE,BUSINESS_DATE,CASH_GL_ID) VALUES (?,?,?,?,?)",id,actor,r.branchCode(),date,r.cashGlId());
   var key=new GeneratedKeyHolder();
   db.jdbc().update(con->{var ps=con.prepareStatement("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,AMOUNT,VALUE_DATE) VALUES (?,'TELLER',?,?,?,'ADJUSTMENT','VALIDATED',?,?)",new String[]{"TXN_ID"});Object[] values={actor,"till-opening:"+id,CustomerHashService.digest("till-opening:"+id),id,OPENING_CASH,date};for(int i=0;i<values.length;i++)ps.setObject(i+1,values[i]);return ps;},key);
@@ -214,12 +217,13 @@ public class TellerController {
   if(!old.isEmpty()){if(!java.security.MessageDigest.isEqual((byte[])old.get(0).get("REQUEST_HASH"),hash))throw fail("Idempotency key was used for different cash details");return ledger.transaction(((Number)old.get(0).get("TXN_ID")).longValue());}
   if(!"OPEN".equals(till.get("STATUS"))||!LocalDate.now(ZoneId.of("Asia/Kolkata")).equals(BusinessRepository.localDate(till.get("BUSINESS_DATE"))))throw fail("Till is closed or belongs to a different business date");
   boolean deposit=r.direction().equals("DEPOSIT");
-  if(!"ACTIVE".equals(a.get("LIFECYCLE_STATUS")))throw fail("Account must be active");
+  var lockedAccount=db.one("SELECT PRODUCT_VERSION_ID,LIFECYCLE_STATUS FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=? FOR UPDATE",r.accountId());
+  if(!"ACTIVE".equals(lockedAccount.get("LIFECYCLE_STATUS")))throw fail("Account must be active");
   BigDecimal balance=(BigDecimal)till.get("CASH_BALANCE");
   if(!deposit&&balance.compareTo(r.amount())<0)throw fail("Insufficient cash in the teller till");
-  var gl=db.one("SELECT GL_ACCOUNT_ID FROM M05_GL_PRODUCT_MAPPING WHERE PRODUCT_VERSION_ID=? AND POSTING_TYPE=? AND GL_ROLE_CODE='CUSTOMER_LIABILITY' AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSDATE AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>=SYSDATE)",a.get("PRODUCT_VERSION_ID"),r.direction());
+  var gl=db.one("SELECT GL_ACCOUNT_ID FROM M05_GL_PRODUCT_MAPPING WHERE PRODUCT_VERSION_ID=? AND POSTING_TYPE=? AND GL_ROLE_CODE='CUSTOMER_LIABILITY' AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSDATE AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>=SYSDATE)",lockedAccount.get("PRODUCT_VERSION_ID"),r.direction());
   var key=new GeneratedKeyHolder();String actor=CurrentActor.get().userId();LocalDate date=LocalDate.now(ZoneId.of("Asia/Kolkata"));
-  db.jdbc().update(con->{var ps=con.prepareStatement("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,'TELLER',?,?,?,?,'VALIDATED',?,?,?,?,?)",new String[]{"TXN_ID"});Object[] values={actor,r.requestKey(),hash,UUID.randomUUID().toString(),r.direction(),deposit?null:r.accountId(),deposit?r.accountId():null,a.get("PRODUCT_VERSION_ID"),r.amount(),date};for(int i=0;i<values.length;i++)ps.setObject(i+1,values[i]);return ps;},key);
+  db.jdbc().update(con->{var ps=con.prepareStatement("INSERT INTO M05_TXN_TRANSACTION_LOG(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,TXN_TYPE,STATUS,SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID,PRODUCT_VERSION_ID,AMOUNT,VALUE_DATE) VALUES (?,'TELLER',?,?,?,?,'VALIDATED',?,?,?,?,?)",new String[]{"TXN_ID"});Object[] values={actor,r.requestKey(),hash,UUID.randomUUID().toString(),r.direction(),deposit?null:r.accountId(),deposit?r.accountId():null,lockedAccount.get("PRODUCT_VERSION_ID"),r.amount(),date};for(int i=0;i<values.length;i++)ps.setObject(i+1,values[i]);return ps;},key);
   long txn=Objects.requireNonNull(key.getKey()).longValue();
   long customerGl=((Number)gl.get("GL_ACCOUNT_ID")).longValue(),cashGl=((Number)till.get("CASH_GL_ID")).longValue();
   var journal=ledger.postJournal(new JournalRequest("cash:"+txn,r.direction(),txn,null,null,null,null,null,date,r.reason(),List.of(

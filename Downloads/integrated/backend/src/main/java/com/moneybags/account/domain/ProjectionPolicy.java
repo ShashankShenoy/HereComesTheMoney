@@ -2,6 +2,7 @@ package com.moneybags.account.domain;
 
 import com.moneybags.account.api.ApiException;
 import com.moneybags.account.api.Models.*;
+import com.moneybags.account.db.AccountStore.ProjectionSnapshot;
 import org.springframework.http.HttpStatus;
 import java.math.BigDecimal;
 
@@ -9,8 +10,8 @@ import java.math.BigDecimal;
 public final class ProjectionPolicy {
     private ProjectionPolicy() { }
     /** Rejects gaps, replays, mismatched deltas, and negative control balances. */
-    public static void validate(AccountView account, ProjectionEvent event) {
-        if (event.version() != account.balanceSourceVersion() + 1) throw conflict("Projection version gap or replay");
+    public static void validate(ProjectionSnapshot account, ProjectionEvent event) {
+        if (event.version() != account.version() + 1) throw conflict("Projection version gap or replay");
         checkAfter(account.ledgerBalance(), event.ledgerDelta(), event.ledgerAfter(), "ledger");
         checkAfter(account.blockedBalance(), event.blockedDelta(), event.blockedAfter(), "blocked");
         checkAfter(account.lienBalance(), event.lienDelta(), event.lienAfter(), "lien");

@@ -95,6 +95,12 @@ public class LoanController {
     public ApiResponse<Map<String,Object>> offer(@AuthenticationPrincipal UserPrincipal actor,@PathVariable long id,
         @Valid @RequestBody Offer body){return ApiResponse.of(loans.offer(actor,id,body));}
 
+    /** Marks an expired, unaccepted offer and its application closed. */
+    @PostMapping("/offers/{id}/expire")
+    public ApiResponse<Map<String,Object>> expireOffer(@AuthenticationPrincipal UserPrincipal actor,@PathVariable long id){
+        return ApiResponse.of(loans.expireOffer(actor,id));
+    }
+
     /** Accepts an offer against borrower-owned accounts. */
     @PostMapping("/offers/{id}/accept")
     public ApiResponse<Map<String,Object>> accept(@AuthenticationPrincipal UserPrincipal actor,@PathVariable long id,

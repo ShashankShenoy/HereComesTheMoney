@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -25,11 +24,10 @@ public class StatementController {
     private final DeliveryService deliveries;
     private final EventService events;
     private final AuthorizationService auth;
-    private final String workerAudience;
     public StatementController(RequestService requests,StatementService statements,DeliveryService deliveries,
-        EventService events,AuthorizationService auth,@Value("${moneybags.worker-token-audience}") String workerAudience) {
+        EventService events,AuthorizationService auth) {
         this.requests=requests;this.statements=statements;this.deliveries=deliveries;
-        this.events=events;this.auth=auth;this.workerAudience=workerAudience;
+        this.events=events;this.auth=auth;
     }
     /** Creates or safely replays a requester-scoped idempotent statement request. */
     @PostMapping("/statement-requests")
@@ -67,7 +65,7 @@ public class StatementController {
     }
     /** Worker endpoint that issues a statement from a posted GL source cut. */
     @PostMapping("/internal/statement-requests/{id}/process")
-    @Operation(summary="Process authorized request",description="System JWT with worker audience required; reauthorizes immediately before issue.")
+    @Operation(summary="Process authorized request",description="Authenticated service account with STATEMENT_INTERNAL required; reauthorizes immediately before issue.")
     public RequestView process(@AuthenticationPrincipal UserPrincipal jwt,@PathVariable String id) {
         return statements.process(id,worker(jwt));
     }
@@ -80,7 +78,11 @@ public class StatementController {
     @Operation(summary="Download a statement",description="PDF, CSV or HTML, rendered from an immutable issued snapshot with a fresh disclosure check.")
     public ResponseEntity<byte[]> download(@AuthenticationPrincipal UserPrincipal user,@PathVariable String id,
         @RequestParam(defaultValue="PDF") String format) {
-        StatementView view=statement(user,id);
+        StatementService.SnapshotInfo s=statements.info(id); Actor actor=Actor.from(user);
+        requireAudience(actor,s);
+        auth.require("VIEW","DOWNLOAD",actor,s.accountId(),s.cif(),id,s.requestId(),null,null,
+            null,actor.id(),actor.type());
+        StatementView view=statements.get(id);
         var result=StatementDocument.render(view,format);
         return ResponseEntity.ok().header("Cache-Control","no-store")
             .header("Content-Disposition","attachment; filename=statement-"+id+"."+format.toLowerCase(java.util.Locale.ROOT))

@@ -30,5 +30,5 @@ export async function api(path,{method='GET',body,headers:extraHeaders={}}={}){
 export async function login(username,password,otp){const value=await api('/auth/login',{method:'POST',body:{username,password,otp:otp||null,clientId:'MONEYBAGS_WEB',deviceRef:navigator.userAgent.slice(0,160)}});saveSession(value);return value;}
 export async function refresh(){if(!session)throw new Error('Sign in first');const value=await api('/auth/refresh',{method:'POST',body:{refreshToken:session.refreshToken}});saveSession(value);return value;}
 export async function logout(){try{await api('/auth/logout',{method:'POST'});}finally{saveSession(null);}}
-/** Downloads authorized evidence through a bearer header; tokens never appear in URLs. */
-export async function download(path){const response=await fetch(`/api/v1${path}`,{headers:{Authorization:`Bearer ${session.accessToken}`,'X-Customer-Hash':customerHash}});if(!response.ok)throw new ApiFailure(await response.json());const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='evidence';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+/** Reuse the authenticated API download path so evidence keeps its filename and session handling. */
+export async function download(path){return api(path);}

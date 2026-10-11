@@ -58,13 +58,13 @@ public class AuditController {
             throw new ApiException(HttpStatus.BAD_REQUEST, "AUDIT_METADATA_VALUE_INVALID",
                     "Audit metadata values must be short codes without free text.");
         }
-        var existing = findSourceId(input.sourceService(), input.sourceStream(), input.sourceEventId());
-        if (existing != null) return Map.of("auditEventId", existing, "status", "DUPLICATE");
-        var retentionUntil = retention.until(input.occurredAt());
         try {
+            var hash = sha256(json.writeValueAsString(input));
+            var existing = findSource(input.sourceService(), input.sourceStream(), input.sourceEventId());
+            if (existing != null) return replay(existing, hash);
+            var retentionUntil = retention.until(input.occurredAt());
             var id = UUID.randomUUID().toString();
             var metadata = json.writeValueAsString(input.metadata());
-            var hash = sha256(json.writeValueAsString(input));
             jdbc.sql("""
                     INSERT INTO M09_PRIVACY_AUDIT_EVENT
                     (AUDIT_EVENT_ID,SOURCE_SERVICE,SOURCE_STREAM,SOURCE_EVENT_ID,EVENT_TYPE,
@@ -92,8 +92,12 @@ public class AuditController {
                     .param("retention", retentionUntil).update();
             return Map.of("auditEventId", id, "status", "CREATED");
         } catch (DuplicateKeyException race) {
-            var id = findSourceId(input.sourceService(), input.sourceStream(), input.sourceEventId());
-            if (id != null) return Map.of("auditEventId", id, "status", "DUPLICATE");
+            try {
+                var existing = findSource(input.sourceService(), input.sourceStream(), input.sourceEventId());
+                if (existing != null) return replay(existing, sha256(json.writeValueAsString(input)));
+            } catch (JsonProcessingException problem) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "AUDIT_JSON_INVALID", "Audit input cannot be serialized.");
+            }
             throw race;
         } catch (JsonProcessingException problem) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "AUDIT_JSON_INVALID", "Audit input cannot be serialized.");
@@ -116,7 +120,7 @@ public class AuditController {
             throw new ApiException(HttpStatus.BAD_REQUEST, "AUDIT_FILTER_REQUIRED",
                     "A case, actor, or complete resource filter is required.");
         }
-        if (to.isBefore(from) || to.isAfter(from.plusDays(31))) {
+        if (!to.isAfter(from) || java.time.Duration.between(from, to).compareTo(java.time.Duration.ofDays(31)) > 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "AUDIT_WINDOW_INVALID",
                     "Search window must be positive and at most 31 days.");
         }
@@ -138,13 +142,23 @@ public class AuditController {
                         rs.getString(7), rs.getString(8), rs.getString(9))).list();
     }
 
-    private String findSourceId(String service, String stream, String eventId) {
+    private SourceEvent findSource(String service, String stream, String eventId) {
         return jdbc.sql("""
-                SELECT AUDIT_EVENT_ID FROM M09_PRIVACY_AUDIT_EVENT
+                SELECT AUDIT_EVENT_ID,EVENT_SHA256 FROM M09_PRIVACY_AUDIT_EVENT
                  WHERE SOURCE_SERVICE=:service AND SOURCE_STREAM=:stream AND SOURCE_EVENT_ID=:eventId
                 """).param("service", service).param("stream", stream).param("eventId", eventId)
-                .query(String.class).optional().orElse(null);
+                .query((rs, n) -> new SourceEvent(rs.getString(1), rs.getString(2))).optional().orElse(null);
     }
+
+    private Map<String, String> replay(SourceEvent existing, String hash) {
+        if (!existing.hash().equalsIgnoreCase(hash)) {
+            throw new ApiException(HttpStatus.CONFLICT, "AUDIT_EVENT_CONFLICT",
+                    "Source event ID belongs to different audit content.");
+        }
+        return Map.of("auditEventId", existing.id(), "status", "DUPLICATE");
+    }
+
+    private record SourceEvent(String id, String hash) {}
 
     private String sha256(String value) {
         try {

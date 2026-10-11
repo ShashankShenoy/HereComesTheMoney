@@ -29,7 +29,7 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
   if(!(body instanceof java.util.Map<?,?> error&&error.containsKey("code"))&&path.matches("/api/v1/payments/\\d+/(history|rail-evidence)")){
    long id=Long.parseLong(path.split("/")[4]);
    var row=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",id);
-   if(!visible(row,hash))return Map.of("paymentId",id);
+   if(!visiblePayment(row,hash))return Map.of("paymentId",id);
   }
   if(path.matches("/api/v1/journals/\\d+/control")){
    long id=Long.parseLong(path.split("/")[4]);
@@ -47,7 +47,7 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
    Object txn=m.containsKey("TXN_ID")?m.get("TXN_ID"):m.get("transactionId");
    Object payment=m.containsKey("PAYMENT_ID")?m.get("PAYMENT_ID"):m.get("paymentId");
    if(txn instanceof Number n){var r=db.one("SELECT SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID FROM M05_TXN_TRANSACTION_LOG WHERE TXN_ID=?",n.longValue());if(!visibleTransaction(r,hash,n.longValue()))return Map.of("transactionId",n.longValue());}
-   else if(payment instanceof Number n){var r=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",n.longValue());if(!visible(r,hash))return Map.of("paymentId",n.longValue());}
+   else if(payment instanceof Number n){var r=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",n.longValue());if(!visiblePayment(r,hash))return Map.of("paymentId",n.longValue());}
   }
   if(body instanceof com.moneybags.account.api.Models.Page<?> page)return new com.moneybags.account.api.Models.Page<>(page.items().stream().map(v->mask(v,hash)).toList(),page.limit(),page.offset());
   if(body instanceof com.moneybags.account.api.Models.AccountView a){
@@ -66,7 +66,7 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
   }
   if(body instanceof Payment p){
    var r=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",p.paymentId());
-   return visible(r,hash)?body:Map.of("paymentId",p.paymentId());
+   return visiblePayment(r,hash)?body:Map.of("paymentId",p.paymentId());
   }
   return body;
  }
@@ -79,6 +79,17 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
    }
   }
   return false;
+ }
+ private boolean visiblePayment(Map<String,Object> row,String hash){
+  var actor=CurrentActor.get();
+  if("EMPLOYEE".equals(actor.userType())&&actor.permissions().contains("PAYMENT_READ"))
+   for(String key:List.of("SOURCE_ACCOUNT_ID","TARGET_ACCOUNT_ID"))
+    if(row.get(key) instanceof Number id)try{
+     access.account("PAYMENT_READ",id.longValue());
+     hashes.audit("FINANCIAL_DETAILS_VIEWED","ACCOUNT",id.toString(),"PAYMENT_READ");
+     return true;
+    }catch(com.moneybags.common.api.BusinessException denied){/* check the other account */}
+  return visible(row,hash);
  }
  private boolean visibleTransaction(Map<String,Object> row,String hash,long id){
   if(access.bankAdminTransactionRead())for(String key:List.of("SOURCE_ACCOUNT_ID","TARGET_ACCOUNT_ID")){

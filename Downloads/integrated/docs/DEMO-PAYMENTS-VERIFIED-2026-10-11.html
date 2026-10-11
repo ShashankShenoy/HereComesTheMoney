@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Demo payments verification — 11 October 2026</title>
+<style>body{font:16px/1.65 system-ui,sans-serif;color:#263238;max-width:850px;margin:40px auto;padding:0 24px}h1{line-height:1.2}table{border-collapse:collapse;width:100%;margin:24px 0}th,td{text-align:left;padding:12px;border-bottom:1px solid #ddd}th{background:#f5f7f8}.pass{color:#176537;font-weight:600}li{margin-bottom:8px}</style>
+<h1>Payments between two demo users are working</h1>
+<p>Verified on 11 October 2026. The running demo now has a direct account transfer in Payments, using the existing atomic ledger transfer service. This immediately debits the sender and credits the recipient, including when external payment simulation is disabled.</p>
+<p>Sign in, open <strong>Payments → Send to another bank account</strong>, select your source account, enter the other user's account number and amount, and review and confirm. The recipient finds their account number in <strong>My accounts</strong>. Each user can refresh their own sent and received transfers.</p>
+<table><caption>First transfer in the isolated verification database: INR 25</caption><tr><th>User</th><th>Before</th><th>After</th></tr><tr><td>Sender</td><td>INR 75,000</td><td>INR 74,975</td></tr><tr><td>Recipient</td><td>INR 25,000</td><td>INR 25,025</td></tr></table>
+<p class="pass">All seven browser checks passed against the packaged running preview:</p>
+<ol>
+<li>Sender debit, recipient credit, matching reference and completed history for both users.</li>
+<li>Saved transfer remains visible after both users reload.</li>
+<li>Retry after a lost response reuses the request key and does not move money twice.</li>
+<li>Invalid inputs, nonexistent recipient, insufficient funds and cancellation leave balances unchanged.</li>
+<li>A user cannot spend from or read another user's private account.</li>
+<li>The recipient can send money back with external simulation disabled.</li>
+<li>The phone layout fits; transfer cards display amount, direction and status without horizontal scrolling.</li>
+</ol>
+<p>Backend verification: <strong>98 passed</strong>. Frontend verification: <strong>32 passed</strong>. Frontend build and startup script syntax passed. The main demo is healthy and serves the updated screen. Read-only Oracle checks found zero unbalanced journals and zero reserve ledger or hold discrepancies; test transfers used isolated synthetic accounts.</p>
+<p>The external-rail simulator remains a separate workflow and is labelled accordingly. Its simulated settlement does not credit another demo user; use the direct account transfer for this demonstration.</p>
+<p>The assistant startup proxy setting was also restored. A greeting through the configured provider returned HTTP 200 in an isolated customer session.</p>
+<p><a href="http://localhost:5174">Open the demo</a></p>
+</html>

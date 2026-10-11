@@ -51,7 +51,14 @@ public class ConsentService {
                     || !prior.subjectExternalId().equals(command.subjectExternalId())
                     || !prior.purposeCode().equals(command.purposeCode())
                     || !Objects.equals(prior.sourceConsentId(), sourceConsentId)
-                    || prior.decision() != command.decision()) {
+                    || prior.decision() != command.decision()
+                    || !Objects.equals(prior.actorExternalId(), context.actorId())
+                    || !Objects.equals(prior.channelCode(), command.channelCode())
+                    || !Objects.equals(prior.noticeSha256(), command.noticeSha256())
+                    || (command.effectiveAt() != null && !prior.effectiveAt().isEqual(command.effectiveAt()))
+                    || !Objects.equals(prior.expiresAt(), command.expiresAt())
+                    || !Objects.equals(prior.evidenceUri(), command.evidenceUri())
+                    || !Objects.equals(prior.evidenceSha256(), command.evidenceSha256())) {
                 throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
                         "Idempotency key belongs to a different consent request.");
             }
@@ -104,7 +111,11 @@ public class ConsentService {
             if (prior.decision() != ConsentDecision.Decision.WITHDRAWN
                     || !prior.subjectService().equals(command.subjectService())
                     || !prior.subjectExternalId().equals(command.subjectExternalId())
-                    || !prior.purposeCode().equals(command.purposeCode())) {
+                    || !prior.purposeCode().equals(command.purposeCode())
+                    || !Objects.equals(prior.actorExternalId(), context.actorId())
+                    || !Objects.equals(prior.channelCode(), command.channelCode())
+                    || !Objects.equals(prior.evidenceUri(), command.evidenceUri())
+                    || !Objects.equals(prior.evidenceSha256(), command.evidenceSha256())) {
                 throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
                         "Idempotency key belongs to a different consent request.");
             }

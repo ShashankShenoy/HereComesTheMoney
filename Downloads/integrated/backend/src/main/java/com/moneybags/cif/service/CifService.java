@@ -119,7 +119,9 @@ public class CifService implements CustomerFactsPort {
       "CIF_READ permission required"
     );
     var rows = db.rows(
-      "SELECT C.*, (SELECT FULL_NAME FROM M02_CIF_NAME N WHERE N.PARTY_ID=C.PARTY_ID AND N.NAME_TYPE='LEGAL' AND N.VALID_TO IS NULL ORDER BY N.VALID_FROM DESC FETCH FIRST 1 ROWS ONLY) LEGAL_NAME FROM M02_CIF_CUSTOMER C WHERE (? IS NULL OR C.STATUS=?) AND (? IS NULL OR UPPER(C.CIF_NUMBER) LIKE ? OR EXISTS (SELECT 1 FROM M02_CIF_NAME N WHERE N.PARTY_ID=C.PARTY_ID AND UPPER(N.FULL_NAME) LIKE ?)) ORDER BY C.CREATED_AT DESC",
+      "SELECT C.*, CASE WHEN C.KYC_STATUS='VERIFIED' AND (C.NEXT_REVIEW_DUE_AT<=? OR EXISTS (SELECT 1 FROM M02_CIF_IDENTIFIER I WHERE I.PARTY_ID=C.PARTY_ID AND I.VALID_TO IS NULL AND I.VERIFICATION_STATUS='VERIFIED' AND I.EXPIRES_ON<=?)) THEN 'EXPIRED' ELSE C.KYC_STATUS END EFFECTIVE_KYC_STATUS, (SELECT FULL_NAME FROM M02_CIF_NAME N WHERE N.PARTY_ID=C.PARTY_ID AND N.NAME_TYPE='LEGAL' AND N.VALID_TO IS NULL ORDER BY N.VALID_FROM DESC FETCH FIRST 1 ROWS ONLY) LEGAL_NAME FROM M02_CIF_CUSTOMER C WHERE (? IS NULL OR C.STATUS=?) AND (? IS NULL OR UPPER(C.CIF_NUMBER) LIKE ? OR EXISTS (SELECT 1 FROM M02_CIF_NAME N WHERE N.PARTY_ID=C.PARTY_ID AND UPPER(N.FULL_NAME) LIKE ?)) ORDER BY C.CREATED_AT DESC",
+      now(),
+      LocalDate.now(clock),
       empty(status),
       empty(status),
       empty(search),
@@ -221,6 +223,10 @@ public class CifService implements CustomerFactsPort {
   }
 
   private void name(String party, String name) {
+    name(party, name, now());
+  }
+
+  private void name(String party, String name, OffsetDateTime validFrom) {
     db.insert(
       SchemaTable.M02_CIF_NAME,
       map(
@@ -233,7 +239,7 @@ public class CifService implements CustomerFactsPort {
         "FULL_NAME",
         name.trim(),
         "VALID_FROM",
-        now()
+        validFrom
       )
     );
   }
@@ -242,6 +248,7 @@ public class CifService implements CustomerFactsPort {
   public Map<String, Object> detail(UserPrincipal user, String cif) {
     var c = customer(cif, false);
     permit(user, "CIF_READ", c, null);
+    c.put("EFFECTIVE_KYC_STATUS", facts(cif).kycStatus());
     String party = str(c, "PARTY_ID");
     var result = map(
       "customer",
@@ -298,22 +305,23 @@ public class CifService implements CustomerFactsPort {
     var c = editable(user, cif);
     version(c, in.rowVersion());
     String party = str(c, "PARTY_ID");
+    OffsetDateTime changeAt = pendingEnd("M02_CIF_NAME", party);
     db
       .jdbc()
       .update(
         "UPDATE M02_CIF_NAME SET VALID_TO=? WHERE PARTY_ID=? AND VERIFICATION_STATUS='PENDING' AND VALID_TO IS NULL",
-        now(),
+        changeAt,
         party
       );
-    name(party, in.legalName());
-    db
-      .jdbc()
-      .update(
-        "UPDATE M02_CIF_CUSTOMER SET SEGMENT_CODE=?,UPDATED_AT=?,ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=?",
-        in.segmentCode(),
-        now(),
-        cif
-      );
+    name(party, in.legalName(), changeAt);
+    db.jdbc().update(
+      "UPDATE M02_KYC_CASE SET PROPOSED_SEGMENT_CODE=?,SEGMENT_CHANGE_PENDING='Y',ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=? AND STATUS IN ('DRAFT','DOCUMENTS_PENDING','MORE_INFO_REQUIRED') AND MAKER_USER_ID=?",
+      in.segmentCode(), cif, user.userId()
+    );
+    db.jdbc().update(
+      "UPDATE M02_CIF_CUSTOMER SET UPDATED_AT=?,ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=?",
+      now(), cif
+    );
     event(user, "CifProfileProposed", cif, null, in.reason());
     return detail(user, cif);
   }
@@ -401,9 +409,10 @@ public class CifService implements CustomerFactsPort {
     var c = editable(user, cif);
     if (in.evidenceDocumentId() != null) bad(
       db.count(
-          "SELECT COUNT(*) FROM M02_KYC_DOCUMENT D JOIN M02_KYC_CASE K ON K.CASE_ID=D.CASE_ID WHERE D.DOCUMENT_ID=? AND K.CIF_ID=?",
+          "SELECT COUNT(*) FROM M02_KYC_DOCUMENT D JOIN M02_KYC_CASE K ON K.CASE_ID=D.CASE_ID WHERE D.DOCUMENT_ID=? AND K.CIF_ID=? AND K.STATUS IN ('DRAFT','DOCUMENTS_PENDING','MORE_INFO_REQUIRED') AND K.MAKER_USER_ID=? AND D.DOCUMENT_TYPE='ADDRESS'",
           in.evidenceDocumentId(),
-          cif
+          cif,
+          user.userId()
         ) ==
         0,
       "INVALID_EVIDENCE",
@@ -575,14 +584,10 @@ public class CifService implements CustomerFactsPort {
               !"VERIFIED".equals(str(d, "VERIFICATION_STATUS"))
           )
       ) issues.add("DOCUMENT_REVIEW_REQUIRED");
-      if (
-        db.count(
-          "SELECT COUNT(*) FROM M02_CIF_IDENTIFIER WHERE PARTY_ID=? AND VALID_TO IS NULL AND VERIFICATION_STATUS<>'REJECTED' AND EXPIRES_ON IS NOT NULL AND EXPIRES_ON<=?",
-          party,
-          LocalDate.now(clock)
-        ) >
-        0
-      ) issues.add("EXPIRED_IDENTIFIER");
+      if (db.count(
+        "SELECT COUNT(*) FROM M02_CIF_IDENTIFIER I WHERE I.PARTY_ID=? AND I.VALID_TO IS NULL AND I.VERIFICATION_STATUS<>'REJECTED' AND I.EXPIRES_ON IS NOT NULL AND I.EXPIRES_ON<=? AND NOT EXISTS (SELECT 1 FROM M02_CIF_IDENTIFIER N WHERE N.PARTY_ID=I.PARTY_ID AND N.IDENTIFIER_TYPE=I.IDENTIFIER_TYPE AND N.VALID_TO IS NULL AND N.VERIFICATION_STATUS<>'REJECTED' AND N.VALID_FROM>I.VALID_FROM)",
+        party, LocalDate.now(clock)
+      ) > 0) issues.add("EXPIRED_IDENTIFIER");
     }
     return issues;
   }
@@ -757,9 +762,11 @@ public class CifService implements CustomerFactsPort {
       db
         .jdbc()
         .update(
-          "UPDATE M02_CIF_CUSTOMER SET STATUS=CASE WHEN STATUS IN ('PROSPECT','PENDING_VERIFICATION','RESTRICTED') THEN 'ACTIVE' ELSE STATUS END,KYC_STATUS='VERIFIED',RISK_LEVEL=?,NEXT_REVIEW_DUE_AT=?,UPDATED_AT=?,ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=?",
+          "UPDATE M02_CIF_CUSTOMER SET STATUS=CASE WHEN STATUS IN ('PROSPECT','PENDING_VERIFICATION') THEN 'ACTIVE' ELSE STATUS END,KYC_STATUS='VERIFIED',RISK_LEVEL=?,NEXT_REVIEW_DUE_AT=?,SEGMENT_CODE=CASE WHEN ?='Y' THEN ? ELSE SEGMENT_CODE END,UPDATED_AT=?,ROW_VERSION=ROW_VERSION+1 WHERE CIF_ID=?",
           in.riskLevel(),
           in.reviewDueAt(),
+          str(k, "SEGMENT_CHANGE_PENDING"),
+          k.get("PROPOSED_SEGMENT_CODE"),
           now(),
           cif
         );
@@ -832,6 +839,16 @@ public class CifService implements CustomerFactsPort {
     }
   }
 
+  private OffsetDateTime pendingEnd(String table, String party) {
+    var unit = java.time.temporal.ChronoUnit.MICROS;
+    OffsetDateTime end = now().truncatedTo(unit);
+    for (var row : db.rows("SELECT VALID_FROM FROM " + table + " WHERE PARTY_ID=? AND VERIFICATION_STATUS='PENDING' AND VALID_TO IS NULL", party)) {
+      OffsetDateTime start = ((OffsetDateTime) row.get("VALID_FROM")).truncatedTo(unit);
+      if (!end.isAfter(start)) end = start.plus(1, unit);
+    }
+    return end;
+  }
+
   private void rejectPending(String party) {
     for (String t : List.of(
       "M02_CIF_NAME",
@@ -845,7 +862,7 @@ public class CifService implements CustomerFactsPort {
           "UPDATE " +
             t +
             " SET VERIFICATION_STATUS='REJECTED',VALID_TO=? WHERE PARTY_ID=? AND VERIFICATION_STATUS='PENDING' AND VALID_TO IS NULL",
-          now(),
+          pendingEnd(t, party),
           party
         );
   }
@@ -865,7 +882,7 @@ public class CifService implements CustomerFactsPort {
       "Closure is terminal"
     );
     bad(
-      "ACTIVE".equals(in.status()) && !"VERIFIED".equals(str(c, "KYC_STATUS")),
+      "ACTIVE".equals(in.status()) && !"VERIFIED".equals(facts(cif).kycStatus()),
       "KYC_REQUIRED",
       "Only verified customers can activate"
     );
@@ -912,6 +929,10 @@ public class CifService implements CustomerFactsPort {
         now(),
         cif
       );
+      db.jdbc().update(
+        "UPDATE M02_CIF_RELATIONSHIP SET VALID_TO=? WHERE (SOURCE_PARTY_ID=? OR TARGET_PARTY_ID=?) AND (VALID_TO IS NULL OR VALID_TO>?)",
+        now(), c.get("PARTY_ID"), c.get("PARTY_ID"), now()
+      );
     }
     db
       .jdbc()
@@ -934,10 +955,13 @@ public class CifService implements CustomerFactsPort {
 
   /** Explicit periodic-review sweep, scoped to the caller, with committed expiry evidence. */
   public int expireDue(UserPrincipal user) {
+    if (!user.permissions().contains("KYC_REVIEW")) throw new BusinessException(
+      HttpStatus.FORBIDDEN, "FORBIDDEN", "KYC_REVIEW permission required"
+    );
     int changed = 0;
     for (var row : db.rows(
-      "SELECT * FROM M02_CIF_CUSTOMER WHERE KYC_STATUS='VERIFIED' AND NEXT_REVIEW_DUE_AT<=? AND STATUS<>'CLOSED'",
-      now()
+      "SELECT C.* FROM M02_CIF_CUSTOMER C WHERE C.KYC_STATUS='VERIFIED' AND C.STATUS<>'CLOSED' AND (C.NEXT_REVIEW_DUE_AT<=? OR EXISTS (SELECT 1 FROM M02_CIF_IDENTIFIER I WHERE I.PARTY_ID=C.PARTY_ID AND I.VALID_TO IS NULL AND I.VERIFICATION_STATUS='VERIFIED' AND I.EXPIRES_ON<=?))",
+      now(), LocalDate.now(clock)
     )) {
       if (
         !access.allowed(
@@ -951,7 +975,8 @@ public class CifService implements CustomerFactsPort {
       ) continue;
       String id = str(row, "CIF_ID");
       var c = customer(id, true);
-      if (!"VERIFIED".equals(str(c, "KYC_STATUS"))) continue;
+      var due = (OffsetDateTime) c.get("NEXT_REVIEW_DUE_AT");
+      if (!"VERIFIED".equals(str(c, "KYC_STATUS")) || !"EXPIRED".equals(facts(id).kycStatus())) continue;
       db
         .jdbc()
         .update(
@@ -966,7 +991,8 @@ public class CifService implements CustomerFactsPort {
           id,
           now()
         );
-      event(user, "KycExpired", id, null, "PERIODIC_REVIEW_DUE");
+      event(user, "KycExpired", id, null,
+        due != null && !due.isAfter(now()) ? "PERIODIC_REVIEW_DUE" : "IDENTIFIER_EXPIRED");
       changed++;
     }
     return changed;
@@ -976,6 +1002,7 @@ public class CifService implements CustomerFactsPort {
   public void consent(UserPrincipal user, String cif, ConsentInput in) {
     var c = customer(cif, true);
     permit(user, "CIF_UPDATE", c, null);
+    bad("CLOSED".equals(str(c, "STATUS")), "CUSTOMER_CLOSED", "Closed customers cannot grant consent");
     bad(
       db.count(
           "SELECT COUNT(*) FROM M02_CIF_CONSENT WHERE CIF_ID=? AND PURPOSE_CODE=? AND STATUS='GRANTED'",
@@ -1036,6 +1063,8 @@ public class CifService implements CustomerFactsPort {
     var target = customer(in.targetCifId(), false);
     permit(user, "CIF_UPDATE", c, null);
     permit(user, "CIF_READ", target, null);
+    bad("CLOSED".equals(str(c, "STATUS")) || "CLOSED".equals(str(target, "STATUS")),
+      "CUSTOMER_CLOSED", "A closed customer cannot enter a new relationship");
     bad(
       cif.equals(in.targetCifId()),
       "SELF_RELATIONSHIP",
@@ -1046,6 +1075,10 @@ public class CifService implements CustomerFactsPort {
       "INVALID_DATES",
       "End date must be in the future"
     );
+    bad(db.count(
+      "SELECT COUNT(*) FROM M02_CIF_RELATIONSHIP WHERE SOURCE_PARTY_ID=? AND TARGET_PARTY_ID=? AND RELATIONSHIP_TYPE=? AND (VALID_TO IS NULL OR VALID_TO>?)",
+      c.get("PARTY_ID"), target.get("PARTY_ID"), in.relationshipType(), now()
+    ) > 0, "RELATIONSHIP_EXISTS", "An active relationship of this type already exists");
     db.insert(
       SchemaTable.M02_CIF_RELATIONSHIP,
       map(
@@ -1075,10 +1108,10 @@ public class CifService implements CustomerFactsPort {
       db
           .jdbc()
           .update(
-            "UPDATE M02_CIF_RELATIONSHIP SET VALID_TO=? WHERE RELATIONSHIP_ID=? AND SOURCE_PARTY_ID=? AND VALID_TO IS NULL",
-            now(),
+            "UPDATE M02_CIF_RELATIONSHIP SET VALID_TO=CURRENT_TIMESTAMP WHERE RELATIONSHIP_ID=? AND SOURCE_PARTY_ID=? AND (VALID_TO IS NULL OR VALID_TO>?)",
             rel,
-            c.get("PARTY_ID")
+            c.get("PARTY_ID"),
+            now()
           ) ==
         0,
       "RELATIONSHIP_NOT_ACTIVE",
