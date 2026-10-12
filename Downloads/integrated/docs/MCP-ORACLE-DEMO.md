@@ -46,12 +46,12 @@ To replace or rotate the OpenRouter key, run `& ./set-openrouter-key.ps1` in you
 Run this only in your own PowerShell console:
 
 ```powershell
-& ./show-mcp-demo-credentials.ps1
+& ./show-alpha-team-credentials.ps1
 ```
 
-It decrypts the locally stored demo passwords and account-holder access keys with the current Windows user's DPAPI key and displays them in that console. Another Windows user or machine cannot decrypt this file. Do not paste the keys into chat text, screenshots, or a repository. A customer needs only their own login to view linked balances and transactions. The access key is for an authorized officer viewing protected financial details.
+It decrypts the single locally stored ALPHA team credential file with the current Windows user's DPAPI key and displays all seven demo logins, roles, passwords, and any account-holder access keys in that console. Another Windows user or machine cannot decrypt this file. Do not paste the keys into chat text, screenshots, or a repository. A customer needs only their own login to view linked balances and transactions. The access key is for an authorized officer viewing protected financial details.
 
-The script shows the four demo logins, **not an Oracle administrator password**. Starting the application never displays or resets an existing administrator's password. First-admin bootstrap uses an explicitly supplied `BOOTSTRAP_PASSWORD` only when IAM has no users; the existing ALPHA installation already has users.
+The script includes the ALPHA web demo administrator `admin` and independent `checker1`, along with the original four MCP users and `demo.officer`. It does **not** show the Oracle schema password. Starting the application does not reset an existing user's password. First-admin bootstrap uses an explicitly supplied `BOOTSTRAP_PASSWORD` only when IAM has no users; the existing ALPHA installation already has users.
 
 ## Check MCP
 

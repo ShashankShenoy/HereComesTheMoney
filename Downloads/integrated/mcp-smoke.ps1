@@ -10,13 +10,19 @@ function Assert-True([bool]$condition, [string]$message) {
   Write-Output "PASS $message"
 }
 
-$credentialFile = Join-Path $Root '.runtime\mcp-demo-credentials.dpapi'
+$credentialFile = Join-Path $Root '.runtime\alpha-team-credentials.dpapi'
+$unified = Test-Path -LiteralPath $credentialFile
+if (-not $unified) { $credentialFile = Join-Path $Root '.runtime\mcp-demo-credentials.dpapi' }
 $protected = Get-Content -LiteralPath $credentialFile -Raw | ConvertTo-SecureString
 $plain = [System.Net.NetworkCredential]::new('', $protected).Password
 $creds = @{}
 foreach ($line in ($plain -split "`n")) {
   $parts = $line.TrimEnd("`r") -split "`t"
-  if ($parts.Count -ge 2) { $creds[$parts[0]] = @{ password = $parts[1]; accessKey = if ($parts.Count -ge 3) { $parts[2] } else { '' } } }
+  if ($unified -and $parts.Count -eq 4) {
+    $creds[$parts[0]] = @{ password = $parts[2]; accessKey = $parts[3] }
+  } elseif (-not $unified -and $parts.Count -ge 2) {
+    $creds[$parts[0]] = @{ password = $parts[1]; accessKey = if ($parts.Count -ge 3) { $parts[2] } else { '' } }
+  }
 }
 $plain = $null
 

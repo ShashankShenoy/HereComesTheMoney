@@ -1,5 +1,5 @@
 param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild,
-      [switch]$CheckOnly, [string]$PassphraseFile)
+      [switch]$CheckOnly, [switch]$UnlockOnly, [string]$PassphraseFile)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required for the encrypted ALPHA team bundle.' }
 $taskRoot = $PSScriptRoot
@@ -21,7 +21,7 @@ $passphrase = $null
 if ($payload.format -ne 'moneybags-alpha-settings-v1' -or
     $payload.dbUrl -notmatch '^jdbc:oracle:' -or
     -not $payload.dbUsername -or -not $payload.dbPassword -or
-    -not $payload.demoCredentials) {
+    -not $payload.demoCredentials -or -not $payload.staffCredentials) {
   throw 'The decrypted ALPHA team settings are incomplete.'
 }
 $keys = @{
@@ -49,15 +49,32 @@ foreach ($name in $keys.Keys) {
   $target = Join-Path $runtime $name
   if (-not (Test-Path -LiteralPath $target)) { [IO.File]::WriteAllBytes($target, $keys[$name]) }
 }
-$demoSecure = ConvertTo-SecureString -String $payload.demoCredentials -AsPlainText -Force
+$rows = [System.Collections.Generic.List[string]]::new()
+foreach ($line in ($payload.staffCredentials -split "`n")) {
+  $parts = $line.TrimEnd("`r") -split "`t"
+  if ($parts.Count -ne 3) { throw 'Invalid staff credential entry in the team bundle.' }
+  $rows.Add("$($parts[0])`t$($parts[1])`t$($parts[2])`t")
+}
+$mcpRoles = @{
+  mcp_demo_customer_a = 'MCP_DEMO_CUSTOMER'
+  mcp_demo_customer_b = 'MCP_DEMO_CUSTOMER'
+  mcp_demo_officer = 'MCP_DEMO_OFFICER'
+  mcp_demo_checker = 'MCP_DEMO_CHECKER'
+}
+foreach ($line in ($payload.demoCredentials -split "`n")) {
+  $parts = $line.TrimEnd("`r") -split "`t"
+  if ($parts.Count -lt 2 -or -not $mcpRoles.ContainsKey($parts[0])) { throw 'Invalid MCP credential entry in the team bundle.' }
+  $accessKey = if ($parts.Count -ge 3) { $parts[2] } else { '' }
+  $rows.Add("$($parts[0])`t$($mcpRoles[$parts[0]])`t$($parts[1])`t$accessKey")
+}
+if ($rows.Count -ne 7) { throw 'The team bundle must contain seven demo logins.' }
+$allSecure = ConvertTo-SecureString -String ($rows -join "`n") -AsPlainText -Force
 try {
-  $demoSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'mcp-demo-credentials.dpapi') -NoNewline
-} finally { $demoSecure.Dispose() }
-if ($payload.staffCredentials) {
-  $staffSecure = ConvertTo-SecureString -String $payload.staffCredentials -AsPlainText -Force
-  try {
-    $staffSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'alpha-team-staff-credentials.dpapi') -NoNewline
-  } finally { $staffSecure.Dispose() }
+  $allSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'alpha-team-credentials.dpapi') -NoNewline
+} finally { $allSecure.Dispose() }
+if ($UnlockOnly) {
+  Write-Host 'All seven demo logins are unlocked in .runtime/alpha-team-credentials.dpapi.'
+  return
 }
 
 $names = @('DB_URL','DB_USERNAME','DB_PASSWORD','OPENROUTER_API_KEY','AI_PROVIDER','AI_MODEL','AI_FALLBACK_MODEL','DEPOSIT_INTEREST_ENABLED')

@@ -131,7 +131,7 @@ On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** 
 ./start-alpha-team.ps1
 ~~~
 
-Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, installs the matching CIF/MFA keys locally, protects the demo-login record for the current Windows user, builds the app, and starts it at [localhost:5174](http://localhost:5174). The database password is passed to the backend through its process environment. Run `./show-alpha-team-credentials.ps1` in your own console for the staff demo passwords, and `./show-mcp-demo-credentials.ps1` for the two MCP customer accounts and MCP-specific officer/checker. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
+Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, installs the matching CIF/MFA keys locally, saves **all seven demo logins in one Windows-protected file** at `.runtime/alpha-team-credentials.dpapi`, builds the app, and starts it at [localhost:5174](http://localhost:5174). The database password is passed to the backend through its process environment. Run `./show-alpha-team-credentials.ps1` in your own console to display all seven usernames, roles, passwords, and any customer access keys together. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
 
 | Staff demo login | Active ALPHA role | Sign-in |
 | --- | --- | --- |
