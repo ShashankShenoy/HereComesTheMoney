@@ -24,6 +24,8 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
   // BankingController has already scoped and redacted this account list. Rechecking
   // each row here would repeat the IAM and transaction queries up to 100 times.
   if(path.equals("/api/v1/banking/transactions")&&p.getContainingClass()==BankingController.class)return body;
+  // The review queue requires reversal approval authority and filters each request by decision scope.
+  if(path.equals("/api/v1/transactions/reversal-requests")&&p.getContainingClass()==com.moneybags.txn.api.TransactionController.class)return body;
   // This endpoint checks account proof or staff GL authority before constructing its scoped response.
   if(path.matches("/api/v1/banking/transactions/\\d+/details"))return body;
   if(!(body instanceof java.util.Map<?,?> error&&error.containsKey("code"))&&path.matches("/api/v1/payments/\\d+/(history|rail-evidence)")){

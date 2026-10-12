@@ -36,7 +36,7 @@ function resetAccountOptionsForActor(){
  const actor=getSession()?.user?.userId;
  if(actor===accountOptionsActor)return;
  accountOptionsActor=actor;accountOptions=[];accountOptionsFetchedAt=0;accountOptionsPending=null;
- transactionAccountNumber='';transactionAccountId='';transactionLegacy=false;transactionRows=null;transactionDetail=null;transactionVisibleCount=25;transactionSection='accounts';
+ transactionAccountNumber='';transactionAccountId='';transactionLegacy=false;transactionRows=null;transactionDetail=null;transactionVisibleCount=25;transactionSection=allow('TXN_REVERSE_APPROVE')?'reversals':'accounts';
  keyHolderAccountNumber='';keyHolders=null;reserveAccountId='';reserveAccounts=[];reservePosition=null;reserveReconciliation=null;reserveLedger=null;reserveOffset=0;
  glLedgerAccountId='';glLedger=null;glLedgerJournal=null;glLedgerAccounts=null;glLedgerOffset=0;
  cashLedgerAccounts=null;cashLedgerError='';
@@ -86,6 +86,7 @@ const customerWorkflows=new Set([
  'GET /currencies','GET /fx/rates','GET /fx/quote'
 ]);
 function workflowAllowed(operation,customer){
+ if(operation.path==='/transactions/reversal-requests'||operation.path==='/transactions/{id}/reversal-decision')return false;
  if(operation.path==='/payments/availability'||operation.path==='/privacy/consents/availability')return false;
  if(customer){if(operation.path.startsWith('/privacy/consents/')&&operation.method==='POST'&&!allow('PRIVACY_CONSENT_SELF'))return false;return customerWorkflows.has(operation.method+' '+operation.path);}
  if(/^\/(?:accounts\/self|loans\/my|term-deposits\/my)(?:\/|$)/.test(operation.path))return false;
@@ -200,13 +201,42 @@ function glLedgerPanel(){
  ]),t('No journal lines found.'))+'</div>';})():'';
  return '<section class="panel" id="gl-ledger-section"><div class="panel-heading"><div><p class="eyebrow">'+tr('GENERAL LEDGER')+'</p><h3>'+tr('GL account ledger')+'</h3></div></div><div class="panel-body"><p class="hint">'+tr('Review every posted entry for one GL account. Running balances follow the account’s normal debit or credit side.')+'</p><form id="gl-ledger-form" class="module-search"><label class="field">'+tr('GL account ID')+'<input data-jet-source="true" name="glAccountId" list="gl-ledger-accounts" inputmode="numeric" pattern="[0-9]+" required value="'+esc(glLedgerAccountId)+'" placeholder="'+tr('Enter a GL account ID')+'"></label><datalist id="gl-ledger-accounts">'+options+'</datalist><button type="submit" class="btn primary">'+tr('Load GL ledger')+'</button></form><p id="gl-ledger-error" class="form-error" role="alert"></p>'+summary+rows+paging+detail+'</div></section>';
 }
+async function pendingReversalsPanel(){
+ let body;
+ try{body=pendingReversalsTable(await api('/transactions/reversal-requests'));}
+ catch(error){body='<div class="notice" role="alert">'+esc(errorText(error))+'</div>';}
+ return '<section class="panel" id="pending-reversals"><div class="panel-heading"><h3>Pending reversal requests</h3><button class="btn small" type="button" id="reversals-refresh">Refresh</button></div><div class="panel-body"><p class="hint">Review the original transfer, amount and reason before deciding. Approval reverses the transfer. A different user must review the maker’s request.</p><p class="form-error" id="reversal-error" role="alert"></p>'+body+'</div></section>';
+}
+function pendingReversalsTable(rows){
+ return table(['Request','Original transfer','From account','To account','Amount','Reason','Requested','Decision'],rows.map(row=>{
+  const own=row.MAKER_ID===getSession()?.user?.userId;
+  const actions=['APPROVED','REJECTED'].map(decision=>'<button type="button" class="btn small '+(decision==='APPROVED'?'primary':'')+'" data-reversal-id="'+esc(row.TXN_ID)+'" data-reversal-decision="'+decision+'" '+(own?'disabled':'')+'>'+(decision==='APPROVED'?'Approve':'Reject')+'</button>').join(' ');
+  return [esc(row.TXN_ID),esc(row.REVERSAL_OF_TXN_ID),esc(row.TARGET_ACCOUNT_NUMBER||row.TARGET_ACCOUNT_ID),esc(row.SOURCE_ACCOUNT_NUMBER||row.SOURCE_ACCOUNT_ID),esc(formatAmount(row.AMOUNT,row.CURRENCY_CODE)),esc(row.REASON_TEXT),esc(formatDate(row.REQUESTED_AT)),actions+(own?'<span class="sub">Another checker must decide your request.</span>':'')];
+ }),'No pending reversal requests.');
+}
+function bindReversalForms(){
+ const panel=document.querySelector('#pending-reversals');
+ if(!panel)return;
+ panel.querySelector('#reversals-refresh').onclick=async()=>{await renderApp();};
+ panel.querySelectorAll('[data-reversal-id]').forEach(button=>button.onclick=async()=>{
+  const buttons=[...panel.querySelectorAll('button')];
+  const disabled=buttons.map(item=>item.disabled);
+  buttons.forEach(item=>item.disabled=true);
+  panel.querySelector('#reversal-error').textContent='';
+  try{
+   await api('/transactions/'+encodeURIComponent(button.dataset.reversalId)+'/reversal-decision',{method:'POST',body:{decision:button.dataset.reversalDecision,reasonText:'Reviewed in pending reversal queue'}});
+   toast(button.dataset.reversalDecision==='APPROVED'?'Reversal approved.':'Reversal rejected.');
+   await renderApp();
+  }catch(error){panel.querySelector('#reversal-error').textContent=errorText(error);buttons.forEach((item,index)=>item.disabled=disabled[index]);}
+ });
+}
 function transactionTabs(){
- const tabs=[['accounts','Account transactions'],...(allow('GL_RECONCILE')?[['gl','GL account ledger']]:[]),['operations','Operations']];
+ const tabs=[['accounts','Account transactions'],...(allow('TXN_REVERSE_APPROVE')?[['reversals','Pending reversals']]:[]),...(allow('GL_RECONCILE')?[['gl','GL account ledger']]:[]),['operations','Operations']];
  if(!tabs.some(([id])=>id===transactionSection))transactionSection='accounts';
  return '<div class="transaction-tabs" role="tablist" aria-label="'+esc(t('Transactions & ledger sections'))+'">'+tabs.map(([id,title])=>'<button type="button" role="tab" id="transaction-tab-'+id+'" aria-controls="transaction-section-'+id+'" aria-selected="'+(transactionSection===id)+'" tabindex="'+(transactionSection===id?'0':'-1')+'" data-transaction-tab="'+id+'">'+esc(t(title))+'</button>').join('')+'</div>';
 }
 function transactionTabPanel(section,content){
- const sections=['accounts',...(allow('GL_RECONCILE')?['gl']:[]),'operations'];
+ const sections=['accounts',...(allow('TXN_REVERSE_APPROVE')?['reversals']:[]),...(allow('GL_RECONCILE')?['gl']:[]),'operations'];
  return sections.map(id=>'<div id="transaction-section-'+id+'" role="tabpanel" aria-labelledby="transaction-tab-'+id+'" tabindex="0"'+(id===section?'':' hidden')+'>'+(id===section?content:'')+'</div>').join('');
 }
 function treasuryPanel(){
@@ -342,6 +372,7 @@ export async function bankingScreen(page){
  if(page==='treasury'&&!allow('TREASURY_READ')&&!allow('TREASURY_LIQUIDITY_MANAGE'))return head+'<section class="panel"><div class="panel-heading"><h3>Reserve ledger access</h3></div><div class="panel-body"><div class="notice">This bank-wide reserve ledger requires Treasury read access. Ask an administrator to assign that permission through the normal access request and approval process.</div></div></section>';
  if(page==='transactions'){
   const tabs=transactionTabs();
+  if(transactionSection==='reversals'&&allow('TXN_REVERSE_APPROVE'))return head+tabs+transactionTabPanel('reversals',await pendingReversalsPanel());
   if(transactionSection==='accounts')return head+tabs+transactionTabPanel('accounts',transactionPanel());
   if(transactionSection==='gl')return head+tabs+transactionTabPanel('gl',glLedgerPanel());
  }
@@ -621,6 +652,7 @@ export function bindBankingForms(){
  bindCustomerFx();
  bindTransactionForms();
  bindGlLedgerForms();
+ bindReversalForms();
  const tabs=[...document.querySelectorAll('[data-transaction-tab]')];
  for(const tab of tabs){
   tab.onclick=async()=>{if(transactionSection===tab.dataset.transactionTab)return;transactionSection=tab.dataset.transactionTab;await renderApp();document.querySelector('[data-transaction-tab="'+transactionSection+'"]')?.focus();};
