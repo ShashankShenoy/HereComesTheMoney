@@ -123,7 +123,7 @@ Rates and amounts are software-demo fixtures. After transactions, use **current 
 
 ### Shared ALPHA database for the team
 
-The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and the synthetic demo logins. The original `.env.ps1` and Windows DPAPI files are tied to one workstation and remain ignored. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
+The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and team demo logins. The original `.env.ps1` and Windows DPAPI files are tied to one workstation and remain ignored. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
 
 On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** in this directory, and run:
 
@@ -131,7 +131,17 @@ On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** 
 ./start-alpha-team.ps1
 ~~~
 
-Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, installs the matching CIF/MFA keys locally, protects the demo-login record for the current Windows user, builds the app, and starts it at [localhost:5174](http://localhost:5174). The database password is passed to the backend through its process environment. Run `./show-mcp-demo-credentials.ps1` in your own console to view the synthetic ALPHA web logins. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
+Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, installs the matching CIF/MFA keys locally, protects the demo-login record for the current Windows user, builds the app, and starts it at [localhost:5174](http://localhost:5174). The database password is passed to the backend through its process environment. Run `./show-alpha-team-credentials.ps1` in your own console for the staff demo passwords, and `./show-mcp-demo-credentials.ps1` for the two MCP customer accounts and MCP-specific officer/checker. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
+
+| Staff demo login | Active ALPHA role | Sign-in |
+| --- | --- | --- |
+| `admin` | Global `BANK_ADMIN`; general maker and administration | `/employee/login` |
+| `checker1` | Global `BANK_CHECKER`; independent decisions | `/employee/login` |
+| `demo.officer` | Branch-scoped `DEMO_BRANCH_OFFICER` at `BR01` | `/employee/login` |
+| `mcp_demo_checker` | MCP demo checker | `/employee/login` |
+| `mcp_demo_officer` | MCP demo officer at `MCP001` | `/employee/login` |
+
+The shared staff passwords were reset for the team bundle. Previously signed-in sessions for `admin`, `checker1`, and `demo.officer` were ended. Any earlier copies of the encrypted bundle or passphrase no longer provide their current passwords; distribute the replacement passphrase from the original workstation.
 
 The passphrase for the bundle created on the original workstation is stored only in ignored `.runtime/alpha-team-passphrase.txt`. Its owner must share it securely with authorized teammates. If the passphrase or encrypted bundle is lost, the original workstation can create a replacement with `./tools/export-alpha-team-bundle.ps1 -ReplaceBundle`; distribute the replacement passphrase separately. A replacement invalidates the previous passphrase. Existing local installation keys that differ from the bundle stop startup rather than overwriting them.
 

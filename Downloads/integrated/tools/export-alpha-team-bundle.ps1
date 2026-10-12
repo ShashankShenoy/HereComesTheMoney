@@ -22,6 +22,12 @@ try {
   }
   $protectedDemo = Get-Content -LiteralPath (Join-Path $taskRoot '.runtime\mcp-demo-credentials.dpapi') -Raw | ConvertTo-SecureString
   $demoCredentials = [System.Net.NetworkCredential]::new('', $protectedDemo).Password
+  $staffPath = Join-Path $taskRoot '.runtime\alpha-team-staff-credentials.dpapi'
+  $staffCredentials = $null
+  if (Test-Path -LiteralPath $staffPath) {
+    $protectedStaff = Get-Content -LiteralPath $staffPath -Raw | ConvertTo-SecureString
+    $staffCredentials = [System.Net.NetworkCredential]::new('', $protectedStaff).Password
+  }
   $payload = [ordered]@{
     format = 'moneybags-alpha-settings-v1'
     dbUrl = $env:DB_URL
@@ -35,6 +41,7 @@ try {
     cifKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $taskRoot 'runtime\cif.key')))
     mfaKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $taskRoot 'runtime\mfa.key')))
     demoCredentials = $demoCredentials
+    staffCredentials = $staffCredentials
   }
   $passphrase = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
   $bundle = Protect-AlphaTeamPayload ($payload | ConvertTo-Json -Depth 4 -Compress) $passphrase
@@ -45,6 +52,7 @@ try {
 } finally {
   Pop-Location
   $demoCredentials = $null
+  $staffCredentials = $null
   $passphrase = $null
   foreach ($name in @('DB_URL','DB_USERNAME','DB_PASSWORD','OPENROUTER_API_KEY','AI_PROVIDER','AI_MODEL','AI_FALLBACK_MODEL','DEPOSIT_INTEREST_ENABLED')) {
     [Environment]::SetEnvironmentVariable($name, $null, 'Process')

@@ -53,6 +53,12 @@ $demoSecure = ConvertTo-SecureString -String $payload.demoCredentials -AsPlainTe
 try {
   $demoSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'mcp-demo-credentials.dpapi') -NoNewline
 } finally { $demoSecure.Dispose() }
+if ($payload.staffCredentials) {
+  $staffSecure = ConvertTo-SecureString -String $payload.staffCredentials -AsPlainText -Force
+  try {
+    $staffSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'alpha-team-staff-credentials.dpapi') -NoNewline
+  } finally { $staffSecure.Dispose() }
+}
 
 $names = @('DB_URL','DB_USERNAME','DB_PASSWORD','OPENROUTER_API_KEY','AI_PROVIDER','AI_MODEL','AI_FALLBACK_MODEL','DEPOSIT_INTEREST_ENABLED')
 $previous = @{}
@@ -67,7 +73,7 @@ try {
   $env:AI_FALLBACK_MODEL = $payload.aiFallbackModel
   $env:DEPOSIT_INTEREST_ENABLED = $payload.depositInterestEnabled
   & (Join-Path $taskRoot 'start-oracle-alpha.ps1') -BackendPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -UseInheritedSettings
-  Write-Host 'ALPHA team workspace is ready. Use ./show-mcp-demo-credentials.ps1 to display the synthetic demo logins privately.'
+  Write-Host 'ALPHA team workspace is ready. Use ./show-alpha-team-credentials.ps1 to display the team demo logins privately.'
 } finally {
   foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
 }
