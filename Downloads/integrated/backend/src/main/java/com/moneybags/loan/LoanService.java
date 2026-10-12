@@ -399,8 +399,8 @@ public class LoanService {
         }
         db.update("""
             UPDATE M08_LOAN_OFFER SET STATUS='ACCEPTED',DISBURSEMENT_ACCOUNT_ID=?,REPAYMENT_ACCOUNT_ID=?,
-              ACCEPTED_BY_USER_ID=?,ACCEPTED_AT=SYSTIMESTAMP WHERE OFFER_ID=?
-            """,input.disbursementAccountId(),input.repaymentAccountId(),actor.userId(),offerId);
+              ACCEPTED_BY_USER_ID=?,ACCEPTED_AT=? WHERE OFFER_ID=?
+            """,input.disbursementAccountId(),input.repaymentAccountId(),actor.userId(),nextEvidenceTime(appId),offerId);
         db.update("UPDATE M08_LOAN_APPLICATION SET STATUS='ACCEPTED',UPDATED_AT=SYSTIMESTAMP WHERE APPLICATION_ID=?",appId);
         history("OFFER",offerId,"ISSUED","ACCEPTED","CUSTOMER_ACCEPTED",actor);
         history("APPLICATION",appId,"OFFERED","ACCEPTED","OFFER_ACCEPTED",actor);
@@ -415,10 +415,11 @@ public class LoanService {
         require(actor,"LOAN_CREATE",a.branchCode(),a.cifId(),null,null,null,null);
         if(Set.of("REJECTED","WITHDRAWN","EXPIRED","CONVERTED","CANCELLED").contains(a.status()))
             throw conflict("INVALID_STATE","Application no longer accepts documents");
+        OffsetDateTime createdAt=nextEvidenceTime(applicationId);
         long id=insert("DOCUMENT_REF_ID","""
-            INSERT INTO M08_LOAN_DOCUMENT_REF(APPLICATION_ID,DOCUMENT_TYPE,STORAGE_REFERENCE,CONTENT_HASH)
-            VALUES(?,?,?,?)
-            """,applicationId,input.type(),input.storageReference(),input.sha256Hex().toUpperCase(Locale.ROOT));
+            INSERT INTO M08_LOAN_DOCUMENT_REF(APPLICATION_ID,DOCUMENT_TYPE,STORAGE_REFERENCE,CONTENT_HASH,CREATED_AT)
+            VALUES(?,?,?,?,?)
+            """,applicationId,input.type(),input.storageReference(),input.sha256Hex().toUpperCase(Locale.ROOT),createdAt);
         event("LoanDocumentRecorded",applicationId,Map.of("applicationId",applicationId,"documentRefId",id,"type",input.type()));
         audit("DOCUMENT_RECORDED","DOCUMENT",id,actor);
         return Map.of("documentRefId",id,"applicationId",applicationId,"status","RECEIVED");
@@ -443,7 +444,7 @@ public class LoanService {
         if(recorders.isEmpty()||recorders.get(0)==null)
             throw conflict("DOCUMENT_ORIGIN_REQUIRED","Document recorder evidence is missing");
         require(actor,"LOAN_DOCUMENT_VERIFY",a.branchCode(),a.cifId(),null,null,null,recorders.get(0));
-        db.update("UPDATE M08_LOAN_DOCUMENT_REF SET STATUS='VERIFIED',VERIFIED_BY_USER_ID=?,VERIFIED_AT=SYSTIMESTAMP WHERE DOCUMENT_REF_ID=?",actor.userId(),documentId);
+        db.update("UPDATE M08_LOAN_DOCUMENT_REF SET STATUS='VERIFIED',VERIFIED_BY_USER_ID=?,VERIFIED_AT=GREATEST(SYSTIMESTAMP,CREATED_AT) WHERE DOCUMENT_REF_ID=?",actor.userId(),documentId);
         event("LoanDocumentVerified",applicationId,Map.of("applicationId",applicationId,"documentRefId",documentId));
         audit("DOCUMENT_VERIFIED","DOCUMENT",documentId,actor);
         return Map.of("documentRefId",documentId,"applicationId",applicationId,"status","VERIFIED");
@@ -593,7 +594,33 @@ public class LoanService {
     }
 
     /** Adds a minimal security audit row without storing document bytes or customer identity fields. */
+    /** Application locking serializes evidence; microsecond precision also orders same-tick writes. */
+    private OffsetDateTime nextEvidenceTime(long applicationId) {
+        OffsetDateTime current=db.queryForObject("SELECT SYSTIMESTAMP FROM DUAL",OffsetDateTime.class)
+            .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        OffsetDateTime previous=db.queryForObject("""
+            SELECT MAX(EVENT_TIME) FROM (
+              SELECT ISSUED_AT AS EVENT_TIME FROM M08_LOAN_OFFER WHERE APPLICATION_ID=?
+              UNION ALL SELECT ACCEPTED_AT FROM M08_LOAN_OFFER WHERE APPLICATION_ID=?
+              UNION ALL SELECT CREATED_AT FROM M08_LOAN_DOCUMENT_REF WHERE APPLICATION_ID=?
+              UNION ALL SELECT VERIFIED_AT FROM M08_LOAN_DOCUMENT_REF WHERE APPLICATION_ID=?
+              UNION ALL SELECT E.OCCURRED_AT FROM M08_SECURITY_AUDIT_EVENT E
+                JOIN M08_LOAN_OFFER O ON E.RESOURCE_ID=CAST(O.OFFER_ID AS VARCHAR2(100))
+                WHERE O.APPLICATION_ID=? AND E.RESOURCE_TYPE='OFFER' AND E.ACTION_CODE='OFFER_ACCOUNTS_UPDATED'
+            )
+            """,OffsetDateTime.class,applicationId,applicationId,applicationId,applicationId,applicationId);
+        return previous!=null&&!current.isAfter(previous)?previous.plusNanos(1000):current;
+    }
+
     private void audit(String action,String type,long id,UserPrincipal actor) {
+        if("OFFER_ACCOUNTS_UPDATED".equals(action)) {
+            long applicationId=db.queryForObject("SELECT APPLICATION_ID FROM M08_LOAN_OFFER WHERE OFFER_ID=?",Long.class,id);
+            db.update("""
+                INSERT INTO M08_SECURITY_AUDIT_EVENT(ACTOR_USER_ID,SESSION_ID,CORRELATION_ID,ACTION_CODE,
+                  RESOURCE_TYPE,RESOURCE_ID,RESULT_CODE,OCCURRED_AT) VALUES(?,?,?,?,?,?,'SUCCESS',?)
+                """,actor.userId(),actor.sessionId(),Correlation.current(),action,type,String.valueOf(id),nextEvidenceTime(applicationId));
+            return;
+        }
         db.update("""
             INSERT INTO M08_SECURITY_AUDIT_EVENT(ACTOR_USER_ID,SESSION_ID,CORRELATION_ID,ACTION_CODE,
               RESOURCE_TYPE,RESOURCE_ID,RESULT_CODE) VALUES(?,?,?,?,?,?,'SUCCESS')

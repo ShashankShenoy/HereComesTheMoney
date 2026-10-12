@@ -477,7 +477,11 @@ class IntegratedContextTest {
   send("/loans/applications/"+id+"/decisions",login("checker"),Map.of("code","APPROVE","reasonCodes","APPROVED","sanctionedAmount","12000","sanctionedTenureMonths",12,"annualRatePct","12","authorityCode","LOAN_SANCTION","authorityEvidenceRef","DEMO-AUTHORITY")).andExpect(status().isOk());
   long offer=value(send("/loans/applications/"+id+"/offers",admin,Map.of("documentRef","demo://customer-offer","expiresAt",java.time.OffsetDateTime.now().plusDays(7).toString())).andExpect(status().isOk())).path("data").path("offerId").asLong();
   send("/loans/offers/"+offer+"/accept",customer,Map.of("disbursementAccountId",1,"repaymentAccountId",1)).andExpect(status().isOk());
-  long document=value(send("/loans/applications/"+id+"/documents",admin,Map.of("type","SIGNED_OFFER","storageReference","demo://customer-signed-offer","sha256Hex","d".repeat(64))).andExpect(status().isOk())).path("data").path("documentRefId").asLong();
+  // Equal persisted timestamps and a clock behind them reproduce the ordering failure without sleeps.
+  var evidenceBoundary=java.time.OffsetDateTime.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+  db.update("UPDATE M08_LOAN_OFFER SET ISSUED_AT=?,ACCEPTED_AT=? WHERE OFFER_ID=?",evidenceBoundary,evidenceBoundary,offer);
+  long document=value(send("/loans/applications/"+id+"/documents",admin,Map.of("type","SIGNED_OFFER","storageReference","demo://customer-signed-offer/"+id,"sha256Hex","d".repeat(64))).andExpect(status().isOk())).path("data").path("documentRefId").asLong();
+  assertTrue(db.queryForObject("SELECT CREATED_AT FROM M08_LOAN_DOCUMENT_REF WHERE DOCUMENT_REF_ID=?",java.time.OffsetDateTime.class,document).isAfter(evidenceBoundary));
   send("/loans/applications/"+id+"/documents/"+document+"/verify",login("checker"),Map.of()).andExpect(status().isOk());
   long facility=value(send("/loans/applications/"+id+"/convert",admin,Map.of()).andExpect(status().isOk())).path("data").path("facilityId").asLong();
   long disbursement=value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("disbursementId").asLong();
@@ -1418,7 +1422,7 @@ class IntegratedContextTest {
   assertEquals(originalSuspense,settledSuspense);
  }
 
- @Test @Order(55) @Transactional void reversalDecisionReplayDoesNotPostTwice() {
+ @Test @Order(55) @Transactional void reversalDecisionReplayDoesNotPostTwice() throws Exception {
   var today=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
   String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
   String checker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
@@ -1428,6 +1432,19 @@ class IntegratedContextTest {
   var reversal=new com.moneybags.txn.api.Contracts.ReversalRequest(UUID.randomUUID().toString(),
     "Customer transfer correction",UUID.randomUUID().toString(),today);
   long id=ledger.requestReversal(original,reversal,maker).transactionId();
+  String token=login("checker");
+  mvc.perform(get("/api/v1/transactions/reversal-requests")).andExpect(status().isUnauthorized());
+  mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+login("customer")))
+    .andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.TXN_ID == "+id+")].REASON_TEXT").value("Customer transfer correction"));
+  String assignment=db.queryForObject("SELECT A.ASSIGNMENT_ID FROM M01_IAM_USER_ROLE A JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID WHERE A.USER_ID=? AND R.ROLE_CODE='BANK_CHECKER'",String.class,checker);
+  db.update("UPDATE M01_IAM_USER_ROLE SET SCOPE_TYPE='BRANCH',SCOPE_REF='OTHER001' WHERE ASSIGNMENT_ID=?",assignment);
+  mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.TXN_ID == "+id+")]").isEmpty());
+  db.update("UPDATE M01_IAM_USER_ROLE SET SCOPE_TYPE='GLOBAL',SCOPE_REF=NULL WHERE ASSIGNMENT_ID=?",assignment);
+  send("/transactions/"+id+"/reversal-decision",login("admin"),Map.of("decision","APPROVED"))
+    .andExpect(status().isForbidden());
   var approve=new com.moneybags.txn.api.Contracts.ApprovalDecision("APPROVED","Reviewed");
   assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
   assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
@@ -1435,6 +1452,22 @@ class IntegratedContextTest {
   var opposite=assertThrows(com.moneybags.txn.api.ApiException.class,()->ledger.decideReversal(id,
     new com.moneybags.txn.api.Contracts.ApprovalDecision("REJECTED","Changed"),checker));
   assertEquals("APPROVAL_CLOSED",opposite.code());
+  mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.TXN_ID == "+id+")]").isEmpty());
+  long second=ledger.transfer(new com.moneybags.txn.api.Contracts.TransferRequest(1L,2L,BigDecimal.ONE,"BRANCH",
+    UUID.randomUUID().toString(),UUID.randomUUID().toString(),today),maker).transactionId();
+  long rejected=ledger.requestReversal(second,new com.moneybags.txn.api.Contracts.ReversalRequest(
+    UUID.randomUUID().toString(),"Reject test",UUID.randomUUID().toString(),today),maker).transactionId();
+  send("/transactions/"+rejected+"/reversal-decision",token,Map.of("decision","REJECTED"))
+    .andExpect(status().isOk());
+  mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.TXN_ID == "+rejected+")]").isEmpty());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE TXN_ID=?",Integer.class,rejected));
+ }
+
+ /** Exercise the full loan path with equal persisted offer timestamps in one transaction. */
+ @Test @Order(55) @Transactional void customerLoanHandlesSameTickEvidenceBoundary() throws Exception {
+  customerCanApplyOnlyForOwnCifAndSeeOwnApplication();
  }
 
  @Test @Order(34) @Transactional void futureDatedRelationshipsCanEndEarlyAndClosureEndsBothDirections() throws Exception {
@@ -1764,13 +1797,12 @@ class IntegratedContextTest {
     "storageReference","test://corrected-document","sha256Hex","c".repeat(64))).andExpect(status().isOk()))
     .path("data").path("documentRefId").asLong();
   send("/loans/applications/"+app+"/documents/"+correctedSigned+"/verify",checker,Map.of()).andExpect(status().isOk());
-  // Make the chronology fixture explicit: fast H2 requests can share a timestamp.
-  java.sql.Timestamp currentEvidenceTime=db.queryForObject(
-    "SELECT MAX(OCCURRED_AT) FROM M08_SECURITY_AUDIT_EVENT WHERE ACTION_CODE='OFFER_ACCOUNTS_UPDATED' AND RESOURCE_TYPE='OFFER' AND RESOURCE_ID=?",
-    java.sql.Timestamp.class,String.valueOf(offer));
-  java.sql.Timestamp afterAccountChange=java.sql.Timestamp.from(currentEvidenceTime.toInstant().plusSeconds(1));
-  db.update("UPDATE M08_LOAN_DOCUMENT_REF SET CREATED_AT=?,VERIFIED_AT=? WHERE DOCUMENT_REF_ID=?",
-    afterAccountChange,afterAccountChange,correctedSigned);
+  // Production evidence ordering must work without manually advancing document timestamps.
+  assertEquals(1,db.queryForObject("""
+    SELECT COUNT(*) FROM M08_LOAN_DOCUMENT_REF WHERE DOCUMENT_REF_ID=? AND CREATED_AT>
+      (SELECT MAX(OCCURRED_AT) FROM M08_SECURITY_AUDIT_EVENT WHERE ACTION_CODE='OFFER_ACCOUNTS_UPDATED'
+        AND RESOURCE_TYPE='OFFER' AND RESOURCE_ID=?)
+    """,Integer.class,correctedSigned,String.valueOf(offer)));
   long pendingDoc=value(send("/loans/applications/"+app+"/documents",admin,Map.of("type","INCOME_PROOF",
     "storageReference","test://unverified","sha256Hex","e".repeat(64))).andExpect(status().isOk()))
     .path("data").path("documentRefId").asLong();

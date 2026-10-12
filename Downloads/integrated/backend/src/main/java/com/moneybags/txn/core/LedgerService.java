@@ -301,6 +301,20 @@ public class LedgerService {
         return transaction(id);
     }
 
+    /** Pending requests are filtered by the controller before returning any account data. */
+    public List<Map<String,Object>> pendingReversals() {
+        return db.queryForList("""
+            SELECT T.TXN_ID,T.REVERSAL_OF_TXN_ID,T.SOURCE_ACCOUNT_ID,T.TARGET_ACCOUNT_ID,
+              T.AMOUNT,T.CURRENCY_CODE,T.VALUE_DATE,A.MAKER_ID,A.REASON_TEXT,A.REQUESTED_AT,
+              S.ACCOUNT_NUMBER AS SOURCE_ACCOUNT_NUMBER,D.ACCOUNT_NUMBER AS TARGET_ACCOUNT_NUMBER
+            FROM M05_TXN_APPROVAL A JOIN M05_TXN_TRANSACTION_LOG T ON T.TXN_ID=A.TXN_ID
+            LEFT JOIN M04_BANK_ACCOUNT S ON S.ACCOUNT_ID=T.SOURCE_ACCOUNT_ID
+            LEFT JOIN M04_BANK_ACCOUNT D ON D.ACCOUNT_ID=T.TARGET_ACCOUNT_ID
+            WHERE A.ACTION_CODE='REVERSAL' AND A.STATUS='PENDING' AND T.STATUS='APPROVAL_PENDING'
+            ORDER BY A.REQUESTED_AT,T.TXN_ID
+            """);
+    }
+
     /** Enforces maker-checker separation and books opposite entries on approval. */
     @Transactional
     public TransactionView decideReversal(long reversalId, ApprovalDecision decision, String checker) {

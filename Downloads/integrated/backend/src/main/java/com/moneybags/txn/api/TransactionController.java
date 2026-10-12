@@ -59,6 +59,22 @@ public class TransactionController {
         return ledger.requestReversal(id, request, actor.getName());
     }
 
+    /** Lists every pending reversal within the checker's decision scope. */
+    @Operation(summary = "List pending reversal requests")
+    @GetMapping("/reversal-requests")
+    @PreAuthorize("hasAuthority('SCOPE_m05.reversal.approve')")
+    public java.util.List<java.util.Map<String,Object>> pendingReversals() {
+        return ledger.pendingReversals().stream().filter(row -> {
+            try {
+                access.transaction("TXN_REVERSE_APPROVE",((Number)row.get("TXN_ID")).longValue());
+                return true;
+            } catch(com.moneybags.common.api.BusinessException denied) {
+                if(denied.status()!=org.springframework.http.HttpStatus.FORBIDDEN)throw denied;
+                return false;
+            }
+        }).toList();
+    }
+
     /** Approves or rejects a reversal as a distinct checker. */
     @Operation(summary = "Decide transfer reversal")
     @PostMapping("/{id}/reversal-decision")
@@ -68,4 +84,3 @@ public class TransactionController {
         return ledger.decideReversal(id, request, actor.getName());
     }
 }
-
