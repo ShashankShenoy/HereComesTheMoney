@@ -1,4 +1,5 @@
-param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild, [bool]$PaymentSimulationEnabled=$true, [switch]$UseInheritedSettings)
+param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild, [bool]$PaymentSimulationEnabled=$true,
+      [switch]$UseInheritedSettings, [string]$CifKeyFile, [string]$MfaKeyFile)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $runtime = Join-Path $taskRoot '.runtime'
@@ -39,6 +40,8 @@ foreach ($oracleAppPort in @($BackendPort, $FrontendPort)) {
 & (Join-Path $taskRoot 'build-before-start.ps1') -CheckOnly:$SkipBuild
 $jar = Join-Path $taskRoot 'backend\target\moneybags-integrated-1.0.0.jar'
 if (-not (Test-Path -LiteralPath $jar)) { throw 'Maven verify finished without creating the backend JAR.' }
+if ($CifKeyFile -and -not (Test-Path -LiteralPath $CifKeyFile)) { throw 'The selected CIF key file is missing.' }
+if ($MfaKeyFile -and -not (Test-Path -LiteralPath $MfaKeyFile)) { throw 'The selected MFA key file is missing.' }
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 $env:INTERNAL_BANK_CODES = 'MCPB0000002' # Synthetic Demo B bank code; real deployments configure their own.
 $env:CUSTOMER_SIGNUP_ENABLED = 'true'
@@ -78,9 +81,12 @@ try {
 $previousPaymentSimulation = [Environment]::GetEnvironmentVariable('PAYMENT_SIMULATION_ENABLED', 'Process')
 $env:PAYMENT_SIMULATION_ENABLED = $PaymentSimulationEnabled.ToString().ToLowerInvariant() # This launcher is exclusively for the local payment demo.
 try {
-$backendLauncher = Start-Process -FilePath 'java.exe' -ArgumentList @(
+$backendArguments = @(
   '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp', '-Djava.net.useSystemProxies=true', '-jar', ('"' + $jar + '"'), "--server.port=$BackendPort", '--server.address=127.0.0.1'
-) -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-backend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-backend.err.log') -PassThru
+)
+if ($CifKeyFile) { $backendArguments += ('"--moneybags.cif.key-file=' + (Resolve-Path -LiteralPath $CifKeyFile).Path + '"') }
+if ($MfaKeyFile) { $backendArguments += ('"--moneybags.auth.mfa-key-file=' + (Resolve-Path -LiteralPath $MfaKeyFile).Path + '"') }
+$backendLauncher = Start-Process -FilePath 'java.exe' -ArgumentList $backendArguments -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-backend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-backend.err.log') -PassThru
 } finally {
   if ($null -eq $previousPaymentSimulation) { Remove-Item Env:PAYMENT_SIMULATION_ENABLED -ErrorAction SilentlyContinue }
   else { $env:PAYMENT_SIMULATION_ENABLED = $previousPaymentSimulation }

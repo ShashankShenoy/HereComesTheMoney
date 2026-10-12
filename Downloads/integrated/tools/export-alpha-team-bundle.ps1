@@ -11,8 +11,13 @@ if ((Test-Path -LiteralPath $bundlePath) -and -not $ReplaceBundle -and -not $Che
 if (-not (Test-Path -LiteralPath (Join-Path $taskRoot '.env.ps1'))) {
   throw 'This workstation does not have the existing ALPHA .env.ps1 settings.'
 }
-foreach ($relative in @('runtime\cif.key','runtime\mfa.key')) {
-  if (-not (Test-Path -LiteralPath (Join-Path $taskRoot $relative))) { throw "Missing ALPHA installation file: $relative" }
+$alphaKeyDirectory = Join-Path $taskRoot '.runtime\alpha-keys'
+if (-not (Test-Path -LiteralPath (Join-Path $alphaKeyDirectory 'cif.key')) -or
+    -not (Test-Path -LiteralPath (Join-Path $alphaKeyDirectory 'mfa.key'))) {
+  $alphaKeyDirectory = Join-Path $taskRoot 'runtime'
+}
+foreach ($relative in @('cif.key','mfa.key')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $alphaKeyDirectory $relative))) { throw "Missing ALPHA installation key: $relative" }
 }
 Push-Location $taskRoot
 try {
@@ -59,8 +64,8 @@ try {
     aiModel = $env:AI_MODEL
     aiFallbackModel = $env:AI_FALLBACK_MODEL
     depositInterestEnabled = $env:DEPOSIT_INTEREST_ENABLED
-    cifKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $taskRoot 'runtime\cif.key')))
-    mfaKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $taskRoot 'runtime\mfa.key')))
+    cifKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $alphaKeyDirectory 'cif.key')))
+    mfaKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $alphaKeyDirectory 'mfa.key')))
     demoCredentials = $demoCredentials
     staffCredentials = $staffCredentials
   }

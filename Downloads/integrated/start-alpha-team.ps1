@@ -28,25 +28,25 @@ $keys = @{
   'cif.key' = [Convert]::FromBase64String($payload.cifKey)
   'mfa.key' = [Convert]::FromBase64String($payload.mfaKey)
 }
+$alphaKeys = Join-Path $taskRoot '.runtime\alpha-keys'
 foreach ($name in $keys.Keys) {
-  $target = Join-Path $taskRoot "runtime\$name"
+  $target = Join-Path $alphaKeys $name
   if (Test-Path -LiteralPath $target) {
     $current = [IO.File]::ReadAllBytes($target)
     if (-not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($current, $keys[$name])) {
-      throw "Existing runtime/$name does not match the ALPHA bundle. Back up and resolve the installation key mismatch before starting."
+      throw "Existing ALPHA key .runtime/alpha-keys/$name does not match the team bundle. Back up and resolve that ALPHA key mismatch before starting."
     }
   }
 }
 if ($CheckOnly) {
-  Write-Host 'The ALPHA team bundle decrypts and its installation keys match any local copies.'
+  Write-Host 'The ALPHA team bundle decrypts and its dedicated keys match any local ALPHA copies.'
   return
 }
 
-$runtime = Join-Path $taskRoot 'runtime'
 $privateRuntime = Join-Path $taskRoot '.runtime'
-New-Item -ItemType Directory -Force -Path $runtime, $privateRuntime | Out-Null
+New-Item -ItemType Directory -Force -Path $alphaKeys, $privateRuntime | Out-Null
 foreach ($name in $keys.Keys) {
-  $target = Join-Path $runtime $name
+  $target = Join-Path $alphaKeys $name
   if (-not (Test-Path -LiteralPath $target)) { [IO.File]::WriteAllBytes($target, $keys[$name]) }
 }
 $rows = [System.Collections.Generic.List[string]]::new()
@@ -89,7 +89,7 @@ try {
   $env:AI_MODEL = $payload.aiModel
   $env:AI_FALLBACK_MODEL = $payload.aiFallbackModel
   $env:DEPOSIT_INTEREST_ENABLED = $payload.depositInterestEnabled
-  & (Join-Path $taskRoot 'start-oracle-alpha.ps1') -BackendPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -UseInheritedSettings
+  & (Join-Path $taskRoot 'start-oracle-alpha.ps1') -BackendPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -UseInheritedSettings -CifKeyFile (Join-Path $alphaKeys 'cif.key') -MfaKeyFile (Join-Path $alphaKeys 'mfa.key')
   Write-Host 'ALPHA team workspace is ready. Use ./show-alpha-team-credentials.ps1 to display the team demo logins privately.'
 } finally {
   foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
