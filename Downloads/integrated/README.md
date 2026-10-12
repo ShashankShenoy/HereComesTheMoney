@@ -1,6 +1,6 @@
 # Moneybags — setup and product demo guide
 
-Moneybags combines a Spring Boot backend, an Oracle JET / Knockout frontend, shared sign-in and permissions, and a balanced transaction ledger. Run it with a fresh local H2 database or an existing Oracle database.
+Moneybags combines a Spring Boot backend, an Oracle JET / Knockout frontend, shared sign-in and permissions, and a balanced transaction ledger. Run it with a fresh local H2 database, a local Oracle Free container, or an existing Oracle database.
 
 This guide covers setup, startup, logins, and demonstrations for each product and supporting banking tab. **Transfers between two users of this demo bank debit the sender and credit the recipient.** External payment rails, card purchases, and the RBI reserve mirror have separate simulation workflows.
 
@@ -25,9 +25,10 @@ This guide covers setup, startup, logins, and demonstrations for each product an
 | Setup | Database | Default web address | Restart behavior |
 | --- | --- | --- | --- |
 | Local demo | In-memory H2 with synthetic users/products | http://localhost:5173 | All demo changes reset to the seeded starting state |
+| Self-contained Oracle demo | Local Oracle Free container and its own persistent volume | http://localhost:5174 | Committed records remain in the Docker volume |
 | Oracle demo | Your configured Oracle schema | http://localhost:5174 | Committed records remain |
 
-Choose local H2 for a first run or repeatable presentation. It needs no Oracle installation, VPN, database password, AI key, or Kafka broker. Choose Oracle when accounts, products, approvals, and transactions must survive restart. Local users/passwords are **not automatically created in Oracle**.
+Choose local H2 for a first run or repeatable presentation. It needs no Oracle installation, VPN, database password, AI key, or Kafka broker. Choose the self-contained Oracle demo for a persistent local database. It needs Docker Desktop, but no private Oracle host or credentials. Use the existing-schema Oracle option to connect to an organization's database. The fully seeded H2 fixtures are **not automatically created in Oracle**.
 
 ## Prerequisites
 
@@ -39,6 +40,7 @@ Choose local H2 for a first run or repeatable presentation. It needs no Oracle i
 | PowerShell | Windows PowerShell 5.1 or PowerShell 7 for the supplied launchers |
 | Browser | A current desktop browser; separate profiles help demonstrate several users |
 | SQL Developer / SQL*Plus | Oracle schema installation and diagnostics only |
+| Docker Desktop | Self-contained Oracle demo only; start its engine before launching |
 
 Put Java, Maven, Node.js, and npm on PATH. Obtain the project, then open PowerShell in the **integrated directory** containing this README, backend, frontend, and the startup scripts:
 
@@ -116,6 +118,22 @@ All four **synthetic local users** use password **LocalBanking!2026**. These cre
 Rates and amounts are software-demo fixtures. After transactions, use **current balances**, not these starting values. Customer UI account fields use account numbers; product, application, card, journal, GL, and payment references are separate IDs. Copy newly created IDs from the result shown on screen.
 
 ## Use Oracle
+
+### Self-contained Oracle demo from a fresh checkout
+
+With Docker Desktop running, start from this directory:
+
+~~~powershell
+& ./start-oracle-demo.ps1
+~~~
+
+The first run downloads Oracle Free, starts an isolated `MONEYBAGS` schema on loopback port **1529**, applies the schema scripts, and builds/starts the app at [localhost:5174](http://localhost:5174). It may take several minutes and needs enough disk space and memory for Oracle. Later starts reuse the database volume. No private `.env.ps1`, VPN, or previous workstation's `.runtime` files are required. See [the Oracle Free container source](https://github.com/gvenzl/oci-oracle-free) for image details.
+
+The first run generates random database and web-administrator passwords in ignored `.runtime/oracle-demo.env`. Sign in at `/employee/login` as **admin**, using `BOOTSTRAP_PASSWORD` from that file. The file and Docker volume belong together: keep the original file when reusing the volume. Stop the application with `./stop-oracle-alpha.ps1`; the Oracle container remains running and its data persists. To stop the container without deleting its data, run `docker compose --env-file .runtime/oracle-demo.env -f compose.oracle-demo.yaml stop`.
+
+This path installs the schema and first administrator. It does **not** copy the existing ALPHA database, its users, encryption keys, accounts, balances, or product setup. Create synthetic customer users with the signup form, then configure and approve products/accounts and fund demo balances through the application. For an immediate two-user transfer demonstration with pre-funded accounts and all local fixtures, use `./start-local.ps1`. Do not treat generated passwords or local Oracle data as production credentials or records.
+
+### Existing Oracle schema
 
 ### 1. Prepare or check the schema
 

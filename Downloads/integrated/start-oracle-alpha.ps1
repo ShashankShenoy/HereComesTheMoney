@@ -1,14 +1,14 @@
-param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild, [bool]$PaymentSimulationEnabled=$true)
+param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild, [bool]$PaymentSimulationEnabled=$true, [switch]$UseInheritedSettings)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $runtime = Join-Path $taskRoot '.runtime'
 $record = Join-Path $runtime 'oracle-alpha-processes.json'
 if (Test-Path -LiteralPath $record) { throw 'An Oracle demo run record exists. Run stop-oracle-alpha.ps1 first.' }
 $envFile = Join-Path $taskRoot '.env.ps1'
-if (-not (Test-Path -LiteralPath $envFile)) {
+if (-not $UseInheritedSettings -and -not (Test-Path -LiteralPath $envFile)) {
   throw 'Oracle settings are missing. Copy .env.example.ps1 to .env.ps1 in Downloads/integrated, then edit DB_URL and DB_USERNAME using your SQL Developer connection. The template prompts for your password.'
 }
-. $envFile
+if (-not $UseInheritedSettings) { . $envFile }
 if ([string]::IsNullOrWhiteSpace($env:DB_URL) -or $env:DB_URL -notmatch '^jdbc:oracle:' -or $env:DB_URL.Contains('<')) {
   throw 'Set DB_URL in .env.ps1 to your Oracle JDBC connection URL.'
 }

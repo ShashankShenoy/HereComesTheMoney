@@ -1,0 +1,23 @@
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: moneybags-oracle-demo
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      APP_USER: MONEYBAGS
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD}
+    ports:
+      - "127.0.0.1:1529:1521"
+    volumes:
+      - oracle-demo-data:/opt/oracle/oradata
+      - ./database:/opt/moneybags/database:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+volumes:
+  oracle-demo-data:
+    name: moneybags-oracle-demo-data
