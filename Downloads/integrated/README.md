@@ -76,6 +76,8 @@ Health should return status **UP**. Stop with:
 
 Restarting the local backend resets all synthetic data. Keep it running until a multi-step demonstration finishes.
 
+The local launcher builds its own backend JAR and frontend bundle. On first backend start, the application creates installation-specific `runtime/cif.key` and `runtime/mfa.key` files. Neither those keys nor `.runtime/` build outputs, logs, process records, and workstation-bound encrypted settings are needed from another person's machine. A fresh checkout generates its own files.
+
 For alternative ports, allow the new browser origin before startup:
 
 ~~~powershell
@@ -186,6 +188,8 @@ Connect the required database network/VPN:
 ~~~
 
 Use the installation's actual web credentials and MFA settings. The local fixture password does not establish an Oracle login. [The Oracle ALPHA fixture record](docs/MCP-ORACLE-DEMO.md) documents this workstation's synthetic accounts; check their current balances rather than assuming the historical figures.
+
+**Keep the original encryption keys for an existing Oracle database.** Back up `runtime/cif.key` and `runtime/mfa.key` privately before replacing a checkout or moving to another machine, and restore them before starting against the same database. New keys cannot decrypt existing CIF or authenticator records. These keys are generated for a fresh installation and must not be committed or shared with another installation. Anyone updating an older checkout that already tracked the two files should save a private copy before pulling this change; Git may remove the tracked copies during that pull.
 
 The Oracle demo launcher enables demo signup and external payment simulation, and sets the synthetic internal bank code. Oracle deposit-interest services additionally require DEPOSIT_INTEREST_ENABLED=true, migration 018, and complete product/GL mappings. Do not enable the local Spring profile when using Oracle.
 
