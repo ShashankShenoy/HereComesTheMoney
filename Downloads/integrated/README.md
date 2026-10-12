@@ -26,7 +26,8 @@ This guide covers setup, startup, logins, and demonstrations for each product an
 | --- | --- | --- | --- |
 | Local demo | In-memory H2 with synthetic users/products | http://localhost:5173 | All demo changes reset to the seeded starting state |
 | Self-contained Oracle demo | Local Oracle Free container and its own persistent volume | http://localhost:5174 | Committed records remain in the Docker volume |
-| Oracle demo | Your configured Oracle schema | http://localhost:5174 | Committed records remain |
+| Shared ALPHA Oracle demo | Team ALPHA schema, unlocked from an encrypted repository bundle | http://localhost:5174 | Committed records remain in ALPHA |
+| Other Oracle schema | Your configured Oracle schema | http://localhost:5174 | Committed records remain |
 
 Choose local H2 for a first run or repeatable presentation. It needs no Oracle installation, VPN, database password, AI key, or Kafka broker. Choose the self-contained Oracle demo for a persistent local database. It needs Docker Desktop, but no private Oracle host or credentials. Use the existing-schema Oracle option to connect to an organization's database. The fully seeded H2 fixtures are **not automatically created in Oracle**.
 
@@ -38,6 +39,7 @@ Choose local H2 for a first run or repeatable presentation. It needs no Oracle i
 | Maven | 3.9 or newer |
 | Node.js and npm | Node.js 20 or newer; latest verification used Node.js 22 |
 | PowerShell | Windows PowerShell 5.1 or PowerShell 7 for the supplied launchers |
+| PowerShell 7 | Required for the encrypted shared ALPHA launcher |
 | Browser | A current desktop browser; separate profiles help demonstrate several users |
 | SQL Developer / SQL*Plus | Oracle schema installation and diagnostics only |
 | Docker Desktop | Self-contained Oracle demo only; start its engine before launching |
@@ -118,6 +120,22 @@ All four **synthetic local users** use password **LocalBanking!2026**. These cre
 Rates and amounts are software-demo fixtures. After transactions, use **current balances**, not these starting values. Customer UI account fields use account numbers; product, application, card, journal, GL, and payment references are separate IDs. Copy newly created IDs from the result shown on screen.
 
 ## Use Oracle
+
+### Shared ALPHA database for the team
+
+The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and the synthetic demo logins. The original `.env.ps1` and Windows DPAPI files are tied to one workstation and remain ignored. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
+
+On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** in this directory, and run:
+
+~~~powershell
+./start-alpha-team.ps1
+~~~
+
+Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, installs the matching CIF/MFA keys locally, protects the demo-login record for the current Windows user, builds the app, and starts it at [localhost:5174](http://localhost:5174). The database password is passed to the backend through its process environment. Run `./show-mcp-demo-credentials.ps1` in your own console to view the synthetic ALPHA web logins. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
+
+The passphrase for the bundle created on the original workstation is stored only in ignored `.runtime/alpha-team-passphrase.txt`. Its owner must share it securely with authorized teammates. If the passphrase or encrypted bundle is lost, the original workstation can create a replacement with `./tools/export-alpha-team-bundle.ps1 -ReplaceBundle`; distribute the replacement passphrase separately. A replacement invalidates the previous passphrase. Existing local installation keys that differ from the bundle stop startup rather than overwriting them.
+
+The shared database is a **single persistent environment**: every teammate sees and can change the same accounts, payments, approvals, and balances. Coordinate demos and use current balances. Repository access alone does not unlock the bundle, but anyone who obtains both the bundle and passphrase can recover all included secrets. The old CIF/MFA keys were previously present in Git history; removing them from the current revision did not erase that history. Rotation of those keys against existing ALPHA records requires a data migration.
 
 ### Self-contained Oracle demo from a fresh checkout
 
