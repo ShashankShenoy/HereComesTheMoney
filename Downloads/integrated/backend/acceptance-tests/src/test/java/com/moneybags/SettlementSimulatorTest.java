@@ -40,6 +40,40 @@ class SettlementSimulatorTest {
  JsonNode outgoing(String rail,String amount)throws Exception{return value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode",rail,"amount",amount,"requestKey",UUID.randomUUID().toString())).andExpect(status().isOk()));}
  void settle(long cycle)throws Exception{send("/payments/simulator/cycles/"+cycle+"/settle",admin,Map.of()).andExpect(status().isOk());}
  void fund()throws Exception{send("/payments/simulator/incoming",admin,incoming("RTGS","3000000",UUID.randomUUID().toString())).andExpect(status().isOk());}
+ JsonNode activity(String token)throws Exception{return value(mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+token)).andExpect(status().isOk()));}
+ JsonNode entry(String token,long payment)throws Exception{for(var row:activity(token))if(row.path("paymentId").asLong()==payment)return row;return json.nullNode();}
+ @Test void outgoingActivityShowsActualDebitBeforeSettlementAndNeverDuplicatesIt()throws Exception{
+  var p=outgoing("UPI","10");long id=p.path("paymentId").asLong();var row=entry(customer,id);
+  assertEquals("EXTERNAL_PAYMENT_SENT",row.path("type").asText());assertEquals("SOURCE",row.path("accountRole").asText());
+  assertEquals("POSTED",row.path("status").asText());assertEquals("SETTLEMENT_PENDING",row.path("paymentStatus").asText());
+  assertEquals(0,new BigDecimal("10").compareTo(row.path("amount").decimalValue()));
+  mvc.perform(get("/api/v1/banking/transactions/"+row.path("transactionId").asText()+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+customer))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.PAYMENT_ID").value(id)).andExpect(jsonPath("$.journals[0].control.IS_BALANCED").value("Y"));
+  settle(p.path("settlementCycleId").asLong());settle(p.path("settlementCycleId").asLong());
+  assertEquals("SETTLED",entry(customer,id).path("paymentStatus").asText());
+  int count=0;for(var item:activity(customer))if(item.path("paymentId").asLong()==id)count++;assertEquals(1,count);
+  fund();var pending=outgoing("NEFT","100000.01");assertTrue(entry(customer,pending.path("paymentId").asLong()).isNull());
+  send("/payments/simulator/payments/"+pending.path("paymentId").asLong()+"/reject",checker,Map.of()).andExpect(status().isOk());
+  assertTrue(entry(customer,pending.path("paymentId").asLong()).isNull());
+ }
+ @Test void incomingActivityFollowsActualCustomerCreditTiming()throws Exception{
+  for(String rail:List.of("UPI","IMPS","NEFT","RTGS")){
+   var p=value(send("/payments/simulator/incoming",admin,incoming(rail,rail.equals("RTGS")?"200000":"11",UUID.randomUUID().toString())).andExpect(status().isOk()));long id=p.path("paymentId").asLong();
+   if(rail.equals("NEFT"))assertTrue(entry(customer,id).isNull());else assertEquals("EXTERNAL_PAYMENT_RECEIVED",entry(customer,id).path("type").asText());
+   if(p.path("settlementCycleId").isNumber())settle(p.path("settlementCycleId").asLong());
+   var row=entry(customer,id);assertEquals("TARGET",row.path("accountRole").asText());assertEquals(rail,row.path("railCode").asText());
+   assertEquals("SETTLED",row.path("paymentStatus").asText());
+  }
+ }
+ @Test void paymentActivityKeepsHolderPrivacyAndAccountScope()throws Exception{
+  var p=outgoing("UPI","10");var row=entry(customer,p.path("paymentId").asLong());String reference=row.path("transactionId").asText();
+  for(var item:activity(checker))if(item.path("transactionId").asText().equals(reference)){assertFalse(item.has("amount"));assertFalse(item.has("paymentId"));}
+  String other=login("customer2");
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000002").header("Authorization","Bearer "+other)).andExpect(status().isNotFound());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+checker)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+ }
  @Test void automaticOutgoingAndCycleRetryHaveOneDebitAndBalancedReserves()throws Exception{
   BigDecimal before=balance(),r=reserve();var p=outgoing("UPI","10");long id=p.path("paymentId").asLong(),cycle=p.path("settlementCycleId").asLong();
   assertEquals("SETTLEMENT_PENDING",p.path("status").asText());assertEquals(0,before.subtract(new BigDecimal("10")).compareTo(balance()));assertEquals(0,r.compareTo(reserve()));
