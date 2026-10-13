@@ -112,6 +112,8 @@ public class TreasuryRepository {
         return jdbc.sql("""
             SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=:id
               AND STATUS IN ('DISPATCHED','ACCEPTED','UNKNOWN','SETTLEMENT_PENDING','SETTLED')
+              AND NOT EXISTS (SELECT 1 FROM MBX_SIM_PAYMENT s JOIN M06_PAYMENT_INSTRUCTION p ON p.PAYMENT_ID=s.PAYMENT_ID
+                WHERE s.PAYMENT_ID=:id AND p.CLEARING_BATCH_ID IS NOT NULL)
             """).param("id", paymentId).query(Integer.class).single() == 1;
     }
 
@@ -173,7 +175,7 @@ public class TreasuryRepository {
         return jdbc.sql("""
             SELECT COUNT(*) FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=:batchId
               AND RAIL_CODE=:rail AND BATCH_DIRECTION=:direction
-              AND BATCH_STATUS IN ('CLOSED','SUBMITTED','SETTLEMENT_PENDING','SETTLED')
+              AND BATCH_STATUS IN ('OPEN','CLOSED','SUBMITTED','SETTLEMENT_PENDING','SETTLED')
             """).param("batchId", command.clearingBatchId()).param("rail", command.railCode())
             .param("direction", command.direction()).query(Integer.class).single() == 1;
     }

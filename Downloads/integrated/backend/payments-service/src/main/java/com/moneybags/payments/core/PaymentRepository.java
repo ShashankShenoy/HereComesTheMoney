@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -106,11 +107,13 @@ public class PaymentRepository {
     /** Advances exactly one version and binds evidence references to the payment. */
     public void advance(Contracts.Payment payment, Contracts.Transition command) {
         int changed = jdbc.update("UPDATE M06_PAYMENT_INSTRUCTION SET STATUS=?,VERSION_NO=VERSION_NO+1,HOLD_ID=COALESCE(?,HOLD_ID),LIQUIDITY_HOLD_ID=COALESCE(?,LIQUIDITY_HOLD_ID),REASON_CODE=?,UPDATED_AT=SYSTIMESTAMP WHERE PAYMENT_ID=? AND VERSION_NO=?",
-                command.toStatus(), command.holdId(), command.liquidityHoldId(), command.reasonCode(), payment.paymentId(), payment.version());
+                new Object[]{command.toStatus(), command.holdId(), command.liquidityHoldId(), command.reasonCode(), payment.paymentId(), payment.version()},
+                new int[]{Types.VARCHAR, Types.NUMERIC, Types.NUMERIC, Types.VARCHAR, Types.NUMERIC, Types.INTEGER});
         if (changed != 1) throw new ApiException(HttpStatus.CONFLICT, "STALE_VERSION", "Payment version changed");
         jdbc.update("INSERT INTO M06_PAYMENT_STATUS_HISTORY (PAYMENT_ID,FROM_STATUS,TO_STATUS,ACTOR_TYPE,ACTOR_ID,REASON_CODE,EVIDENCE_ID,PAYMENT_DIRECTION,LEDGER_JOURNAL_ID,TREASURY_ENTRY_ID) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                payment.paymentId(), payment.status(), command.toStatus(), Actor.type(), Actor.id(),
-                command.reasonCode(), command.evidenceId(), payment.direction(), command.ledgerJournalId(), command.treasuryEntryId());
+                new Object[]{payment.paymentId(), payment.status(), command.toStatus(), Actor.type(), Actor.id(),
+                command.reasonCode(), command.evidenceId(), payment.direction(), command.ledgerJournalId(), command.treasuryEntryId()},
+                new int[]{Types.NUMERIC, Types.VARCHAR, Types.VARCHAR, Types.VARCHAR, Types.VARCHAR, Types.VARCHAR, Types.NUMERIC, Types.VARCHAR, Types.NUMERIC, Types.NUMERIC});
     }
 
     /** Stores the initial history row; its nullable from-state is intentionally outside the transition FK. */

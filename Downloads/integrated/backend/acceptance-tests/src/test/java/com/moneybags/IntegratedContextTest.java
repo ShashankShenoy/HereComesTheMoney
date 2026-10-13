@@ -15,7 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(properties = "moneybags.auth.allowed-origins=http://localhost:5173")
+@SpringBootTest(properties = {"moneybags.auth.allowed-origins=http://localhost:5173", "moneybags.payment-simulation.clearing-enabled=false"})
 @AutoConfigureMockMvc @ActiveProfiles("local")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IntegratedContextTest {

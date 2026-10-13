@@ -6,7 +6,7 @@ export function icon(name){return `<svg class="ui-icon" viewBox="0 0 24 24" fill
 
 const entryProducts={accounts:'accounts and fixed deposits',creditCards:'credit cards',loans:'loans'};
 export function entryContext(pathname,search=''){
-  const employee=['/employee','/employee/','/employee/login','/employee/login/'].includes(pathname);
+  const employee=['/employee','/employee/','/employee/login','/employee/login/','/employee/rbi-simulator'].includes(pathname);
   const product=new URLSearchParams(search).get('product');
   return {employee,compact:employee||['/login','/login/'].includes(pathname),product:!employee&&Object.hasOwn(entryProducts,product)?product:null};
 }
