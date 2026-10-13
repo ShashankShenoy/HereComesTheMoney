@@ -1,6 +1,6 @@
 # Moneybags — setup and product demo guide
 
-Moneybags combines a Spring Boot backend, an Oracle JET / Knockout frontend, shared sign-in and permissions, and a balanced transaction ledger. Run it with a fresh local H2 database, a local Oracle Free container, or an existing Oracle database.
+Moneybags runs six separate Spring Boot services for identity, banking, payments, loans, audit/compliance and reporting, a Node.js API gateway, and an Oracle JET / Knockout frontend. Banking has customer, product, account, ledger, treasury, card and deposit libraries. The services retain the existing shared relational schema and balanced transaction ledger. Run them with a fresh local H2 database, a local Oracle Free container, or an existing Oracle database. See [the service architecture and verification guide](docs/MICROSERVICES.md).
 
 This guide covers setup, startup, logins, and demonstrations for each product and supporting banking tab. **Transfers between two users of this demo bank debit the sender and credit the recipient.** External payment rails, card purchases, and the RBI reserve mirror have separate simulation workflows.
 
@@ -62,7 +62,7 @@ npm --version
 & ./start-local.ps1
 ~~~
 
-Wait for the **Local workspace** message. The launcher runs backend verification, installs frontend dependencies with npm ci, checks/tests the frontend, builds frontend/dist, and starts Java and Node in hidden windows.
+Wait for the **Moneybags microservices ready** message. The launcher verifies all backend modules, tests the gateway and architecture boundaries, installs frontend dependencies with npm ci, checks/tests the frontend, builds frontend/dist, and starts the database, six Java services, gateway and frontend in hidden windows. It waits for readiness and cleans up a failed start. `start-microservices.ps1` is the direct entry point; the existing local and Oracle launchers delegate to it.
 
 | Page | Address |
 | --- | --- |
@@ -70,7 +70,8 @@ Wait for the **Local workspace** message. The launcher runs backend verification
 | Bank-admin / employee sign-in | [localhost:5173/employee/login](http://localhost:5173/employee/login) |
 | API documentation | [localhost:5173/swagger](http://localhost:5173/swagger) |
 | Health | [localhost:5173/actuator/health](http://localhost:5173/actuator/health) |
-| Backend directly | http://127.0.0.1:8090 |
+| API gateway directly | http://127.0.0.1:8090 |
+| Identity / reporting / banking | http://127.0.0.1:8092 / :8093 / :8094 |
 
 Health should return status **UP**. Stop with:
 
@@ -80,7 +81,7 @@ Health should return status **UP**. Stop with:
 
 Restarting the local backend resets all synthetic data. Keep it running until a multi-step demonstration finishes.
 
-The local launcher builds its own backend JAR and frontend bundle. On first backend start, the application creates installation-specific `runtime/cif.key` and `runtime/mfa.key` files. Neither those keys nor `.runtime/` build outputs, logs, process records, and workstation-bound encrypted settings are needed from another person's machine. A fresh checkout generates its own files.
+The local launcher builds each service JAR and the frontend bundle. On first startup, banking and identity create installation-specific `runtime/cif.key` and `runtime/mfa.key` files. Neither those keys nor `.runtime/` build outputs, logs, process records, and workstation-bound encrypted settings are needed from another person's machine. A fresh checkout generates its own files.
 
 For alternative ports, allow the new browser origin before startup:
 
@@ -546,7 +547,7 @@ npm --prefix frontend run check
 npm --prefix frontend run build
 ~~~
 
-The latest verification before this documentation update passed **98 backend tests**, **32 frontend tests**, syntax checks, and frontend build. Two-user Payments checks covered balances/history, reload, lost-response retry, insufficient funds, ownership, return transfer, and mobile layout. A separate local admin check verified both account histories and a balanced GL journal without a holder key. Oracle connectivity and read-only journal/reserve consistency were checked. See [the latest demo payment record](docs/DEMO-PAYMENTS-VERIFIED-2026-10-11.html).
+The current six-service verification passed **318 automated local checks** and **seven browser checks**. Live Oracle verification recorded **41 passes, two failures and three skips**; the unresolved findings are an existing account-position reconciliation gap and a bundled demo-password mismatch. See the [current test report](docs/MICROSERVICES-TEST-REPORT.md) for the complete flow coverage, evidence, measured load and limits. The [11 October demo payment record](docs/DEMO-PAYMENTS-VERIFIED-2026-10-11.html) remains a historical verification record.
 
 These checks do not certify live rails, every Oracle product configuration, regulatory compliance, or all crash/concurrency cases. H2 demonstrations use generated synthetic fixtures; Oracle retains its own users/products. This documentation update does not change credentials, install schema, or reset balances.
 

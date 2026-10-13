@@ -32,101 +32,16 @@ if ($env:DB_URL -match '^jdbc:oracle:thin:@(?:\/\/)?(?<dbHost>[^:/()\s]+):(?<dbP
   } catch { throw "Oracle port is unreachable. Check the database VPN and listener. Host: $oracleNetworkHost Port: $oracleNetworkPort" }
   finally { $oracleNetworkProbe.Dispose() }
 }
-foreach ($oracleAppPort in @($BackendPort, $FrontendPort)) {
-  if (Get-NetTCPConnection -LocalPort $oracleAppPort -State Listen -ErrorAction SilentlyContinue) {
-    throw "Port $oracleAppPort is already in use. Stop the previous application before starting again."
-  }
-}
-& (Join-Path $taskRoot 'build-before-start.ps1') -CheckOnly:$SkipBuild
-$jar = Join-Path $taskRoot 'backend\target\moneybags-integrated-1.0.0.jar'
-if (-not (Test-Path -LiteralPath $jar)) { throw 'Maven verify finished without creating the backend JAR.' }
 if ($CifKeyFile -and -not (Test-Path -LiteralPath $CifKeyFile)) { throw 'The selected CIF key file is missing.' }
 if ($MfaKeyFile -and -not (Test-Path -LiteralPath $MfaKeyFile)) { throw 'The selected MFA key file is missing.' }
-New-Item -ItemType Directory -Force -Path $runtime | Out-Null
-$env:INTERNAL_BANK_CODES = 'MCPB0000002' # Synthetic Demo B bank code; real deployments configure their own.
-$env:CUSTOMER_SIGNUP_ENABLED = 'true'
-$env:FRONTEND_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
-$backendLauncher = $null
-$frontend = $null
-$backendLauncherStartTicks = $null
-$frontendStartTicks = $null
-function Save-OracleRunRecord {
-  if ($null -eq $backendLauncher) { return }
-  $backendProcess = $backendLauncher
-  # Windows javapath can launch a separate JVM. Track that child as well as
-  # the launcher so a failed startup can stop the actual backend safely.
-  $backendChildren = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($backendLauncher.Id) AND Name = 'java.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*$jar*" })
-  if ($backendChildren.Count -eq 1) {
-    $backendChild = Get-Process -Id $backendChildren[0].ProcessId -ErrorAction SilentlyContinue
-    if ($backendChild -and $backendChild.StartTime.ToUniversalTime().Ticks -ge $backendLauncherStartTicks) { $backendProcess = $backendChild }
-  }
-  $backendTicks = $backendLauncherStartTicks
-  if ($backendProcess.Id -ne $backendLauncher.Id) { $backendTicks = $backendProcess.StartTime.ToUniversalTime().Ticks }
-  $oracleRun = @{
-    backend = $backendProcess.Id
-    backendStartTicks = $backendTicks.ToString()
-    backendLauncher = $backendLauncher.Id
-    backendLauncherStartTicks = $backendLauncherStartTicks.ToString()
-    backendPort = $BackendPort
-    frontendPort = $FrontendPort
-  }
-  if ($null -ne $frontend) {
-    $oracleRun.frontend = $frontend.Id
-    $oracleRun.frontendStartTicks = $frontendStartTicks.ToString()
-  }
-  $oracleRun | ConvertTo-Json | Set-Content -LiteralPath $record
-}
+$settingNames = @('INTERNAL_BANK_CODES','CUSTOMER_SIGNUP_ENABLED','PAYMENT_SIMULATION_ENABLED')
+$previousSettings = @{}
+foreach ($name in $settingNames) { $previousSettings[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 try {
-$previousPaymentSimulation = [Environment]::GetEnvironmentVariable('PAYMENT_SIMULATION_ENABLED', 'Process')
-$env:PAYMENT_SIMULATION_ENABLED = $PaymentSimulationEnabled.ToString().ToLowerInvariant() # This launcher is exclusively for the local payment demo.
-try {
-$backendArguments = @(
-  '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp', '-Djava.net.useSystemProxies=true', '-jar', ('"' + $jar + '"'), "--server.port=$BackendPort", '--server.address=127.0.0.1'
-)
-if ($CifKeyFile) { $backendArguments += ('"--moneybags.cif.key-file=' + (Resolve-Path -LiteralPath $CifKeyFile).Path + '"') }
-if ($MfaKeyFile) { $backendArguments += ('"--moneybags.auth.mfa-key-file=' + (Resolve-Path -LiteralPath $MfaKeyFile).Path + '"') }
-$backendLauncher = Start-Process -FilePath 'java.exe' -ArgumentList $backendArguments -WindowStyle Hidden -WorkingDirectory $taskRoot -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-backend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-backend.err.log') -PassThru
+  $env:INTERNAL_BANK_CODES = 'MCPB0000002'
+  $env:CUSTOMER_SIGNUP_ENABLED = 'true'
+  $env:PAYMENT_SIMULATION_ENABLED = $PaymentSimulationEnabled.ToString().ToLowerInvariant()
+  & (Join-Path $taskRoot 'start-microservices.ps1') -Database Oracle -GatewayPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -CifKeyFile $CifKeyFile -MfaKeyFile $MfaKeyFile
 } finally {
-  if ($null -eq $previousPaymentSimulation) { Remove-Item Env:PAYMENT_SIMULATION_ENABLED -ErrorAction SilentlyContinue }
-  else { $env:PAYMENT_SIMULATION_ENABLED = $previousPaymentSimulation }
-}
-$backendLauncherStartTicks = $backendLauncher.StartTime.ToUniversalTime().Ticks
-Save-OracleRunRecord
-$env:BACKEND_URL = "http://127.0.0.1:$BackendPort"
-$env:PORT = "$FrontendPort"
-$frontend = Start-Process -FilePath 'node.exe' -ArgumentList @('server.mjs') -WindowStyle Hidden -WorkingDirectory (Join-Path $taskRoot 'frontend\dist') -RedirectStandardOutput (Join-Path $runtime 'oracle-alpha-frontend.log') -RedirectStandardError (Join-Path $runtime 'oracle-alpha-frontend.err.log') -PassThru
-$frontendStartTicks = $frontend.StartTime.ToUniversalTime().Ticks
-Save-OracleRunRecord
-$deadline = [datetime]::UtcNow.AddSeconds(60)
-$health = $null
-while ([datetime]::UtcNow -lt $deadline) {
-  Save-OracleRunRecord
-  $backendLauncher.Refresh()
-  if ($backendLauncher.HasExited) { throw 'Oracle backend exited during startup. See .runtime/oracle-alpha-backend.log and .runtime/oracle-alpha-backend.err.log.' }
-  try {
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/actuator/health" -TimeoutSec 2
-    if ($health.status -eq 'UP') { break }
-  } catch { }
-  Start-Sleep -Seconds 1
-}
-if ($health.status -ne 'UP') { throw 'Oracle backend did not become healthy. See .runtime/oracle-alpha-backend.log; then run stop-oracle-alpha.ps1.' }
-$frontend.Refresh()
-if ($frontend.HasExited) { throw 'Frontend exited. See .runtime/oracle-alpha-frontend.err.log; then run stop-oracle-alpha.ps1.' }
-try { $page = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSec 8 }
-catch { throw "Frontend did not become healthy: $($_.Exception.Message). See .runtime/oracle-alpha-frontend.log." }
-if ($page.StatusCode -ne 200) { throw 'Frontend did not serve the workspace.' }
-$backendListener = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen | Where-Object { $_.LocalAddress -in @('127.0.0.1','::1','0.0.0.0','::') })
-$frontendListener = @(Get-NetTCPConnection -LocalPort $FrontendPort -State Listen | Where-Object { $_.LocalAddress -in @('127.0.0.1','::1','0.0.0.0','::') })
-if ($backendListener.Count -ne 1 -or $frontendListener.Count -ne 1) { throw 'Could not uniquely identify the demo listener processes.' }
-Save-OracleRunRecord
-Write-Host "Oracle ALPHA workspace: http://localhost:$FrontendPort"
-Write-Host "Backend health: http://127.0.0.1:$BackendPort/actuator/health"
-} catch {
-  $oracleStartupFailure = $_
-  try {
-    Save-OracleRunRecord
-    & (Join-Path $taskRoot 'stop-oracle-alpha.ps1')
-  } catch { Write-Warning 'Automatic cleanup could not finish. Run stop-oracle-alpha.ps1; the process record is retained for inspection.' }
-  throw $oracleStartupFailure
+  foreach ($name in $settingNames) { [Environment]::SetEnvironmentVariable($name,$previousSettings[$name],'Process') }
 }

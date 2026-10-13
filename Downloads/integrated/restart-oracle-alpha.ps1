@@ -8,9 +8,9 @@ foreach ($name in @('DB_URL', 'DB_USERNAME', 'DB_PASSWORD')) {
     throw "Oracle setting $name is missing. Set it privately in this PowerShell session before restarting. The running demo was not stopped."
   }
 }
-$newJar = Join-Path $taskRoot 'backend\target\moneybags-integrated-1.0.0.jar'
+$newJar = Join-Path $taskRoot 'backend/banking-service/target/banking-service-1.0.0-exec.jar'
 if (-not (Test-Path -LiteralPath $newJar)) {
-  throw 'The integrated backend JAR is missing. Build the combined application first. The running demo was not stopped.'
+  throw 'The banking service JAR is missing. Run build-before-start.ps1 first. The running demo was not stopped.'
 }
 & (Join-Path $taskRoot 'build-before-start.ps1') -CheckOnly
 & (Join-Path $taskRoot 'stop-oracle-alpha.ps1')

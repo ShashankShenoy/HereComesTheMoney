@@ -9,7 +9,7 @@ if (-not $OracleEnvFile) { $OracleEnvFile = Join-Path $repoRoot '.env' }
 if (-not $DependencyDirectory) {
     $DependencyDirectory = Join-Path $repoRoot '.offline-compile\BOOT-INF\lib'
     if (-not (Test-Path -LiteralPath $DependencyDirectory)) {
-        $DependencyDirectory = Join-Path $PSScriptRoot 'backend\target\dependency'
+        $DependencyDirectory = Join-Path $PSScriptRoot 'backend/shared/target/dependency'
     }
 }
 if (-not (Test-Path -LiteralPath $DependencyDirectory)) {
@@ -38,13 +38,16 @@ try {
     $classes = Join-Path $runtime 'classes'
     New-Item -ItemType Directory -Force -Path $classes | Out-Null
     $sourceList = Join-Path $runtime 'sources.txt'
-    $production = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'backend\src\main\java') -Recurse -Filter '*.java'
-    $test = Join-Path $PSScriptRoot 'backend\src\test\java\com\moneybags\privacy\audit\FinancialAuditOracleSmoke.java'
+    $production = foreach ($module in ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'backend/pom.xml') -Raw)).project.modules.module) {
+        if($module -in @('local-database','acceptance-tests')){continue}
+        Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "backend/$module/src/main/java") -Recurse -Filter '*.java'
+    }
+    $test = Join-Path $PSScriptRoot 'backend/acceptance-tests/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java'
     $sources = @($production.FullName) + @($test)
     $sources | ForEach-Object { '"'+($_ -replace '\\','/')+'"' } | Set-Content -LiteralPath $sourceList -Encoding utf8
     $jars = Join-Path ([IO.Path]::GetFullPath($DependencyDirectory)) '*'
     Write-Host 'Compiling all production sources and the focused Oracle audit test...'
-    & javac --release 17 -parameters -cp $jars -d $classes ('@'+$sourceList)
+    & javac --release 17 -encoding UTF-8 -parameters -cp $jars -d $classes ('@'+$sourceList)
     if ($LASTEXITCODE -ne 0) { throw 'Backend compilation failed; the Oracle test was not run.' }
     Write-Host 'Testing existing synthetic accounts in a rollback-only Oracle transaction...'
     & java -cp ($classes+';'+$jars) com.moneybags.privacy.audit.FinancialAuditOracleSmoke

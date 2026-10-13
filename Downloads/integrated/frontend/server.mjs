@@ -4,23 +4,26 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
-const target=new URL(process.env.BACKEND_URL||'http://127.0.0.1:8080');
-if(target.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(target.hostname))throw new Error('BACKEND_URL must point to a local HTTP backend');
+const target=new URL(process.env.BACKEND_URL||'http://127.0.0.1:8090');
+if(target.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(target.hostname)||target.username||target.password||target.pathname!=='/'||target.search||target.hash)throw new Error('BACKEND_URL must be a loopback HTTP origin');
 const files=new Map([['/assets/InterVariable.woff2','assets/InterVariable.woff2'],['/oracle-red.css','oracle-red.css'],['/design.js','design.js'],['/customer-payments.js','customer-payments.js'],['/customer-fx.js','customer-fx.js'],['/login','index.html'],['/login/','index.html'],['/employee','index.html'],['/employee/','index.html'],['/employee/login','index.html'],['/employee/login/','index.html'],['/','index.html'],['/index.html','index.html'],['/banking.js','banking.js'],['/credit-cards.js','credit-cards.js'],['/credit-cards.css','credit-cards.css'],['/comparisons.js','comparisons.js'],['/app.js','app.js'],['/assistant.js','assistant.js'],['/assistant-markdown.js','assistant-markdown.js'],['/presentation.js','presentation.js'],['/api.js','api.js'],['/ui.js','ui.js'],['/jet.js','jet.js'],['/domains.js','domains.js'],['/i18n.js','i18n.js'],['/style.css','style.css'],['/professional.css','professional.css'],['/favicon.svg','favicon.svg']]);
 // Public vendor roots are explicit; node_modules itself and package/config files are never exposed.
 const vendors=new Map(Object.entries({jet:'@oracle/oraclejet/dist/js/libs/oj','jet-css':'@oracle/oraclejet/dist/css','jet-preact':'@oracle/oraclejet-preact/amd',require:'requirejs',knockout:'knockout/build/output',jquery:'jquery/dist','jquery-ui':'jquery-ui/ui',hammer:'hammerjs',signals:'signals/dist',preact:'preact/dist','preact-compat':'preact/compat/dist','preact-hooks':'preact/hooks/dist','preact-jsx':'preact/jsx-runtime/dist',text:'requirejs-text',css:'require-css'}));
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.png':'image/png','.gif':'image/gif'};
 export const server=http.createServer(async(req,res)=>{
-  const url=new URL(req.url,'http://localhost');
+  let url;
+  try{url=new URL(req.url,'http://localhost');}catch{res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({code:'INVALID_REQUEST',message:'Invalid URL'}));return;}
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','no-store');
   if(url.pathname==='/swagger'){res.writeHead(302,{Location:'/swagger-ui/index.html'});res.end();return;}
   if(url.pathname.startsWith('/swagger-ui/')||url.pathname.startsWith('/api/')||url.pathname.startsWith('/actuator/')||url.pathname.startsWith('/v3/api-docs')){
     const upstream=http.request({hostname:target.hostname,port:target.port||80,path:url.pathname+url.search,method:req.method,headers:{...req.headers,host:target.host}},response=>{
       res.writeHead(response.statusCode,response.headers);response.pipe(res);
+      response.on('error',()=>res.destroy());
     });
-    upstream.setTimeout(url.pathname==='/api/v1/assistant/chat'?75000:15000,()=>upstream.destroy(new Error('Backend timeout')));
-    upstream.on('error',()=>{if(!res.headersSent){res.writeHead(502,{'Content-Type':'application/json'});res.end(JSON.stringify({status:502,code:'BACKEND_OFFLINE',message:'Backend is unavailable. Start moneybags-backend and check BACKEND_URL.',fieldErrors:{}}));}else res.destroy();});
-    req.on('aborted',()=>upstream.destroy());req.pipe(upstream);return;
+    upstream.setTimeout(url.pathname==='/api/v1/assistant/chat'?95000:url.pathname.startsWith('/v3/api-docs')?60000:35000,()=>upstream.destroy(new Error('Gateway timeout')));
+    upstream.on('error',()=>{if(!res.headersSent){res.writeHead(502,{'Content-Type':'application/json'});res.end(JSON.stringify({status:502,code:'BACKEND_OFFLINE',message:'The API gateway is unavailable. Run start-microservices.ps1 and check BACKEND_URL.',fieldErrors:{}}));}else res.destroy();});
+    req.on('aborted',()=>upstream.destroy());req.on('error',()=>upstream.destroy());
+    res.on('close',()=>{if(!res.writableFinished)upstream.destroy();});req.pipe(upstream);return;
   }
   if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}
   let filename=files.get(url.pathname);

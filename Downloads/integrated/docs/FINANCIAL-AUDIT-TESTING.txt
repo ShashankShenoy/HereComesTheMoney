@@ -1,9 +1,9 @@
 Financial transaction auditing: test and startup steps
 
 The implementation is in this actual repository. Its files are:
-  backend/src/main/java/com/moneybags/privacy/audit/FinancialAuditController.java
+  backend/reporting-service/src/main/java/com/moneybags/privacy/audit/FinancialAuditController.java
   frontend/app.js (Audit trail -> Financial transactions)
-  backend/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java
+  backend/acceptance-tests/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java
   frontend/financial-audit.test.js
   test-financial-audit-oracle.ps1
 
@@ -39,7 +39,7 @@ missing. To use another dependency JAR directory:
 
 If this checkout's offline JAR directory is unavailable, obtain the runtime
 dependencies with Maven, then rerun the script:
-  mvn -f .\backend\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" dependency:copy-dependencies -DincludeScope=runtime "-DoutputDirectory=$PWD\backend\target\dependency"
+  mvn -f .\backend\shared\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" dependency:copy-dependencies -DincludeScope=runtime "-DoutputDirectory=$PWD\backend\shared\target\dependency"
 
 2. Check the frontend, including existing audit failure isolation
 
@@ -55,7 +55,7 @@ the endpoint, and preserving existing IAM panels if that endpoint fails.
 If the application is already running, stop it with your usual launcher before
 replacing its JAR. Choose unused ports if other services use 8091/5175.
 
-  mvn -f .\backend\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" -DskipTests package
+  mvn -f .\backend\shared\pom.xml "-Dmaven.repo.local=$PWD\..\..\.m2-cache" -DskipTests package
   npm --prefix .\frontend ci
 
 The existing IntegratedContextTest uses H2 explicitly, so -DskipTests above

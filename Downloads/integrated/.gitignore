@@ -1,4 +1,6 @@
 backend/target/
+backend/*/target/
+gateway/node_modules/
 frontend/node_modules/
 frontend/dist/
 .runtime/

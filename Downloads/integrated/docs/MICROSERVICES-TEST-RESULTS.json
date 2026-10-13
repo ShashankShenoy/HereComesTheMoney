@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-10-13T16:43:15.3438871+05:30",
+  "services": 6,
+  "domainLibraries": 7,
+  "automated": {
+    "total": 364,
+    "passed": 359,
+    "failed": 2,
+    "skipped": 3
+  },
+  "manual": {
+    "total": 7,
+    "passed": 7
+  },
+  "localLoad": {
+    "requests": 64,
+    "concurrency": 8,
+    "errors": 0,
+    "elapsedMs": 875,
+    "p50Ms": 72,
+    "p95Ms": 118,
+    "maxMs": 136
+  },
+  "oracleLoad": {
+    "requests": 64,
+    "concurrency": 8,
+    "errors": 0,
+    "elapsedMs": 50728,
+    "p50Ms": 3944,
+    "p95Ms": 6347,
+    "maxMs": 7163
+  },
+  "oracleReconciliation": [
+    {
+      "accountId": 6,
+      "posted": "500000",
+      "derived": "0",
+      "difference": "500000"
+    }
+  ],
+  "publishStatus": "AUTHORIZED: user explicitly requested publishing to the main GitHub repository after the two Oracle failures were disclosed"
+}

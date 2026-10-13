@@ -4,7 +4,8 @@ $taskRoot = $PSScriptRoot
 $mavenRepository = Join-Path $env:USERPROFILE '.m2\repository'
 $runtime = Join-Path $taskRoot '.runtime'
 $buildRecord = Join-Path $runtime 'verified-build.json'
-$jar = Join-Path $taskRoot 'backend\target\moneybags-integrated-1.0.0.jar'
+$serviceModules = @('local-database','identity-service','reporting-service','banking-service','payments-service','loan-service','audit-service')
+$jars = @($serviceModules | ForEach-Object { Join-Path $taskRoot "backend/$_/target/$_-1.0.0-exec.jar" })
 $frontendDist = Join-Path $taskRoot 'frontend\dist'
 
 function Get-FileSetHash {
@@ -13,7 +14,13 @@ function Get-FileSetHash {
   [Array]::Sort($paths, [StringComparer]::Ordinal)
   $lines = foreach ($path in $paths) {
     $relative = $path.Substring($taskRoot.Length + 1).Replace('\', '/')
-    "$relative $((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)"
+    # Hash directly so Windows PowerShell does not depend on an inherited
+    # PowerShell 7 module search path to find Get-FileHash.
+    $fileSha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($path)
+    try { $fileHash = ([System.BitConverter]::ToString($fileSha.ComputeHash($stream))).Replace('-', '') }
+    finally { $stream.Dispose(); $fileSha.Dispose() }
+    "$relative $fileHash"
   }
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try {
@@ -25,27 +32,33 @@ function Get-FileSetHash {
 function Get-SourceHash {
   $files = @(
     Get-Item -LiteralPath (Join-Path $taskRoot 'backend\pom.xml')
-    Get-ChildItem -LiteralPath (Join-Path $taskRoot 'backend\src') -Recurse -File
+    foreach ($module in ([xml](Get-Content -LiteralPath (Join-Path $taskRoot 'backend/pom.xml') -Raw)).project.modules.module) {
+      Get-Item -LiteralPath (Join-Path $taskRoot "backend/$module/pom.xml")
+      $sources = Join-Path $taskRoot "backend/$module/src"
+      if (Test-Path -LiteralPath $sources) { Get-ChildItem -LiteralPath $sources -Recurse -File }
+    }
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'frontend') -File | Where-Object { $_.Extension -in @('.js', '.mjs', '.css', '.html', '.svg', '.json') }
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'frontend\tools') -Recurse -File
+    Get-ChildItem -LiteralPath (Join-Path $taskRoot 'frontend/assets') -Recurse -File
+    Get-ChildItem -LiteralPath (Join-Path $taskRoot 'gateway') -File
   )
   Get-FileSetHash $files
 }
 
 function Get-FrontendHash {
-  $files = @(Get-ChildItem -LiteralPath $frontendDist -File | Where-Object { $_.Extension -in @('.js', '.mjs', '.css', '.html', '.svg', '.json') })
+  $files = @(Get-ChildItem -LiteralPath $frontendDist -Recurse -File)
   if (-not $files) { throw 'The frontend build is missing from frontend/dist.' }
   Get-FileSetHash $files
 }
 
 if ($CheckOnly) {
   if (-not (Test-Path -LiteralPath $buildRecord)) { throw 'No verified build record exists. Disconnect the VPN, run build-before-start.ps1, then reconnect and start with -SkipBuild.' }
-  if (-not (Test-Path -LiteralPath $jar)) { throw 'The verified backend JAR is missing. Run build-before-start.ps1 before connecting the VPN.' }
+  foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Missing service JAR: $jar. Run build-before-start.ps1." } }
   $record = Get-Content -LiteralPath $buildRecord -Raw | ConvertFrom-Json
   if ($record.sourceHash -ne (Get-SourceHash)) { throw 'Source files changed since the last build. Run build-before-start.ps1 before connecting the VPN.' }
-  if ($record.jarHash -ne (Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash) { throw 'The backend JAR changed since the last verified build. Rebuild before starting.' }
+  if ($record.servicesHash -ne (Get-FileSetHash @( $jars | ForEach-Object { Get-Item -LiteralPath $_ } ))) { throw 'The service JARs changed since the last verified build. Rebuild before starting.' }
   if ($record.frontendHash -ne (Get-FrontendHash)) { throw 'The frontend output changed since the last verified build. Rebuild before starting.' }
-  Write-Host 'Verified build matches the current source, backend JAR, and frontend output.'
+  Write-Host 'Verified build matches all service sources, executable JARs, gateway and frontend output.'
   return
 }
 
@@ -67,14 +80,16 @@ if ($Offline) {
   Write-Host 'Offline build: using cached Maven/npm dependencies. Missing dependencies require an online build.'
 }
 Invoke-BuildStep 'backend (Maven clean verify)' 'mvn' $mavenArguments
+Invoke-BuildStep 'gateway syntax' 'node' @('--check', (Join-Path $taskRoot 'gateway/server.mjs'))
+Invoke-BuildStep 'gateway and architecture tests' 'node' @('--test', (Join-Path $taskRoot 'gateway/gateway.test.mjs'), (Join-Path $taskRoot 'gateway/architecture.test.mjs'))
 Invoke-BuildStep 'frontend dependencies (npm ci)' 'npm' $npmArguments
 Invoke-BuildStep 'frontend checks' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'run', 'check')
 Invoke-BuildStep 'frontend tests' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'test')
 Invoke-BuildStep 'frontend bundle' 'npm' @('--prefix', (Join-Path $taskRoot 'frontend'), 'run', 'build')
-if (-not (Test-Path -LiteralPath $jar)) { throw 'Maven verify finished without creating the backend JAR.' }
+foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Maven verify did not create $jar." } }
 @{
   sourceHash = Get-SourceHash
-  jarHash = (Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash
+  servicesHash = Get-FileSetHash @( $jars | ForEach-Object { Get-Item -LiteralPath $_ } )
   frontendHash = Get-FrontendHash
 } | ConvertTo-Json | Set-Content -LiteralPath $buildRecord
 Write-Host 'Build complete and recorded for VPN launch.'

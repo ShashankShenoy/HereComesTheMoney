@@ -4,7 +4,7 @@
 
 | Setting | Local demonstrator | Oracle deployment |
 | --- | --- | --- |
-| Profile | `local` | Default; do not enable `local` |
+| Profile | Banking: `local,local-microservices`; others: `local-microservices` | `oracle-microservices`; do not enable `local` |
 | Database | Fresh in-memory H2, generated fixture | Existing Oracle schema; no startup DDL |
 | Seed | Public synthetic users/accounts | No demo seed |
 | Payment simulator | Enabled | Disabled unless explicitly configured |
@@ -12,21 +12,9 @@
 | FX provider | Unconfigured | Trusted HTTPS endpoint and secret supplied externally |
 | Bind/transport | Loopback, Tomcat NIO2 | Deployment-controlled interface, TLS ingress |
 
-Build before startup: `mvn -f integrated/backend/pom.xml verify`. On Windows, stop the running JAR before packaging because it may be locked. `npm --prefix integrated/frontend ci` restores the lockfile dependencies; `npm --prefix integrated/frontend run build` creates `frontend/dist`. The provided development server accepts only a loopback HTTP `BACKEND_URL`; use a managed reverse proxy for a distributed/TLS production topology.
+Build and verify with `./build-before-start.ps1` from `Downloads/integrated`, then run `./start-microservices.ps1` or the existing local/Oracle entry points. Stop with `./stop-microservices.ps1`. See [MICROSERVICES.md](MICROSERVICES.md) for the six service boundaries, reusable domain libraries, ports, shared-schema constraints and separate-process acceptance tests.
 
-Run the PowerShell scripts from PowerShell 7 with `& ./integrated/start-local.ps1` and `& ./integrated/stop-local.ps1`. If your organization's execution policy blocks local scripts, use separate terminals instead, without changing the machine policy:
-
-```powershell
-java -Djava.net.preferIPv4Stack=true -jar integrated/backend/target/moneybags-integrated-1.0.0.jar --spring.profiles.active=local --server.port=8090
-```
-
-```powershell
-$env:BACKEND_URL='http://127.0.0.1:8090'
-$env:PORT='5173'
-node integrated/frontend/dist/server.mjs
-```
-
-The start script records process IDs and start timestamps; the stop script refuses to stop a reused PID. `.runtime/backend.log`, `backend.err.log`, `frontend.log` and `frontend.err.log` contain local diagnostics. A startup timeout is an error, not a healthy deployment. Health is `/actuator/health`.
+The local stack has a loopback H2 TCP database, independently packaged identity, banking, payments, loan, audit and reporting services, a gateway and a frontend. Oracle mode uses the existing schema without initialization or seeding. Per-component logs are `.runtime/<component>.log` and `.runtime/<component>.err.log`; PID creation times are recorded in `.runtime/microservices-processes.json`. The stop script refuses to stop a reused PID. Aggregate gateway readiness is `/actuator/health` and includes all six services.
 
 ## Oracle schema installation
 
@@ -36,7 +24,7 @@ For an Oracle demo that obtains notes through a simulated RBI cash delivery, app
 
 If the Oracle schema has no RBI current reserve, apply [014-simulated-reserve-opening.sql](../database/014-simulated-reserve-opening.sql) once after `012`. Register distinct INR reserve asset and opening capital equity GL accounts; create an `RBI_CURRENT` reserve account with the reserve GL. A bank administrator requests a synthetic opening reserve with a unique evidence reference and approved demo amount. A different checker confirms it. This posts DR reserve asset / CR opening capital and appends one `RBI` `IN` entry to the local reserve mirror. It requires an unused zero-balance reserve and GL. No RBI network or physical cash transfer is implied. Do not insert an opening balance directly into the position table.
 
-After installing the cash migrations and building the combined application, run `& .\restart-oracle-alpha.ps1` from the integrated folder, with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the verified standard backend JAR/frontend build before stopping the existing Oracle demo, then starts with `-SkipBuild`. It does not reset Oracle data. Cached dependencies can be used on VPN with `build-before-start.ps1 -Offline`; missing cached dependencies require an online build. Updated fingerprints work across Windows PowerShell 5.1 and PowerShell 7.
+After installing the cash migrations and building the service artifacts, run `& .\restart-oracle-alpha.ps1` from the integrated folder, with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` set. The helper checks those settings and the verified service JARs/frontend build before stopping the existing Oracle demo, then starts with `-SkipBuild`. It does not reset Oracle data. Cached dependencies can be used on VPN with `build-before-start.ps1 -Offline`; missing cached dependencies require an online build. Updated fingerprints work across Windows PowerShell 5.1 and PowerShell 7.
 
 Apply [013-teller-replenishment.sql](../database/013-teller-replenishment.sql) once after `011` for existing open tills. After the branch vault receives cash, an authorized second person uses `POST /api/v1/teller/tills/{id}/replenish` with a unique request key, counted amount, and evidence reference. The operation posts DR teller cash / CR branch vault cash and updates both cash balances in one transaction; the RBI reserve is unaffected by the later internal transfer. Existing tills do not need to be deleted or recreated. A closed till or one from an earlier business date cannot be replenished.
 

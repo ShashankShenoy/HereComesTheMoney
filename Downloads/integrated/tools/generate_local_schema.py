@@ -76,6 +76,6 @@ for m in re.finditer(r'^INSERT ALL\s+[\s\S]*?SELECT 1 FROM DUAL;|^INSERT INTO [^
         parts.append(adapt(m[0]))
 for m in re.finditer(r'^CREATE (?:OR REPLACE )?VIEW\s+[^;]+;',source,re.M):
     parts.append(adapt(m[0]))
-out=base/'backend/src/main/resources/local-schema.sql'
+out=base/'backend/banking-service/src/main/resources/local-schema.sql'
 out.write_text('\n\n'.join(parts),encoding='utf-8')
 print(f'Generated {len(tables)} tables, {len(fks)} foreign keys: {out.name}')

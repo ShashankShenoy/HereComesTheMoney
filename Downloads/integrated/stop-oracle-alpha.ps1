@@ -1,4 +1,8 @@
 $ErrorActionPreference = 'Stop'
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.runtime/microservices-processes.json')) {
+  & (Join-Path $PSScriptRoot 'stop-microservices.ps1')
+  return
+}
 $record = Join-Path $PSScriptRoot '.runtime\oracle-alpha-processes.json'
 if (-not (Test-Path -LiteralPath $record)) { Write-Host 'No Oracle demo run record.'; return }
 $run = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json

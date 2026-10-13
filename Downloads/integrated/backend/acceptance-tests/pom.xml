@@ -1,0 +1,16 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.moneybags</groupId><artifactId>moneybags-services</artifactId><version>1.0.0</version><relativePath>../pom.xml</relativePath></parent>
+  <artifactId>acceptance-tests</artifactId>
+  <dependencies>
+    <dependency><groupId>com.moneybags</groupId><artifactId>shared</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>identity-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>banking-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>reporting-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>payments-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>loan-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.moneybags</groupId><artifactId>audit-service</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>
