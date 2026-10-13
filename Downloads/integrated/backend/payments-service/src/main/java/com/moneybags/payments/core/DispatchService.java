@@ -73,9 +73,11 @@ public class DispatchService {
             default -> throw conflict("INVALID_OUTCOME", "Unsupported attempt outcome");
         };
         jdbc.update("INSERT INTO M06_RAIL_DISPATCH_ATTEMPT (DISPATCH_ID,ATTEMPT_NO,ATTEMPT_TYPE,OUTCOME_CODE,TRANSPORT_REFERENCE,ERROR_CODE,STARTED_AT,COMPLETED_AT) VALUES (?,?,?,?,?,?,SYSTIMESTAMP,CASE WHEN ?='STARTED' THEN NULL ELSE SYSTIMESTAMP END)",
-                dispatchId, attemptNo, request.attemptType(), request.outcome(), request.transportReference(), request.errorCode(), request.outcome());
+                new Object[]{dispatchId, attemptNo, request.attemptType(), request.outcome(), request.transportReference(), request.errorCode(), request.outcome()},
+                new int[]{java.sql.Types.NUMERIC, java.sql.Types.INTEGER, java.sql.Types.VARCHAR, java.sql.Types.VARCHAR, java.sql.Types.VARCHAR, java.sql.Types.VARCHAR, java.sql.Types.VARCHAR});
         jdbc.update("UPDATE M06_RAIL_DISPATCH SET DISPATCH_STATUS=?,ATTEMPT_COUNT=?,LAST_ATTEMPT_AT=SYSTIMESTAMP,LAST_ERROR_CODE=?,FIRST_DISPATCHED_AT=CASE WHEN ?='SENT' THEN COALESCE(FIRST_DISPATCHED_AT,SYSTIMESTAMP) ELSE FIRST_DISPATCHED_AT END WHERE DISPATCH_ID=?",
-                next, attemptNo, request.errorCode(), request.outcome(), dispatchId);
+                new Object[]{next, attemptNo, request.errorCode(), request.outcome(), dispatchId},
+                new int[]{java.sql.Types.VARCHAR, java.sql.Types.INTEGER, java.sql.Types.VARCHAR, java.sql.Types.VARCHAR, java.sql.Types.NUMERIC});
         events.emit("M06.RailDispatchAttemptRecorded", paymentId, null, Map.of("paymentId", paymentId, "dispatchId", dispatchId, "attemptNo", attemptNo, "outcome", request.outcome()));
         events.audit("RECORD_DISPATCH_ATTEMPT", paymentId, "SUCCESS", request.errorCode());
         return jdbc.queryForMap("SELECT DISPATCH_ID,PAYMENT_ID,DISPATCH_STATUS,ATTEMPT_COUNT,LAST_ATTEMPT_AT,LAST_ERROR_CODE FROM M06_RAIL_DISPATCH WHERE DISPATCH_ID=?", dispatchId);

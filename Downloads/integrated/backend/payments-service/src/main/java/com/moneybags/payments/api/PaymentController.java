@@ -21,20 +21,28 @@ public class PaymentController {
     private final DispatchService dispatches;
     private final com.moneybags.integration.BankingAccess access;
     private final com.moneybags.common.database.BusinessRepository db;
+    private final com.moneybags.payments.core.SettlementSimulator simulator;
+    private final boolean clearing;
 
     /** Receives payment and rail dispatch use cases. */
     public PaymentController(PaymentService payments, DispatchService dispatches,
                              com.moneybags.integration.BankingAccess access,
-                             com.moneybags.common.database.BusinessRepository db) {
-        this.payments = payments; this.dispatches = dispatches; this.access = access; this.db = db;
+                             com.moneybags.common.database.BusinessRepository db,
+                             com.moneybags.payments.core.SettlementSimulator simulator,
+                             @org.springframework.beans.factory.annotation.Value("${moneybags.payment-simulation.clearing-enabled:true}") boolean clearing) {
+        this.payments = payments; this.dispatches = dispatches; this.access = access; this.db = db;this.simulator=simulator;this.clearing=clearing;
     }
 
     /** Creates a payment using the originator/channel/request-key idempotency scope. */
     @Operation(summary = "Create payment instruction", description = "Returns the original payment for an identical request-key replay; a different payload returns 409.")
     @PostMapping("/payments")
     @PreAuthorize("hasAuthority('SCOPE_M06_PAYMENT_WRITE')")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<Contracts.Payment> create(@Valid @RequestBody Contracts.CreatePayment request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(payments.create(request));
+        boolean managed=clearing&&simulator.enabled()&&"OUTBOUND".equals(request.direction());
+        if(managed)simulator.lock();
+        var payment=payments.create(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(managed?simulator.registerOutgoing(payment.paymentId()):payment);
     }
 
     /** Lists a bounded, optionally status-filtered payment queue. */

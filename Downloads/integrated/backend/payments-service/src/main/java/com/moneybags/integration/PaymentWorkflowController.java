@@ -21,8 +21,8 @@ import java.util.*;
 /** Explicit simulation boundary. Never contacts a payment network or represents real rail evidence. */
 @RestController @RequestMapping("/api/v1/payments")
 public class PaymentWorkflowController implements PaymentInitiationPort {
- private final BusinessRepository db;private final BankingAccess access;private final PaymentService payments;private final LedgerService ledger;private final TreasuryService treasury;private final DispatchService dispatch;private final boolean simulation;
- public PaymentWorkflowController(BusinessRepository db,BankingAccess access,PaymentService payments,LedgerService ledger,TreasuryService treasury,DispatchService dispatch,@Value("${moneybags.payment-simulation.enabled:false}")boolean simulation){this.db=db;this.access=access;this.payments=payments;this.ledger=ledger;this.treasury=treasury;this.dispatch=dispatch;this.simulation=simulation;}
+ private final BusinessRepository db;private final BankingAccess access;private final PaymentService payments;private final LedgerService ledger;private final TreasuryService treasury;private final DispatchService dispatch;private final boolean simulation;private final SettlementSimulator simulator;@Value("${moneybags.payment-simulation.clearing-enabled:true}")private boolean clearing;
+ public PaymentWorkflowController(BusinessRepository db,BankingAccess access,PaymentService payments,LedgerService ledger,TreasuryService treasury,DispatchService dispatch,@Value("${moneybags.payment-simulation.enabled:false}")boolean simulation,SettlementSimulator simulator){this.db=db;this.access=access;this.payments=payments;this.ledger=ledger;this.treasury=treasury;this.dispatch=dispatch;this.simulation=simulation;this.simulator=simulator;}
  public record Initiate(@NotNull Long sourceAccountId,@NotBlank String beneficiaryId,@NotBlank @Pattern(regexp="UPI|IMPS|NEFT|RTGS")String railCode,@NotNull @DecimalMin("0.01") @Digits(integer=16,fraction=2)BigDecimal amount,@NotBlank @Size(max=92)String requestKey){}
  public record Authorize(@NotNull Long reserveAccountId){}
  public record Outcome(@NotBlank @Pattern(regexp="ACCEPTED|UNKNOWN|REJECTED|SETTLED|REFUNDED")String outcome){}
@@ -33,7 +33,7 @@ public class PaymentWorkflowController implements PaymentInitiationPort {
  @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('SCOPE_M06_READ')")
  public Map<String,Object> availability(){return Map.of("initiationEnabled",simulation,"mode",simulation?"SIMULATION":"UNAVAILABLE");}
  @PostMapping("/initiate") @Transactional public Payment initiate(@Valid @RequestBody Initiate r){
-  enabled();
+  enabled();if(clearing)simulator.lock();
   validateSimulationAmount(r.railCode(),r.amount());
   var a=access.account("PAYMENT_CREATE",r.sourceAccountId());String originator=CurrentActor.get().userId();
   var prior=db.rows("SELECT REQUESTED_EXECUTION_DATE FROM M06_PAYMENT_INSTRUCTION WHERE ORIGINATOR_ID=? AND CHANNEL_CODE='WEB' AND REQUEST_KEY=?",originator,r.requestKey());
@@ -43,10 +43,10 @@ public class PaymentWorkflowController implements PaymentInitiationPort {
    ?db.one("SELECT ACCOUNT_TOKEN,BANK_CODE FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=? AND OWNER_USER_ID=? AND STATUS='ACTIVE'",r.beneficiaryId(),originator)
    :db.one("SELECT ACCOUNT_TOKEN,BANK_CODE FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=? AND OWNER_USER_ID=?",r.beneficiaryId(),originator);
   LocalDate executionDate=prior.isEmpty()?today():BusinessRepository.localDate(prior.get(0).get("REQUESTED_EXECUTION_DATE"));
-  return payments.create(new CreatePayment(originator,"WEB",r.requestKey(),"payment:"+r.requestKey(),"MB-"+r.requestKey(),"OUTBOUND","PAYMENT",null,r.sourceAccountId(),(String)a.get("PRIMARY_CIF_ID"),null,null,(String)beneficiary.get("ACCOUNT_TOKEN"),(String)beneficiary.get("BANK_CODE"),r.railCode(),r.amount(),executionDate));
+  var created=payments.create(new CreatePayment(originator,"WEB",r.requestKey(),"payment:"+r.requestKey(),"MB-"+r.requestKey(),"OUTBOUND","PAYMENT",null,r.sourceAccountId(),(String)a.get("PRIMARY_CIF_ID"),null,null,(String)beneficiary.get("ACCOUNT_TOKEN"),(String)beneficiary.get("BANK_CODE"),r.railCode(),r.amount(),executionDate));return clearing?simulator.registerOutgoing(created.paymentId()):created;
  }
  @PostMapping("/{id}/authorize-simulation") @Transactional public Payment authorize(@PathVariable long id,@Valid @RequestBody Authorize r){
-  enabled();var row=db.one("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=? FOR UPDATE",id);long account=((Number)row.get("SOURCE_ACCOUNT_ID")).longValue();
+  enabled();if(clearing)return simulator.approve(id,r.reserveAccountId());var row=db.one("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=? FOR UPDATE",id);long account=((Number)row.get("SOURCE_ACCOUNT_ID")).longValue();
   access.account("PAYMENT_APPROVE",account);String actor=CurrentActor.get().userId();
   if(actor.equals(row.get("ORIGINATOR_ID")))throw fail("A distinct checker must authorize the payment");
   Payment p=payments.get(id);if(!p.status().equals("RECEIVED"))return p;
@@ -69,7 +69,7 @@ public class PaymentWorkflowController implements PaymentInitiationPort {
  }
  @PostMapping("/{id}/simulate-outcome") @Transactional public Payment outcome(@PathVariable long id,@Valid @RequestBody Outcome r){
   enabled();var row=db.one("SELECT * FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=? FOR UPDATE",id);long account=((Number)row.get("SOURCE_ACCOUNT_ID")).longValue();access.account("PAYMENT_OPERATE",account);
-  Payment p=payments.get(id);if(p.status().equals(r.outcome()))return p;
+  Payment p=payments.get(id);if(!db.rows("SELECT PAYMENT_ID FROM MBX_SIM_PAYMENT WHERE PAYMENT_ID=?",id).isEmpty())throw fail("Use the simulator cycle settlement action for managed payments");if(p.status().equals(r.outcome()))return p;
   if(db.rows("SELECT 1 FROM M06_PAYMENT_DIRECTION_TRANSITION WHERE PAYMENT_DIRECTION=? AND FROM_STATUS=? AND TO_STATUS=?",p.direction(),p.status(),r.outcome()).isEmpty())
    throw fail("Payment cannot move from "+p.status()+" to "+r.outcome());
   String actor=CurrentActor.get().userId();long evidence=payments.evidence(id,new RailEvidence("SIM-"+id,"SIM-"+id+"-"+r.outcome(),r.outcome().equals("REFUNDED")?"RETURN":"CALLBACK",r.outcome().equals("REFUNDED")?"RETURNED":r.outcome(),"SIMULATED","simulation://payment/"+id,HexFormat.of().formatHex(CustomerHashService.digest(id+"|"+r.outcome())),OffsetDateTime.now()));
@@ -109,10 +109,7 @@ public class PaymentWorkflowController implements PaymentInitiationPort {
   return new ProvisionalGl(((Number)customer.get(0).get("GL_ACCOUNT_ID")).longValue(),((Number)suspense.get(0).get("GL_ACCOUNT_ID")).longValue());
  }
  private long gl(long version,String role){return ((Number)db.one("SELECT GL_ACCOUNT_ID FROM M05_GL_PRODUCT_MAPPING WHERE PRODUCT_VERSION_ID=? AND POSTING_TYPE='PAYMENT' AND GL_ROLE_CODE=? AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSDATE AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>=SYSDATE)",version,role).get("GL_ACCOUNT_ID")).longValue();}
- private void validateSimulationAmount(String rail,BigDecimal amount){
-  if(rail.equals("RTGS")&&amount.compareTo(new BigDecimal("200000"))<0)throw fail("Simulation RTGS minimum is INR 200000");
-  if(Set.of("UPI","IMPS").contains(rail)&&amount.compareTo(new BigDecimal("100000"))>0)throw fail("Simulation instant-rail limit is INR 100000");
- }
+ private void validateSimulationAmount(String rail,BigDecimal amount){try{SimulationPolicy.validate(rail,amount);}catch(IllegalArgumentException e){throw fail(e.getMessage());}}
  private void enabled(){if(!simulation)throw new BusinessException(HttpStatus.CONFLICT,"SIMULATION_DISABLED","Payment simulation is disabled in this deployment");}
  private static LocalDate today(){return LocalDate.now(ZoneId.of("Asia/Kolkata"));}
  private BusinessException fail(String m){return new BusinessException(HttpStatus.CONFLICT,"PAYMENT_CONTROL",m);}

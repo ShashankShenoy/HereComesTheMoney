@@ -52,6 +52,9 @@ public class OperationsService {
     public Map<String, Object> addBatchItem(long batchId, Contracts.AddBatchItem request) {
         Map<String, Object> batch = jdbc.queryForMap("SELECT * FROM M06_CLEARING_BATCH WHERE CLEARING_BATCH_ID=? FOR UPDATE", batchId);
         Contracts.Payment payment = payments.lock(request.paymentId());
+        if (!jdbc.queryForList("SELECT PAYMENT_ID FROM MBX_SIM_PAYMENT WHERE PAYMENT_ID=?",payment.paymentId()).isEmpty()
+                && payment.railCode().equals("RTGS"))
+            throw conflict("INDIVIDUAL_SETTLEMENT_ONLY", "RTGS payments cannot enter timed clearing");
         if (payment.clearingBatchId() != null && payment.clearingBatchId() == batchId) {
             int replay = count("SELECT COUNT(*) FROM M06_CLEARING_BATCH_ITEM WHERE CLEARING_BATCH_ID=? AND PAYMENT_ID=? AND EXTERNAL_ITEM_REF=?",
                     batchId, payment.paymentId(), request.externalItemRef());

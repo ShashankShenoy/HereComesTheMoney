@@ -399,21 +399,16 @@ Savings posting runs at 01:10 Asia/Kolkata on the first of the month; maturity r
 
 Servicing requires eligible due interest accrual before a due repayment; future/unsupported prepayments fail. Oracle needs loan products/rules/mappings, KYC, customer permissions, and checker authority. See [Operations](docs/OPERATIONS.md).
 
-### 7. External payment simulation and recipients
+### 7. External payment simulation
 
-**Users:** customer, checker, admin. **Screens:** Payments, Beneficiaries, Payments & clearing.
+1. Customer: add an external recipient with **Account number** and a registered bank IFSC, for example HDFC0000001, UTIB0000001, SBIN0000001 or ICIC0000001.
+2. Checker: open **Beneficiaries Pending → View** or **Verify a beneficiary** and use the row's Verified/Not verified button.
+3. Customer: choose the source account, verified recipient, rail and amount in External payment simulation. Eligible requests process automatically. IMPS/NEFT above INR 1,00,000 and RTGS above INR 10,00,000 await independent checker approval; UPI retains its INR 1,00,000 cap and IMPS has an INR 5,00,000 maximum.
+4. Checker: **Authorize simulated payment** lists pending requests with Approve/Reject buttons. Approval opens the reserve selector.
+5. Admin: open the separate **RBI / NPCI simulation portal** to inspect windows, payment membership and participating bank reserves, settle a cycle early, or simulate an incoming instruction.
+6. Customer: refresh payment progress. Completed outgoing payments say: **Interbank settlement completed; beneficiary credit handled by receiving bank.**
 
-1. Customer: add a recipient, for example Demo External Recipient, account/payment address DEMOEXTERNAL001, bank code TEST0123456.
-2. Checker: independently verify it under Beneficiaries; refresh the customer screen.
-3. Customer: in the separate **External payment simulation** form, choose your account, that verified recipient, UPI, amount **10**. Review/confirm and record the payment ID.
-4. Checker: **Authorize simulated payment**, using that ID and local reserve account **1**.
-5. Admin: **Record simulated rail outcome**, first ACCEPTED, then SETTLED.
-6. Customer: refresh **Payment requests → View progress**, ending at **Settled in simulation**.
-
-**Expected:** initiation creates a request; authorization debits the customer, and the simulator uses suspense/reserve accounting. **It does not credit customer2. Use walkthrough 2 for transfers between demo users.**
-
-Illustrative simulator limits: UPI/IMPS up to INR 100,000; RTGS starts at INR 200,000. A fresh INR 75,000 account cannot fund RTGS without additional valid demo funding. Invalid transitions/repeated terminal outcomes do not duplicate financial postings. These rail choices do not represent live network connections.
-
+UPI and IMPS use separate two-hour demo clearing cycles; NEFT uses 30-minute cycles, Asia/Kolkata. RTGS settles individually and retains its INR 2,00,000 minimum. Internal account transfers remain a separate workflow. External customer accounts are outside scope. See [payment and clearing policies, installation and verification](docs/PAYMENT-CLEARING.md).
 ### 8. Statements and documents
 
 **User:** customer. **Screen:** Statements & documents.
@@ -553,6 +548,7 @@ These checks do not certify live rails, every Oracle product configuration, regu
 
 ## Further documentation
 
+- [Payment clearing and RBI simulation](docs/PAYMENT-CLEARING.md)
 - [Feature coverage and boundaries](docs/FEATURE-COVERAGE.md)
 - [Oracle operations](docs/OPERATIONS.md)
 - [Combined release / schema upgrades](docs/CREDIT-CARD-MAIN-MERGE.md)

@@ -27,7 +27,14 @@ public class BankingOperationsController {
   db.jdbc().update("UPDATE MBX_BENEFICIARY SET STATUS='ACTIVE',VERIFIED_BY=?,VERIFIED_AT=SYSTIMESTAMP WHERE BENEFICIARY_ID=?",CurrentActor.get().userId(),id);
   audit.audit("BENEFICIARY_VERIFIED","BENEFICIARY",id,"MANUAL_SIMULATION_CHECK");return Map.of("beneficiaryId",id,"status","ACTIVE");
  }
- @GetMapping("/beneficiaries/pending") public List<Map<String,Object>> pending(){access.global("BENEFICIARY_VERIFY");return db.rows("SELECT BENEFICIARY_ID,DISPLAY_NAME,BANK_CODE,STATUS FROM MBX_BENEFICIARY WHERE STATUS='PENDING' FETCH FIRST 100 ROWS ONLY");}
+ @PostMapping("/beneficiaries/{id}/not-verified") @Transactional public Map<String,String> notVerified(@PathVariable String id){
+  access.global("BENEFICIARY_VERIFY");var b=db.one("SELECT OWNER_USER_ID,STATUS FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=? FOR UPDATE",id);
+  if(b.get("OWNER_USER_ID").equals(CurrentActor.get().userId()))throw conflict("A different employee must review the beneficiary");
+  if(!"PENDING".equals(b.get("STATUS")))throw conflict("Only pending beneficiaries can be reviewed");
+  db.jdbc().update("UPDATE MBX_BENEFICIARY SET STATUS='DISABLED' WHERE BENEFICIARY_ID=?",id);
+  audit.audit("BENEFICIARY_NOT_VERIFIED","BENEFICIARY",id,"MANUAL_SIMULATION_CHECK");return Map.of("beneficiaryId",id,"status","DISABLED");
+ }
+ @GetMapping("/beneficiaries/pending") public List<Map<String,Object>> pending(){access.global("BENEFICIARY_VERIFY");return db.rows("SELECT BENEFICIARY_ID,DISPLAY_NAME,ACCOUNT_TOKEN,BANK_CODE,STATUS FROM MBX_BENEFICIARY WHERE STATUS='PENDING' ORDER BY CREATED_AT FETCH FIRST 100 ROWS ONLY");}
  @GetMapping("/currencies") public List<Map<String,Object>> currencies(){CurrentActor.require("FX_READ");return db.rows("SELECT * FROM MBX_CURRENCY ORDER BY CURRENCY_CODE");}
  @GetMapping("/fx/rates") public List<Map<String,Object>> rates(){
   CurrentActor.require("FX_READ");

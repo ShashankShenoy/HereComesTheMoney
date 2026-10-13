@@ -45,7 +45,7 @@ public class PaymentService {
             if(!"OUTBOUND".equals(request.direction())||!"PAYMENT".equals(request.kind())||!"WEB".equals(request.channelCode()))
                 throw new ApiException(HttpStatus.FORBIDDEN,"CUSTOMER_PAYMENT_ROUTE","Customers may only create web outbound payment requests");
             if(request.amount()!=null && ("RTGS".equals(request.railCode())&&request.amount().compareTo(new java.math.BigDecimal("200000"))<0
-                    ||("UPI".equals(request.railCode())||"IMPS".equals(request.railCode()))&&request.amount().compareTo(new java.math.BigDecimal("100000"))>0))
+                    ||("UPI".equals(request.railCode())&&request.amount().compareTo(new java.math.BigDecimal("100000"))>0||"IMPS".equals(request.railCode())&&request.amount().compareTo(new java.math.BigDecimal("500000"))>0)))
                 throw conflict("RAIL_AMOUNT_LIMIT","Amount is outside the simulated rail limit");
         }
         if("OUTBOUND".equals(request.direction())){

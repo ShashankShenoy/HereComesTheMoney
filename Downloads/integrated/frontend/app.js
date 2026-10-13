@@ -30,6 +30,7 @@ const tags=values=>values.map(v=>`<span class="tag">${esc(v)}</span>`).join('')|
 const router=await new Promise((resolve,reject)=>window.require(['ojs/ojcorerouter','ojs/ojurlparamadapter'],(CoreRouter,UrlParamAdapter)=>resolve(new CoreRouter([{path:'',redirect:'banking'},...Object.keys(titles).map(path=>({path}))],{urlAdapter:new UrlParamAdapter()})),reject));
 router.currentState.subscribe(({state:route})=>{if(!route)return;state.page=route.path==='assistant'?'banking':route.path;if(route.path==='assistant')openAssistant();if(document.querySelector('#content'))render();});
 await router.sync();
+if(location.pathname==='/employee/rbi-simulator'&&!new URLSearchParams(location.search).has('ojr'))state.page='simulator';
 const requestedProduct=entryContext(location.pathname,location.search).product;
 if(requestedProduct&&!getSession())state.page=requestedProduct;
 const head=(title,subtitle,button='')=>`<div class="page-heading"><div><p class="eyebrow">IDENTITY & ACCESS</p><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${button}</div>`;
@@ -87,7 +88,7 @@ function shell(){
   if(user.userType!=='CUSTOMER'&&can('CIF_READ')&&!nav.some(n=>n.page==='customers'))nav.push({page:'customers',label:'Customers & KYC'});
   if(can('PRODUCT_READ')&&!nav.some(n=>n.page==='products'))nav.push({page:'products',label:'Product master'});
   nav=nav.filter(n=>n.page!=='assistant'&&(user.userType!=='CUSTOMER'||n.page!=='treasury'));
-  for(const [page,config] of Object.entries(bankingPages))if((page==='treasury'?user.userType!=='CUSTOMER':page==='customerAccess'||page==='beneficiaries'&&can('PAYMENT_CREATE')||!config.permission||can(config.permission))&&!nav.some(n=>n.page===page))nav.push({page,label:config.title});
+  for(const [page,config] of Object.entries(bankingPages))if((!config.staffOnly||user.userType==='EMPLOYEE')&&(page==='treasury'?user.userType!=='CUSTOMER':page==='customerAccess'||page==='beneficiaries'&&can('PAYMENT_CREATE')||!config.permission||can(config.permission))&&!nav.some(n=>n.page===page))nav.push({page,label:config.title});
   const navigationOrder=['banking','accounts','transactions','customerAccess','payments','beneficiaries','teller','creditCards','loans','treasury','statements','currency','customers','products','privacy','dashboard','users','roles','access','audit','security'];
   nav.sort((a,b)=>navigationOrder.indexOf(a.page)-navigationOrder.indexOf(b.page));
   if(!nav.some(n=>n.page===state.page))state.page=nav[0]?.page||'security';
@@ -112,7 +113,8 @@ async function start(){
     const switched=entry.employee!==employee;
     if(switched)state.page='banking';
     const query=new URLSearchParams(location.search);query.delete('product');
-    history.replaceState(null,'',workspacePath(user.userType)+(query.size?'?'+query.toString():''));
+    const workspace=employee&&location.pathname==='/employee/rbi-simulator'?'/employee/rbi-simulator':workspacePath(user.userType);
+    history.replaceState(null,'',workspace+(query.size?'?'+query.toString():''));
     state.menus=await api('/iam/menus');
     if(!can('IAM_USER_READ')&&state.page==='dashboard')state.page='banking';
     await router.go({path:state.page});shell();await render();
