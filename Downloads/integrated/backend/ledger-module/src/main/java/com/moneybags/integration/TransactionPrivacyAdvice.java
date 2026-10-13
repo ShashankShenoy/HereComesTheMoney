@@ -27,7 +27,7 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
   // The review queue requires reversal approval authority and filters each request by decision scope.
   if(path.equals("/api/v1/transactions/reversal-requests")&&p.getContainingClass().getName().equals("com.moneybags.txn.api.TransactionController"))return body;
   // This endpoint checks account proof or staff GL authority before constructing its scoped response.
-  if(path.matches("/api/v1/banking/transactions/\\d+/details"))return body;
+  if(path.matches("/api/v1/banking/transactions/(?:\\d+|PAYMENT-\\d+)/details")&&p.getContainingClass().getName().equals("com.moneybags.integration.BankingController"))return body;
   if(!(body instanceof java.util.Map<?,?> error&&error.containsKey("code"))&&path.matches("/api/v1/payments/\\d+/(history|rail-evidence)")){
    long id=Long.parseLong(path.split("/")[4]);
    var row=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",id);
