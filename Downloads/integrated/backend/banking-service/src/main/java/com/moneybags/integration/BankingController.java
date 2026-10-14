@@ -116,7 +116,7 @@ public class BankingController {
    item.put("journalId",row.get("JOURNAL_ID"));item.put("status","POSTED");
    item.put("paymentStatus",row.get("PAYMENT_STATUS"));item.put("railCode",row.get("RAIL_CODE"));
    item.put("type",row.get("JOURNAL_TYPE").equals("PAYMENT_REFUND")?"PAYMENT_REFUND":net.signum()<0?"EXTERNAL_PAYMENT_SENT":"EXTERNAL_PAYMENT_RECEIVED");
-   item.put("amount",net.abs());item.put("currency","INR");
+   item.put("amount",net.abs());item.put("postedDelta",net);item.put("currency","INR");
    item.put("valueDate",row.get("VALUE_DATE"));item.put("createdAt",row.get("BOOKED_AT"));
    item.put("accountRole",net.signum()<0?"SOURCE":"TARGET");result.add(item);
   }
@@ -179,7 +179,7 @@ public class BankingController {
   detail.put("transactionId","PAYMENT-"+journalId);detail.put("accountId",accountId);
   detail.put("accountRole",net.signum()<0?"SOURCE":"TARGET");detail.put("STATUS","POSTED");
   detail.put("TXN_TYPE",row.get("JOURNAL_TYPE").equals("PAYMENT_REFUND")?"PAYMENT_REFUND":net.signum()<0?"EXTERNAL_PAYMENT_SENT":"EXTERNAL_PAYMENT_RECEIVED");
-  detail.put("AMOUNT",net.abs());detail.put("CURRENCY_CODE","INR");
+  detail.put("AMOUNT",net.abs());detail.put("postedDelta",net);detail.put("CURRENCY_CODE","INR");
   detail.put("VALUE_DATE",row.get("VALUE_DATE"));detail.put("CREATED_AT",row.get("BOOKED_AT"));
   detail.put("PAYMENT_ID",row.get("PAYMENT_ID"));detail.put("RAIL_CODE",row.get("RAIL_CODE"));
   detail.put("PAYMENT_STATUS",row.get("PAYMENT_STATUS"));

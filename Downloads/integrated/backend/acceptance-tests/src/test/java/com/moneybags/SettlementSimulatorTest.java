@@ -50,8 +50,9 @@ class SettlementSimulatorTest {
   assertEquals("EXTERNAL_PAYMENT_SENT",row.path("type").asText());assertEquals("SOURCE",row.path("accountRole").asText());
   assertEquals("POSTED",row.path("status").asText());assertEquals("SETTLEMENT_PENDING",row.path("paymentStatus").asText());
   assertEquals(0,new BigDecimal("10").compareTo(row.path("amount").decimalValue()));
+  assertEquals(0,new BigDecimal("-10").compareTo(row.path("postedDelta").decimalValue()));
   mvc.perform(get("/api/v1/banking/transactions/"+row.path("transactionId").asText()+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+customer))
-   .andExpect(status().isOk()).andExpect(jsonPath("$.PAYMENT_ID").value(id)).andExpect(jsonPath("$.journals[0].control.IS_BALANCED").value("Y"));
+   .andExpect(status().isOk()).andExpect(jsonPath("$.PAYMENT_ID").value(id)).andExpect(jsonPath("$.postedDelta").value(-10)).andExpect(jsonPath("$.journals[0].control.IS_BALANCED").value("Y"));
   settle(p.path("settlementCycleId").asLong());settle(p.path("settlementCycleId").asLong());
   assertEquals("SETTLED",entry(customer,id).path("paymentStatus").asText());
   int count=0;for(var item:activity(customer))if(item.path("paymentId").asLong()==id)count++;assertEquals(1,count);
@@ -65,6 +66,7 @@ class SettlementSimulatorTest {
    if(rail.equals("NEFT"))assertTrue(entry(customer,id).isNull());else assertEquals("EXTERNAL_PAYMENT_RECEIVED",entry(customer,id).path("type").asText());
    if(p.path("settlementCycleId").isNumber())settle(p.path("settlementCycleId").asLong());
    var row=entry(customer,id);assertEquals("TARGET",row.path("accountRole").asText());assertEquals(rail,row.path("railCode").asText());
+   assertEquals(0,new BigDecimal(rail.equals("RTGS")?"200000":"11").compareTo(row.path("postedDelta").decimalValue()));
    assertEquals("SETTLED",row.path("paymentStatus").asText());
   }
  }
