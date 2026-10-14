@@ -60,12 +60,30 @@ public class BankingController {
   return ((Number)db.one("SELECT ACCOUNT_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_NUMBER=?",number).get("ACCOUNT_ID")).longValue();
  }
  private boolean transactionReadAllowed(long accountId,String hash){return access.bankAdminTransactionRead()||hashes.permits(accountId,hash);}
+ /** Account-facing amount and other-party name come from posted entries and the verified name effective when the transfer was made. */
+ private static final String ACCOUNT_TRANSACTION_SELECT="""
+   SELECT T.TXN_ID,T.SOURCE_ACCOUNT_ID,T.TARGET_ACCOUNT_ID,T.TXN_TYPE,T.STATUS,T.AMOUNT,T.CURRENCY_CODE,
+          T.VALUE_DATE,T.FAILURE_CODE,T.REVERSAL_OF_TXN_ID,T.CREATED_AT,T.UPDATED_AT,
+          (SELECT SUM(CASE WHEN P.ENTRY_SIDE='CR' THEN P.AMOUNT ELSE -P.AMOUNT END)
+             FROM M05_GL_JOURNAL J JOIN M05_GL_POSTING P ON P.JOURNAL_ID=J.JOURNAL_ID
+            WHERE J.TXN_ID=T.TXN_ID AND P.BANK_ACCOUNT_ID=?) AS POSTED_DELTA,
+          (SELECT MAX(N.FULL_NAME)
+             FROM M04_BANK_ACCOUNT A JOIN M02_CIF_CUSTOMER C ON C.CIF_ID=A.PRIMARY_CIF_ID
+             JOIN M02_CIF_NAME N ON N.PARTY_ID=C.PARTY_ID
+            WHERE A.ACCOUNT_ID=CASE WHEN T.SOURCE_ACCOUNT_ID=? THEN T.TARGET_ACCOUNT_ID ELSE T.SOURCE_ACCOUNT_ID END
+              AND T.TXN_TYPE IN ('INTERNAL_TRANSFER','REVERSAL')
+              AND N.NAME_TYPE='LEGAL' AND N.VERIFICATION_STATUS='VERIFIED'
+              AND N.VALID_FROM<=T.CREATED_AT AND (N.VALID_TO IS NULL OR N.VALID_TO>T.CREATED_AT)) AS OTHER_PARTY_NAME
+     FROM M05_TXN_TRANSACTION_LOG T
+   """;
  @GetMapping("/transactions") public List<Map<String,Object>> transactions(@RequestParam(required=false) Long accountId,@RequestParam(required=false) String accountNumber,@RequestHeader(value="X-Customer-Hash",required=false)String hash){
   CurrentActor.require("TXN_READ");
   accountId=accountId(accountId,accountNumber);
   access.account("TXN_READ",accountId);
   boolean canRead=transactionReadAllowed(accountId,hash);
-  var rows=db.rows("SELECT TXN_ID,SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID,TXN_TYPE,STATUS,AMOUNT,CURRENCY_CODE,VALUE_DATE,CREATED_AT FROM M05_TXN_TRANSACTION_LOG WHERE SOURCE_ACCOUNT_ID=? OR TARGET_ACCOUNT_ID=? ORDER BY TXN_ID DESC FETCH FIRST 100 ROWS ONLY",accountId,accountId);
+  var rows=canRead
+   ?db.rows(ACCOUNT_TRANSACTION_SELECT+" WHERE T.SOURCE_ACCOUNT_ID=? OR T.TARGET_ACCOUNT_ID=? ORDER BY T.TXN_ID DESC FETCH FIRST 100 ROWS ONLY",accountId,accountId,accountId,accountId)
+   :db.rows("SELECT TXN_ID FROM M05_TXN_TRANSACTION_LOG WHERE SOURCE_ACCOUNT_ID=? OR TARGET_ACCOUNT_ID=? ORDER BY TXN_ID DESC FETCH FIRST 100 ROWS ONLY",accountId,accountId);
   var result=new ArrayList<Map<String,Object>>();
   for(var row:rows){long id=((Number)row.get("TXN_ID")).longValue();if(canRead){
    var item=new LinkedHashMap<String,Object>();
@@ -73,6 +91,7 @@ public class BankingController {
    item.put("amount",row.get("AMOUNT"));item.put("currency",row.get("CURRENCY_CODE"));
    item.put("valueDate",row.get("VALUE_DATE"));item.put("createdAt",row.get("CREATED_AT"));
    item.put("accountRole",row.get("SOURCE_ACCOUNT_ID") instanceof Number source&&source.longValue()==accountId?"SOURCE":"TARGET");
+   item.put("otherPartyName",row.get("OTHER_PARTY_NAME"));item.put("postedDelta",row.get("POSTED_DELTA"));
    result.add(item);
   }else result.add(Map.of("transactionId",id));}
   // Payments post against PAYMENT_ID rather than TXN_ID. Include their actual
@@ -181,12 +200,13 @@ public class BankingController {
    accountId=accountId(accountId,accountNumber);
    access.account("TXN_READ",accountId);
    if(!transactionReadAllowed(accountId,hash))hashes.require(accountId,hash);
-   t=db.one("SELECT TXN_ID,SOURCE_ACCOUNT_ID,TARGET_ACCOUNT_ID,TXN_TYPE,STATUS,AMOUNT,CURRENCY_CODE,VALUE_DATE,FAILURE_CODE,REVERSAL_OF_TXN_ID,CREATED_AT,UPDATED_AT FROM M05_TXN_TRANSACTION_LOG WHERE TXN_ID=? AND (SOURCE_ACCOUNT_ID=? OR TARGET_ACCOUNT_ID=?)",id,accountId,accountId);
+   t=db.one(ACCOUNT_TRANSACTION_SELECT+" WHERE T.TXN_ID=? AND (T.SOURCE_ACCOUNT_ID=? OR T.TARGET_ACCOUNT_ID=?)",accountId,accountId,id,accountId,accountId);
   }
   var detail=new LinkedHashMap<String,Object>();
   detail.put("transactionId",id);
   detail.put("accountId",accountId);
   detail.put("accountRole",accountId==null?"INTERNAL":t.get("SOURCE_ACCOUNT_ID") instanceof Number source&&source.longValue()==accountId?"SOURCE":"TARGET");
+  detail.put("otherPartyName",t.get("OTHER_PARTY_NAME"));detail.put("postedDelta",t.get("POSTED_DELTA"));
   for(String key:List.of("TXN_TYPE","STATUS","AMOUNT","CURRENCY_CODE","VALUE_DATE","FAILURE_CODE","REVERSAL_OF_TXN_ID","CREATED_AT","UPDATED_AT"))detail.put(key,t.get(key));
   detail.put("statusHistory",db.rows("SELECT FROM_STATUS,TO_STATUS,REASON_CODE,CHANGED_AT FROM M05_TXN_STATUS_HISTORY WHERE TXN_ID=? ORDER BY CHANGED_AT,TXN_STATUS_HISTORY_ID",id));
   var journals=new ArrayList<Map<String,Object>>();

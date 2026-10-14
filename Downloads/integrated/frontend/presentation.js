@@ -1,6 +1,6 @@
 // Display-only formatting. Financial values are kept as decimal strings to avoid
 // changing the precision returned by the banking services.
-import {locale} from './i18n.js';
+import {locale,t} from './i18n.js';
 const currencyDigits=code=>{
   try{return new Intl.NumberFormat(locale,{style:'currency',currency:code}).resolvedOptions().maximumFractionDigits;}
   catch{return 2;}
@@ -45,4 +45,33 @@ export function fieldKind(key){
 export function rowCurrency(row,field=''){
   const prefix=String(field).replace(/(?:Amount|Balance|Posted|Spendable|Principal|Limit)$/i,'');
   return row?.[prefix+'Currency']||row?.[prefix+'CurrencyCode']||row?.currency||row?.currencyCode||row?.CURRENCY||row?.CURRENCY_CODE||row?.CCY||'';
+}
+
+/** Names only apply to transfers. Other transaction kinds get a plain description. */
+export function transactionOtherParty(row){
+ if(row.otherPartyName)return row.otherPartyName;
+ const type=row.type??row.TXN_TYPE??'';
+ if(['INTERNAL_TRANSFER','REVERSAL'].includes(type))return t('Name unavailable');
+ const descriptions={OPENING_FUNDING:'Opening funding',DEPOSIT:'Cash deposit',WITHDRAWAL:'Cash withdrawal',FEE:'Bank fee',INTEREST:'Interest',ADJUSTMENT:'Bank adjustment',PAYMENT_DEBIT:'Payment',PAYMENT_REFUND:'Payment refund',SETTLEMENT:'Settlement',RETURN:'Payment return'};
+ if(type.startsWith('LOAN_'))return t('Loan activity');
+ if(type.startsWith('CARD_'))return t('Credit card activity');
+ return t(descriptions[type]||type.replaceAll('_',' ')||'—');
+}
+
+/** Only committed account postings receive a sign; a pending or rejected request does not. */
+export function transactionAccountImpact(row){
+ const amount=row.amount??row.AMOUNT,currency=row.currency??row.CURRENCY_CODE;
+ const delta=row.postedDelta;
+ if(delta!==null&&delta!==undefined){
+  const value=String(delta).trim();
+  if(!/^-?\d+(?:\.\d+)?$/.test(value))return {text:formatAmount(amount,currency),note:t('Account change unavailable')};
+  const unsigned=value.replace(/^-/,''),nonzero=/[1-9]/.test(unsigned);
+  if(!nonzero)return {text:formatAmount(0,currency),note:t('No net change')};
+  const outgoing=value.startsWith('-');
+  return {text:(outgoing?'− ':'+ ')+formatAmount(unsigned,currency),note:t(outgoing?'Money out':'Money in')};
+ }
+ const status=row.status??row.STATUS;
+ const note=['REJECTED','FAILED','CANCELLED'].includes(status)?'No balance change'
+  :['POSTED','REVERSED'].includes(status)?'Account change unavailable':'Not posted';
+ return {text:formatAmount(amount,currency),note:t(note)};
 }
