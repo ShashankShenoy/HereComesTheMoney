@@ -44,7 +44,7 @@ public class SecurityConfiguration {
             if("127.0.0.1".equals(host))allowed.add(origin.replace("://127.0.0.1","://localhost"));
         }
         var c=new CorsConfiguration();c.setAllowedOrigins(new ArrayList<>(allowed));
-        c.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));c.setAllowedHeaders(List.of("Authorization","Content-Type","X-Correlation-ID","Idempotency-Key","X-Customer-Hash","If-Match","MCP-Protocol-Version","Mcp-Method","Mcp-Name"));c.setExposedHeaders(List.of("X-Correlation-ID","Content-Disposition"));c.setAllowCredentials(false);
+        c.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));c.setAllowedHeaders(List.of("Authorization","Content-Type","X-Correlation-ID","Idempotency-Key","X-Customer-Hash","X-Payment-Pin","If-Match","MCP-Protocol-Version","Mcp-Method","Mcp-Name"));c.setExposedHeaders(List.of("X-Correlation-ID","Content-Disposition"));c.setAllowCredentials(false);
         var source=new UrlBasedCorsConfigurationSource();source.registerCorsConfiguration("/**",c);return source;
     }
 }

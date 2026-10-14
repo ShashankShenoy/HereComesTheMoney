@@ -21,6 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:settlement;MODE=Oracle;DB_CLOSE_DELAY=-1;DEFAULT_NULL_ORDERING=HIGH","moneybags.payment-simulation.clearing-enabled=true","moneybags.payment-simulation.poll-ms=3600000"})
 @AutoConfigureMockMvc @ActiveProfiles("local") @Transactional
+@Import(PaymentPinTestSupport.class)
 class SettlementSimulatorTest {
  @TestConfiguration static class TimeConfig {@Bean @Primary TestClock simulatorClock(){return new TestClock();}}
  static class TestClock extends Clock {Instant time=Instant.now();public ZoneId getZone(){return ZoneOffset.UTC;}public Clock withZone(ZoneId z){return Clock.fixed(time,z);}public Instant instant(){return time;}}
@@ -31,7 +32,9 @@ class SettlementSimulatorTest {
   beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","HDFC recipient","accountToken","EXT-"+UUID.randomUUID(),"bankCode","HDFC0000001")).andExpect(status().isOk())).path("beneficiaryId").asText();
   send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
  }
- String login(String name)throws Exception{return value(mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",name,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk())).path("data").path("accessToken").asText();}
+ String login(String name)throws Exception{var result=value(mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",name,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk())).path("data");String token=result.path("accessToken").asText();
+  if(result.path("user").path("userType").asText().equals("CUSTOMER")&&db.queryForObject("SELECT COUNT(*) FROM MBX_PAYMENT_PIN WHERE USER_ID=?",Integer.class,result.path("user").path("userId").asText())==0)
+   send("/auth/payment-pin/setup",token,Map.of("pin",PaymentPinTestSupport.PIN)).andExpect(status().isOk());return token;}
  ResultActions send(String path,String token,Object body)throws Exception{return mvc.perform(post("/api/v1"+path).header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)));}
  JsonNode value(ResultActions r)throws Exception{return json.readTree(r.andReturn().getResponse().getContentAsString());}
  BigDecimal balance(){return db.queryForObject("SELECT POSTED_BALANCE FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=1",BigDecimal.class);}

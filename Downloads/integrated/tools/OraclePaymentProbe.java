@@ -8,13 +8,14 @@ public class OraclePaymentProbe {
   try(Connection c=DriverManager.getConnection(System.getenv("DB_URL"),System.getenv("DB_USERNAME"),System.getenv("DB_PASSWORD"))){
    System.out.println("PASS: connected to configured Oracle schema");
    if(args.length>0&&args[0].equals("apply")){
+    try(Statement wait=c.createStatement()){wait.execute("ALTER SESSION SET DDL_LOCK_TIMEOUT=30");}
     String sql=Files.readString(Path.of(args[1])).replaceAll("(?m)--.*$","");
     for(String statement:sql.split(";")){
      if(statement.isBlank())continue;
      try(Statement s=c.createStatement()){s.execute(statement.trim());}
      catch(SQLException e){if(e.getErrorCode()!=955&&e.getErrorCode()!=1)throw e;}
     }
-    System.out.println("PASS: additive simulator migration applied; existing balances preserved");
+    System.out.println("PASS: additive migration applied; existing balances preserved");
    }
    try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME IN ('MBX_SIM_BANK','MBX_SIM_PAYMENT','MBX_SIM_WINDOW','MBX_SIM_SETTLEMENT','MBX_SIM_MOVEMENT','MBX_EMPLOYEE_ERROR')")){
     r.next();if(r.getInt(1)!=6)throw new IllegalStateException("Simulator migration is incomplete");
