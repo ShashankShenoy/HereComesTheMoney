@@ -1,6 +1,7 @@
 import {api,getSession} from './api.js';
 import {esc,field,select,table,badge,dialog,toast,errorText} from './ui.js';
 import {formatAmount,formatDate} from './presentation.js';
+import {paymentPinField,withPaymentPin} from './payment-pin.js';
 
 let accounts=[],beneficiaries=[],payments=[],actorId;
 const money=value=>esc(formatAmount(value,'INR'));
@@ -53,8 +54,8 @@ export function bindCustomerPayments(render){
     if(!target||target===account.ACCOUNT_NUMBER)return void(error.textContent='Enter a different recipient account number.');
     // Keep the same key while confirmation is open, including a retry after a lost response.
     const body={sourceAccountNumber:account.ACCOUNT_NUMBER,targetAccountNumber:target,amount,requestKey:crypto.randomUUID(),correlationId:crypto.randomUUID()};
-    dialog('Confirm account transfer',`<p>From <strong>${esc(account.ACCOUNT_NUMBER)}</strong> to <strong>${esc(target)}</strong>.</p><p>Amount: <strong>${money(amount)}</strong></p><p>Check the recipient account number carefully. Confirming debits your account and credits the recipient immediately.</p>`,async()=>{
-      const transfer=await api('/transactions/transfers/by-number',{method:'POST',body});
+    dialog('Confirm account transfer',`<p>From <strong>${esc(account.ACCOUNT_NUMBER)}</strong> to <strong>${esc(target)}</strong>.</p><p>Amount: <strong>${money(amount)}</strong></p><p>Check the recipient account number carefully. Confirming debits your account and credits the recipient immediately.</p>`+paymentPinField(),async data=>{
+      const transfer=await withPaymentPin(data,headers=>api('/transactions/transfers/by-number',{method:'POST',body,headers}));
       toast(`Transfer ${transfer.transactionId} completed. Both account balances have been updated.`);
       await render();
     });
@@ -70,8 +71,8 @@ export function bindCustomerPayments(render){
     const recipient=beneficiaries.find(b=>b.BENEFICIARY_ID===data.get('beneficiaryId'));
     if(!account||!eligible(account)||!recipient||recipient.STATUS!=='ACTIVE')return void(error.textContent='Refresh this page and choose an eligible account and verified recipient.');
     const body={sourceAccountId:Number(account.ACCOUNT_ID),beneficiaryId:recipient.BENEFICIARY_ID,railCode:rail,amount:String(data.get('amount')),requestKey:crypto.randomUUID()};
-    dialog('Confirm simulated payment',`<p>From <strong>${esc(account.ACCOUNT_NUMBER)}</strong> to <strong>${esc(recipient.DISPLAY_NAME)}</strong> (${esc(recipient.BANK_CODE)}).</p><p>Amount: <strong>${money(body.amount)}</strong> · Method: ${esc(rail)}</p><div class="notice">Eligible payments process automatically, including a customer debit. Payments above the rail approval threshold await an independent checker before processing. This is a simulated external payment.</div>`,async()=>{
-      const payment=await api('/payments/initiate',{method:'POST',body});
+    dialog('Confirm simulated payment',`<p>From <strong>${esc(account.ACCOUNT_NUMBER)}</strong> to <strong>${esc(recipient.DISPLAY_NAME)}</strong> (${esc(recipient.BANK_CODE)}).</p><p>Amount: <strong>${money(body.amount)}</strong> · Method: ${esc(rail)}</p><div class="notice">Eligible payments process automatically, including a customer debit. Payments above the rail approval threshold await an independent checker before processing. This is a simulated external payment.</div>`+paymentPinField(),async data=>{
+      const payment=await withPaymentPin(data,headers=>api('/payments/initiate',{method:'POST',body,headers}));
       toast(`Payment request ${payment.paymentId} created. Follow its progress below.`);
       await render();
     });

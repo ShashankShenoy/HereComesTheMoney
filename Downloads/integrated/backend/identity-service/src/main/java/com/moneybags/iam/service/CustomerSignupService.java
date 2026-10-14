@@ -19,6 +19,7 @@ import static com.moneybags.iam.repository.IamRepository.map;
 /** Explicit demo signup: KYC is assumed complete only when this feature flag is enabled. */
 @Service
 public class CustomerSignupService {
+    @org.springframework.beans.factory.annotation.Autowired private com.moneybags.integration.PaymentPinService paymentPins;
     private static final List<String> CUSTOMER_PERMISSIONS=List.of(
         "ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE",
         "STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW",
@@ -38,7 +39,7 @@ public class CustomerSignupService {
     }
     public boolean enabled(){return enabled;}
 
-    @Transactional public Map<String,String> register(CustomerSignupRequest request){return registerChecked(request,null);}
+    @Transactional public Map<String,String> register(CustomerSignupRequest request){com.moneybags.integration.PaymentPinService.validate(request.paymentPin());return registerChecked(request,null);}
     @Transactional public Map<String,String> registerAsAdmin(UserPrincipal actor,CustomerSignupRequest request){
         guard.require(actor,"IAM_USER_CREATE");return registerChecked(request,actor.userId());
     }
@@ -76,6 +77,7 @@ public class CustomerSignupService {
         schema.insert(SchemaTable.M01_IAM_AUDIT_EVENT,map("AUDIT_ID",UUID.randomUUID().toString(),"EVENT_TYPE",adminUserId==null?"DEMO_CUSTOMER_SIGNUP":"DEMO_CUSTOMER_ADMIN_CREATED",
             "ACTOR_USER_ID",adminUserId==null?user:adminUserId,"RESOURCE_TYPE","IAM_USER","RESOURCE_ID",user,"RESULT","SUCCESS",
             "REASON_CODE","DEMO_KYC_ASSUMED","CORRELATION_ID",UUID.randomUUID().toString()));
+        if(request.paymentPin()!=null)paymentPins.initialize(user,request.paymentPin());
         return Map.of("username",username,"cifId",cif);
     }
 
