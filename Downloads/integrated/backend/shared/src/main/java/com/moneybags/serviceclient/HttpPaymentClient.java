@@ -27,7 +27,7 @@ public class HttpPaymentClient implements PaymentInitiationPort {
         try{
             var headers=new java.util.LinkedHashMap<String,String>();
             headers.put("Authorization",bearer);headers.put("Content-Type","application/json");headers.put("Idempotency-Key",requestKey);
-            for(String name:java.util.List.of("X-Customer-Hash","X-Correlation-ID")){
+            for(String name:java.util.List.of("X-Customer-Hash","X-Correlation-ID","X-Payment-Pin")){
                 String value=attrs.getRequest().getHeader(name);if(value!=null)headers.put(name,value);
             }
             var body=Map.of("sourceAccountId",sourceAccountId,"beneficiaryId",beneficiaryId,"railCode",railCode,"amount",amount.toPlainString(),"requestKey",requestKey);

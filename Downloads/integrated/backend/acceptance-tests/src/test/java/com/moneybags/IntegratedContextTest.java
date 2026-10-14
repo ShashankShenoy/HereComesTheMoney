@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {"moneybags.auth.allowed-origins=http://localhost:5173", "moneybags.payment-simulation.clearing-enabled=false"})
 @AutoConfigureMockMvc @ActiveProfiles("local")
+@org.springframework.context.annotation.Import(PaymentPinTestSupport.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IntegratedContextTest {
  @Autowired MockMvc mvc;@Autowired ObjectMapper json;@Autowired JdbcTemplate db;@Autowired com.moneybags.txn.core.LedgerService ledger;
@@ -36,7 +37,10 @@ class IntegratedContextTest {
  static final String HASH=("customer-demo-hash-"+"x".repeat(43)).substring(0,43);
  String login(String user)throws Exception{
   var r=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",user,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
-  return json.readTree(r.getResponse().getContentAsString()).path("data").path("accessToken").asText();
+  var result=json.readTree(r.getResponse().getContentAsString()).path("data");String token=result.path("accessToken").asText();
+  if(result.path("user").path("userType").asText().equals("CUSTOMER")&&db.queryForObject("SELECT COUNT(*) FROM MBX_PAYMENT_PIN WHERE USER_ID=?",Integer.class,result.path("user").path("userId").asText())==0)
+   mvc.perform(post("/api/v1/auth/payment-pin/setup").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("pin",PaymentPinTestSupport.PIN)))).andExpect(status().isOk());
+  return token;
  }
  ResultActions send(String path,String token,Object body)throws Exception{return mvc.perform(post("/api/v1"+path).header("Authorization","Bearer "+token).header("Idempotency-Key",UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)));}
  JsonNode value(ResultActions result)throws Exception{return json.readTree(result.andReturn().getResponse().getContentAsString());}
@@ -418,7 +422,7 @@ class IntegratedContextTest {
  }
  @Test @Order(18) void publicCustomerSignupCreatesVerifiedSelfScopedIdentity()throws Exception{
   String username="new_signup_"+UUID.randomUUID().toString().substring(0,8),password="NewCustomer!2026";
-  var body=Map.of("username",username,"legalName","New Demo Customer","dateOfBirth","1995-04-12","password",password);
+  var body=Map.of("username",username,"legalName","New Demo Customer","dateOfBirth","1995-04-12","password",password,"paymentPin",PaymentPinTestSupport.PIN);
   mvc.perform(get("/api/v1/auth/signup-availability")).andExpect(status().isOk()).andExpect(jsonPath("$.data.enabled").value(true));
   var result=mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body))).andExpect(status().isOk()).andReturn();
   String cif=json.readTree(result.getResponse().getContentAsString()).path("data").path("cifId").asText();
@@ -842,7 +846,7 @@ class IntegratedContextTest {
     "WHERE R.ROLE_CODE='RETAIL_CUSTOMER' AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'");
   String username="scoped_signup_"+UUID.randomUUID().toString().substring(0,8);
   var body=Map.of("username",username,"legalName","Scoped Customer","dateOfBirth","1995-04-12",
-    "password","NewCustomer!2026");
+    "password","NewCustomer!2026","paymentPin",PaymentPinTestSupport.PIN);
   mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
     .content(json.writeValueAsString(body))).andExpect(status().isOk());
   assertEquals("RETAIL_CUSTOMER_SIGNUP",db.queryForObject(

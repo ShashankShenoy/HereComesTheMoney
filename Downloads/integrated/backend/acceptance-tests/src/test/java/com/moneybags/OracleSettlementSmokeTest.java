@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(properties={"moneybags.payment-simulation.enabled=true","moneybags.payment-simulation.clearing-enabled=true","moneybags.payment-simulation.poll-ms=3600000","moneybags.deposit-interest.enabled=false","moneybags.bootstrap.enabled=false","spring.sql.init.mode=never"})
 @Transactional
 class OracleSettlementSmokeTest {
- @Autowired JdbcTemplate db;@Autowired SettlementSimulator simulator;@Autowired PaymentWorkflowController workflow;
+ @Autowired JdbcTemplate db;@Autowired SettlementSimulator simulator;@Autowired PaymentWorkflowController workflow;@Autowired BankingController banking;
  long account,reserve;String number,cif,admin,checker,beneficiary;
  @BeforeEach void setup(){
   var a=db.queryForList("SELECT A.ACCOUNT_ID,A.ACCOUNT_NUMBER,A.PRIMARY_CIF_ID FROM M04_BANK_ACCOUNT A JOIN M02_CIF_CUSTOMER C ON C.CIF_ID=A.PRIMARY_CIF_ID WHERE A.ACCOUNT_STATUS='ACTIVE' AND C.KYC_STATUS='VERIFIED' AND EXISTS (SELECT 1 FROM M05_GL_PRODUCT_MAPPING M WHERE M.PRODUCT_VERSION_ID=A.PRODUCT_VERSION_ID AND M.POSTING_TYPE='PAYMENT' AND M.GL_ROLE_CODE='SETTLEMENT_SUSPENSE' AND M.STATUS='ACTIVE') ORDER BY A.ACCOUNT_ID FETCH FIRST 1 ROWS ONLY").get(0);
@@ -50,6 +50,7 @@ class OracleSettlementSmokeTest {
    if(p.settlementCycleId()!=null){simulator.closeCycle(p.settlementCycleId(),admin);simulator.settleCycle(p.settlementCycleId(),admin);simulator.settleCycle(p.settlementCycleId(),admin);}
    assertEquals(0,before.add(new BigDecimal(amount)).compareTo(position()));
    assertEquals(p.paymentId(),simulator.incoming(incoming(rail,amount,ref)).paymentId());
+   assertActivity(p.paymentId(),amount,"EXTERNAL_PAYMENT_RECEIVED");
    assertEquals(0,db.queryForObject("SELECT SUM(M.NET_AMOUNT) FROM MBX_SIM_MOVEMENT M JOIN MBX_SIM_PAYMENT P ON P.SETTLEMENT_REFERENCE=M.SETTLEMENT_REFERENCE WHERE P.PAYMENT_ID=?",BigDecimal.class,p.paymentId()).signum());
   }
  }
@@ -61,8 +62,16 @@ class OracleSettlementSmokeTest {
    assertNotEquals("RECEIVED",p.status());assertEquals(0,before.subtract(new BigDecimal(amount)).compareTo(position()));
    if(p.settlementCycleId()!=null){simulator.closeCycle(p.settlementCycleId(),admin);simulator.settleCycle(p.settlementCycleId(),admin);}
    assertEquals("SETTLED",db.queryForObject("SELECT STATUS FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",String.class,p.paymentId()));
+   assertActivity(p.paymentId(),amount,"EXTERNAL_PAYMENT_SENT");
   }
   var p=workflow.initiate(new PaymentWorkflowController.Initiate(account,beneficiary,"NEFT",new BigDecimal("100000.01"),UUID.randomUUID().toString()));
   assertEquals("RECEIVED",p.status());as(checker);p=simulator.approve(p.paymentId(),reserve);assertNotNull(p.clearingBatchId());as(admin);simulator.closeCycle(p.settlementCycleId(),admin);simulator.settleCycle(p.settlementCycleId(),admin);
+ }
+ void assertActivity(long payment,String amount,String type){
+  var entries=banking.transactions(account,null,null).stream().filter(r->r.get("paymentId") instanceof Number n&&n.longValue()==payment).toList();
+  assertEquals(1,entries.size());var row=entries.get(0);assertEquals(type,row.get("type"));
+  assertEquals(0,new BigDecimal(amount).compareTo((BigDecimal)row.get("amount")));
+  var detail=banking.activityDetails((String)row.get("transactionId"),account,null,null);
+  assertEquals(payment,((Number)detail.get("PAYMENT_ID")).longValue());assertEquals("POSTED",detail.get("STATUS"));
  }
 }

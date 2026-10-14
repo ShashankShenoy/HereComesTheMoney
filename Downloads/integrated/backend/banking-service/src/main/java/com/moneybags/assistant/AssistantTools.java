@@ -134,7 +134,7 @@ public class AssistantTools {
                 result.add(row);
             }
         }
-        result.sort((a,b)->Long.compare(((Number)b.get("transactionId")).longValue(),((Number)a.get("transactionId")).longValue()));
+        result.sort(java.util.Comparator.comparing((Map<String,Object> row)->BankingController.activityTime(row.get("createdAt"))).reversed());
         return result.stream().limit(limit).toList();
     }
     private Object transactions(long accountId,int limit,String hash) {

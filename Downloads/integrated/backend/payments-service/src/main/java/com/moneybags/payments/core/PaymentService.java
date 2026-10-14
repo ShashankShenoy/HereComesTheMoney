@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** Owns idempotent instructions, the direction-aware state machine, and immutable rail evidence. */
 @Service
 public class PaymentService {
+    @org.springframework.beans.factory.annotation.Autowired private com.moneybags.integration.PaymentPinGuard paymentPins;
     private final com.moneybags.integration.BankingAccess access;
     private final PaymentRepository payments;
     private final IntegrationChecks checks;
@@ -53,6 +54,7 @@ public class PaymentService {
             var account=access.account("PAYMENT_CREATE",request.sourceAccountId());
             if(!account.get("PRIMARY_CIF_ID").equals(request.sourceCifId()))throw conflict("CIF_MISMATCH","Source CIF must match the account");
         }else if(!"SERVICE".equals(actor.userType())||!actor.permissions().contains("PAYMENT_INTERNAL"))throw new ApiException(HttpStatus.FORBIDDEN,"INBOUND_SERVICE_ONLY","Inbound rail instructions require a trusted service identity");
+        paymentPins.requireForCustomer();
         byte[] hash = sha256(canonical(request));
         var existing = payments.existing(request.originatorId(), request.channelCode(), request.requestKey());
         if (!existing.isEmpty()) {

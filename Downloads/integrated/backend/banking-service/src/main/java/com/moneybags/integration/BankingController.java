@@ -94,8 +94,40 @@ public class BankingController {
    item.put("otherPartyName",row.get("OTHER_PARTY_NAME"));item.put("postedDelta",row.get("POSTED_DELTA"));
    result.add(item);
   }else result.add(Map.of("transactionId",id));}
+  // Payments post against PAYMENT_ID rather than TXN_ID. Include their actual
+  // customer ledger entries, including historical entries, without posting again.
+  for(var row:db.rows("""
+    SELECT J.JOURNAL_ID,J.PAYMENT_ID,J.JOURNAL_TYPE,J.VALUE_DATE,J.BOOKED_AT,
+      I.RAIL_CODE,I.STATUS AS PAYMENT_STATUS,
+      SUM(CASE WHEN P.ENTRY_SIDE='CR' THEN P.AMOUNT ELSE -P.AMOUNT END) AS NET_AMOUNT
+    FROM M05_GL_JOURNAL J JOIN M05_GL_POSTING P ON P.JOURNAL_ID=J.JOURNAL_ID
+    JOIN M06_PAYMENT_INSTRUCTION I ON I.PAYMENT_ID=J.PAYMENT_ID
+    WHERE P.BANK_ACCOUNT_ID=? AND J.TXN_ID IS NULL
+      AND J.JOURNAL_TYPE IN ('PAYMENT_PROVISIONAL','PAYMENT_REFUND','RETURN')
+    GROUP BY J.JOURNAL_ID,J.PAYMENT_ID,J.JOURNAL_TYPE,J.VALUE_DATE,J.BOOKED_AT,I.RAIL_CODE,I.STATUS
+    ORDER BY J.BOOKED_AT DESC,J.JOURNAL_ID DESC FETCH FIRST 100 ROWS ONLY
+    """,accountId)){
+   String reference="PAYMENT-"+row.get("JOURNAL_ID");
+   if(!canRead){result.add(Map.of("transactionId",reference));continue;}
+   var net=(java.math.BigDecimal)row.get("NET_AMOUNT");
+   if(net.signum()==0)continue;
+   var item=new LinkedHashMap<String,Object>();
+   item.put("transactionId",reference);item.put("paymentId",row.get("PAYMENT_ID"));
+   item.put("journalId",row.get("JOURNAL_ID"));item.put("status","POSTED");
+   item.put("paymentStatus",row.get("PAYMENT_STATUS"));item.put("railCode",row.get("RAIL_CODE"));
+   item.put("type",row.get("JOURNAL_TYPE").equals("PAYMENT_REFUND")?"PAYMENT_REFUND":net.signum()<0?"EXTERNAL_PAYMENT_SENT":"EXTERNAL_PAYMENT_RECEIVED");
+   item.put("amount",net.abs());item.put("currency","INR");
+   item.put("valueDate",row.get("VALUE_DATE"));item.put("createdAt",row.get("BOOKED_AT"));
+   item.put("accountRole",net.signum()<0?"SOURCE":"TARGET");result.add(item);
+  }
+  if(canRead)result.sort(Comparator.comparing((Map<String,Object> item)->activityTime(item.get("createdAt"))).reversed());
   if(canRead)hashes.audit("TRANSACTION_LIST_VIEWED","ACCOUNT",accountId.toString(),access.bankAdminTransactionRead()?"BANK_ADMIN":hashes.proofLabel());
-  return result;
+  return result.stream().limit(100).toList();
+ }
+ public static java.time.Instant activityTime(Object time){
+  if(time instanceof java.time.OffsetDateTime t)return t.toInstant();
+  if(time instanceof java.time.LocalDateTime t)return t.atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant();
+  return java.time.Instant.MIN;
  }
  /** Identifies active holders who can generate a new key; never returns a key or its digest. */
  @GetMapping("/accounts/{id}/key-holders") public List<Map<String,Object>> keyHolders(@PathVariable long id){
@@ -125,7 +157,40 @@ public class BankingController {
   return keyHolders(accountId(null,number));
  }
  /** Account-scoped financial detail; the account-holder proof is checked before any detail is returned. */
- @GetMapping("/transactions/{id}/details") public Map<String,Object> transactionDetails(@PathVariable long id,@RequestParam(required=false) Long accountId,@RequestParam(required=false) String accountNumber,@RequestHeader(value="X-Customer-Hash",required=false)String hash){
+ @GetMapping("/transactions/{id}/details") public Map<String,Object> activityDetails(@PathVariable String id,@RequestParam(required=false) Long accountId,@RequestParam(required=false) String accountNumber,@RequestHeader(value="X-Customer-Hash",required=false)String hash){
+  if(id.matches("PAYMENT-[0-9]{1,18}"))return paymentActivityDetails(Long.parseLong(id.substring(8)),accountId,accountNumber,hash);
+  if(!id.matches("[0-9]{1,18}"))throw new com.moneybags.common.api.BusinessException(HttpStatus.BAD_REQUEST,"INVALID_TRANSACTION_REFERENCE","Select a transaction from the account activity list");
+  return transactionDetails(Long.parseLong(id),accountId,accountNumber,hash);
+ }
+ private Map<String,Object> paymentActivityDetails(long journalId,Long accountId,String accountNumber,String hash){
+  CurrentActor.require("TXN_READ");accountId=accountId(accountId,accountNumber);
+  access.account("TXN_READ",accountId);if(!transactionReadAllowed(accountId,hash))hashes.require(accountId,hash);
+  var row=db.one("""
+    SELECT J.JOURNAL_ID,J.PAYMENT_ID,J.JOURNAL_TYPE,J.VALUE_DATE,J.BOOKED_AT,
+      I.RAIL_CODE,I.STATUS AS PAYMENT_STATUS,
+      SUM(CASE WHEN P.ENTRY_SIDE='CR' THEN P.AMOUNT ELSE -P.AMOUNT END) AS NET_AMOUNT
+    FROM M05_GL_JOURNAL J JOIN M05_GL_POSTING P ON P.JOURNAL_ID=J.JOURNAL_ID
+    JOIN M06_PAYMENT_INSTRUCTION I ON I.PAYMENT_ID=J.PAYMENT_ID
+    WHERE J.JOURNAL_ID=? AND P.BANK_ACCOUNT_ID=? AND J.TXN_ID IS NULL
+      AND J.JOURNAL_TYPE IN ('PAYMENT_PROVISIONAL','PAYMENT_REFUND','RETURN')
+    GROUP BY J.JOURNAL_ID,J.PAYMENT_ID,J.JOURNAL_TYPE,J.VALUE_DATE,J.BOOKED_AT,I.RAIL_CODE,I.STATUS
+    """,journalId,accountId);
+  var net=(java.math.BigDecimal)row.get("NET_AMOUNT");var detail=new LinkedHashMap<String,Object>();
+  detail.put("transactionId","PAYMENT-"+journalId);detail.put("accountId",accountId);
+  detail.put("accountRole",net.signum()<0?"SOURCE":"TARGET");detail.put("STATUS","POSTED");
+  detail.put("TXN_TYPE",row.get("JOURNAL_TYPE").equals("PAYMENT_REFUND")?"PAYMENT_REFUND":net.signum()<0?"EXTERNAL_PAYMENT_SENT":"EXTERNAL_PAYMENT_RECEIVED");
+  detail.put("AMOUNT",net.abs());detail.put("CURRENCY_CODE","INR");
+  detail.put("VALUE_DATE",row.get("VALUE_DATE"));detail.put("CREATED_AT",row.get("BOOKED_AT"));
+  detail.put("PAYMENT_ID",row.get("PAYMENT_ID"));detail.put("RAIL_CODE",row.get("RAIL_CODE"));
+  detail.put("PAYMENT_STATUS",row.get("PAYMENT_STATUS"));
+  detail.put("statusHistory",db.rows("SELECT FROM_STATUS,TO_STATUS,REASON_CODE,CHANGED_AT FROM M06_PAYMENT_STATUS_HISTORY WHERE PAYMENT_ID=? ORDER BY CHANGED_AT,PAYMENT_STATUS_HISTORY_ID",row.get("PAYMENT_ID")));
+  var journal=new LinkedHashMap<String,Object>();journal.put("JOURNAL_ID",journalId);journal.put("JOURNAL_TYPE",row.get("JOURNAL_TYPE"));journal.put("BOOKED_AT",row.get("BOOKED_AT"));
+  journal.put("control",db.one("SELECT LINE_COUNT,DEBIT_TOTAL,CREDIT_TOTAL,BALANCE_DIFFERENCE,IS_BALANCED FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=?",journalId));
+  journal.put("accountPostings",db.rows("SELECT POSTING_ID,LINE_NO,GL_ACCOUNT_ID,ENTRY_SIDE,AMOUNT FROM M05_GL_POSTING WHERE JOURNAL_ID=? AND BANK_ACCOUNT_ID=? ORDER BY LINE_NO",journalId,accountId));
+  detail.put("journals",List.of(journal));
+  hashes.audit("PAYMENT_ACTIVITY_VIEWED","ACCOUNT",accountId.toString(),access.bankAdminTransactionRead()?"BANK_ADMIN":hashes.proofLabel());return detail;
+ }
+ public Map<String,Object> transactionDetails(long id,Long accountId,String accountNumber,String hash){
   CurrentActor.require("TXN_READ");
   Map<String,Object> t;
   if(accountId==null&&(accountNumber==null||accountNumber.isBlank())){

@@ -26,6 +26,7 @@ class ServiceClientsTest {
     @AfterEach void clearRequest() { RequestContextHolder.resetRequestAttributes(); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
     void paymentRequest(){
         request("Bearer session");
+        ((MockHttpServletRequest)((ServletRequestAttributes)RequestContextHolder.getRequestAttributes()).getRequest()).addHeader("X-Payment-Pin","134679");
         org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
             new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(user,null,List.of()));
     }
@@ -112,6 +113,7 @@ class ServiceClientsTest {
             assertEquals("intent-key",sent.headers.get("idempotency-key"));
             assertEquals("access-key",sent.headers.get("x-customer-hash"));
             assertEquals("trace",sent.headers.get("x-correlation-id"));
+            assertEquals("134679",sent.headers.get("x-payment-pin"));
             var body=json.readTree(sent.body);assertEquals("0.01",body.path("amount").asText());assertEquals("intent-key",body.path("requestKey").asText());
         }
     }

@@ -21,6 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:settlement;MODE=Oracle;DB_CLOSE_DELAY=-1;DEFAULT_NULL_ORDERING=HIGH","moneybags.payment-simulation.clearing-enabled=true","moneybags.payment-simulation.poll-ms=3600000"})
 @AutoConfigureMockMvc @ActiveProfiles("local") @Transactional
+@Import(PaymentPinTestSupport.class)
 class SettlementSimulatorTest {
  @TestConfiguration static class TimeConfig {@Bean @Primary TestClock simulatorClock(){return new TestClock();}}
  static class TestClock extends Clock {Instant time=Instant.now();public ZoneId getZone(){return ZoneOffset.UTC;}public Clock withZone(ZoneId z){return Clock.fixed(time,z);}public Instant instant(){return time;}}
@@ -31,7 +32,9 @@ class SettlementSimulatorTest {
   beneficiary=value(send("/beneficiaries",customer,Map.of("displayName","HDFC recipient","accountToken","EXT-"+UUID.randomUUID(),"bankCode","HDFC0000001")).andExpect(status().isOk())).path("beneficiaryId").asText();
   send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of()).andExpect(status().isOk());
  }
- String login(String name)throws Exception{return value(mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",name,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk())).path("data").path("accessToken").asText();}
+ String login(String name)throws Exception{var result=value(mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",name,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk())).path("data");String token=result.path("accessToken").asText();
+  if(result.path("user").path("userType").asText().equals("CUSTOMER")&&db.queryForObject("SELECT COUNT(*) FROM MBX_PAYMENT_PIN WHERE USER_ID=?",Integer.class,result.path("user").path("userId").asText())==0)
+   send("/auth/payment-pin/setup",token,Map.of("pin",PaymentPinTestSupport.PIN)).andExpect(status().isOk());return token;}
  ResultActions send(String path,String token,Object body)throws Exception{return mvc.perform(post("/api/v1"+path).header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)));}
  JsonNode value(ResultActions r)throws Exception{return json.readTree(r.andReturn().getResponse().getContentAsString());}
  BigDecimal balance(){return db.queryForObject("SELECT POSTED_BALANCE FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=1",BigDecimal.class);}
@@ -40,6 +43,40 @@ class SettlementSimulatorTest {
  JsonNode outgoing(String rail,String amount)throws Exception{return value(send("/payments/initiate",customer,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"railCode",rail,"amount",amount,"requestKey",UUID.randomUUID().toString())).andExpect(status().isOk()));}
  void settle(long cycle)throws Exception{send("/payments/simulator/cycles/"+cycle+"/settle",admin,Map.of()).andExpect(status().isOk());}
  void fund()throws Exception{send("/payments/simulator/incoming",admin,incoming("RTGS","3000000",UUID.randomUUID().toString())).andExpect(status().isOk());}
+ JsonNode activity(String token)throws Exception{return value(mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+token)).andExpect(status().isOk()));}
+ JsonNode entry(String token,long payment)throws Exception{for(var row:activity(token))if(row.path("paymentId").asLong()==payment)return row;return json.nullNode();}
+ @Test void outgoingActivityShowsActualDebitBeforeSettlementAndNeverDuplicatesIt()throws Exception{
+  var p=outgoing("UPI","10");long id=p.path("paymentId").asLong();var row=entry(customer,id);
+  assertEquals("EXTERNAL_PAYMENT_SENT",row.path("type").asText());assertEquals("SOURCE",row.path("accountRole").asText());
+  assertEquals("POSTED",row.path("status").asText());assertEquals("SETTLEMENT_PENDING",row.path("paymentStatus").asText());
+  assertEquals(0,new BigDecimal("10").compareTo(row.path("amount").decimalValue()));
+  mvc.perform(get("/api/v1/banking/transactions/"+row.path("transactionId").asText()+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+customer))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.PAYMENT_ID").value(id)).andExpect(jsonPath("$.journals[0].control.IS_BALANCED").value("Y"));
+  settle(p.path("settlementCycleId").asLong());settle(p.path("settlementCycleId").asLong());
+  assertEquals("SETTLED",entry(customer,id).path("paymentStatus").asText());
+  int count=0;for(var item:activity(customer))if(item.path("paymentId").asLong()==id)count++;assertEquals(1,count);
+  fund();var pending=outgoing("NEFT","100000.01");assertTrue(entry(customer,pending.path("paymentId").asLong()).isNull());
+  send("/payments/simulator/payments/"+pending.path("paymentId").asLong()+"/reject",checker,Map.of()).andExpect(status().isOk());
+  assertTrue(entry(customer,pending.path("paymentId").asLong()).isNull());
+ }
+ @Test void incomingActivityFollowsActualCustomerCreditTiming()throws Exception{
+  for(String rail:List.of("UPI","IMPS","NEFT","RTGS")){
+   var p=value(send("/payments/simulator/incoming",admin,incoming(rail,rail.equals("RTGS")?"200000":"11",UUID.randomUUID().toString())).andExpect(status().isOk()));long id=p.path("paymentId").asLong();
+   if(rail.equals("NEFT"))assertTrue(entry(customer,id).isNull());else assertEquals("EXTERNAL_PAYMENT_RECEIVED",entry(customer,id).path("type").asText());
+   if(p.path("settlementCycleId").isNumber())settle(p.path("settlementCycleId").asLong());
+   var row=entry(customer,id);assertEquals("TARGET",row.path("accountRole").asText());assertEquals(rail,row.path("railCode").asText());
+   assertEquals("SETTLED",row.path("paymentStatus").asText());
+  }
+ }
+ @Test void paymentActivityKeepsHolderPrivacyAndAccountScope()throws Exception{
+  var p=outgoing("UPI","10");var row=entry(customer,p.path("paymentId").asLong());String reference=row.path("transactionId").asText();
+  for(var item:activity(checker))if(item.path("transactionId").asText().equals(reference)){assertFalse(item.has("amount"));assertFalse(item.has("paymentId"));}
+  String other=login("customer2");
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000002").header("Authorization","Bearer "+other)).andExpect(status().isNotFound());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+checker)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/transactions/"+reference+"/details?accountNumber=MB000000001").header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+ }
  @Test void automaticOutgoingAndCycleRetryHaveOneDebitAndBalancedReserves()throws Exception{
   BigDecimal before=balance(),r=reserve();var p=outgoing("UPI","10");long id=p.path("paymentId").asLong(),cycle=p.path("settlementCycleId").asLong();
   assertEquals("SETTLEMENT_PENDING",p.path("status").asText());assertEquals(0,before.subtract(new BigDecimal("10")).compareTo(balance()));assertEquals(0,r.compareTo(reserve()));
