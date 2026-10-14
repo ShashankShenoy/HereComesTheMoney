@@ -1,5 +1,6 @@
 import {api,getSession} from './api.js';
-import {esc,errorText} from './ui.js';
+import {paymentPinField,withPaymentPin} from './payment-pin.js';
+import {esc,errorText,dialog} from './ui.js';
 import {renderAssistantMarkdown} from './assistant-markdown.js';
 import {locale,t} from './i18n.js';
 
@@ -131,9 +132,11 @@ export function bindAssistant(){
     const button=event.target.closest('[data-assistant-confirm]');if(!button||button.disabled)return;
     const action=actions.find(a=>a.intentId===button.dataset.assistantConfirm);if(!action)return;
     const owner=identity;
-    button.disabled=true;
+    const financial=['INTERNAL_TRANSFER','PAYMENT_INITIATE'].includes(action.action);
+    const submit=async data=>{button.disabled=true;
     try{
-      const result=await api(`/assistant/intents/${encodeURIComponent(action.intentId)}/confirm`,{method:'POST'});
+      const send=headers=>api(`/assistant/intents/${encodeURIComponent(action.intentId)}/confirm`,{method:'POST',headers});
+      const result=financial?await withPaymentPin(data,send):await send({});
       if(identity!==owner)return;
       action.status='COMPLETED';
       const confirmation=locale==='hi-IN'
@@ -142,7 +145,9 @@ export function bindAssistant(){
           ?result.action==='INTERNAL_TRANSFER'?`ಆಂತರಿಕ ವರ್ಗಾವಣೆ ${result.resultRef} ದಾಖಲಾಗಿದೆ. ಸ್ವೀಕರಿಸುವವರ ಖಾತೆಗೆ ಹಣ ಜಮಾ ಆಗಿದೆ.`:result.action==='PAYMENT_INITIATE'?`ಪಾವತಿ ವಿನಂತಿ ${result.resultRef} ಸಲ್ಲಿಸಲಾಗಿದೆ ಮತ್ತು ಬ್ಯಾಂಕ್ ಪ್ರಕ್ರಿಯೆಗೆ ಕಾಯುತ್ತಿದೆ.`:`ಫಲಾನುಭವಿ ${result.resultRef} ಪರಿಶೀಲಿಸಲಾಗಿದೆ.`
           :result.action==='INTERNAL_TRANSFER'?`Internal transfer ${result.resultRef} was posted. The recipient account has been credited.`:result.action==='PAYMENT_INITIATE'?`Payment request ${result.resultRef} was submitted and is awaiting bank processing.`:`Beneficiary ${result.resultRef} was verified.`;
       messages.push({role:'assistant',text:confirmation});
-    }catch(error){if(identity===owner)messages.push({role:'assistant',text:errorText(error)});}
-    finally{if(identity===owner)paint();}
+    }catch(error){if(identity===owner)messages.push({role:'assistant',text:errorText(error)});throw error;}
+    finally{if(identity===owner)paint();}};
+    if(financial&&getSession()?.user?.userType==='CUSTOMER')dialog('Confirm payment or transfer','<p>'+esc(action.summary)+'</p>'+paymentPinField(),submit);
+    else try{await submit(new FormData());}catch{/* the safe failure was added to the action history */}
   };
 }

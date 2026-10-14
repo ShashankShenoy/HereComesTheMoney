@@ -44,6 +44,12 @@ public class TransactionController {
         return banking.transferByNumber(request);
     }
 
+    @PostMapping("/transfers/by-beneficiary")
+    @PreAuthorize("hasAuthority('SCOPE_m05.transfer')")
+    public TransactionView transferByBeneficiary(@Valid @RequestBody com.moneybags.integration.BankingService.BeneficiaryTransferRequest request) {
+        return banking.transferByBeneficiary(request);
+    }
+
     /** Reads a Module 5 transaction and its first linked journal. */
     @Operation(summary = "Get a transaction")
     @GetMapping("/{id}")

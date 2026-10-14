@@ -1,6 +1,7 @@
 import {publicHeader,publicStory,publicProducts,customerPageLabels,entryContext,workspacePath,workspaceRole,icon,accessHeader,accessStory,accessHelp} from './design.js';
 import {bankingPages,bankingScreen,configureBanking,bindBankingForms} from './banking.js';
 import {api,login,logout,refresh,getSession,saveSession} from './api.js';
+import {newPinFields,validateNewPin,showPinSetup,pinSecurityPanel,bindPinSecurity} from './payment-pin.js';
 import {esc,date,badge,field,select,reason,table,action,dialog,closeDialog,toast,errorText} from './ui.js';
 import {jetReady,enhanceForms,validateJet,disposeJet,syncConditionalField} from './jet.js';
 import {configureDomains,customersScreen,productsScreen,bindDomainForms} from './domains.js';
@@ -71,12 +72,13 @@ function showSignup(){
   const card=document.querySelector('.login-card');if(!card)return;
   card.innerHTML=`<p class="eyebrow">MONEYBAGS</p><h2>Create a customer account</h2><p>Enter your details to join the demo workspace. KYC is treated as verified for this sign-up flow. Customers under 18 need guardian-assisted onboarding.</p><form id="signup-form"><label class="field">Legal name<input name="legalName" autocomplete="name" required maxlength="300"></label><label class="field">Date of birth<input name="dateOfBirth" type="date" required></label><label class="field">Username<input name="username" autocomplete="username" required minlength="3" maxlength="120" pattern="[A-Za-z0-9._@-]+"></label><label class="field">Password<input name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="72"></label><label class="field">Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="72"></label><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Create account</button></form><button class="btn signup-link" id="back-to-login" type="button">Back to sign in</button>`;
   document.querySelector('#back-to-login').onclick=()=>signIn();
+  document.querySelector('#signup-form .form-error').insertAdjacentHTML('beforebegin',newPinFields('paymentPin','confirmPaymentPin'));
   document.querySelector('#signup-form').onsubmit=async event=>{
     event.preventDefault();if(!await validateJet(event.target))return;
     const form=event.target,values=new FormData(form),error=form.querySelector('.form-error'),button=form.querySelector('button');
     if(values.get('password')!==values.get('confirmPassword')){error.textContent='Passwords do not match.';return;}
     button.disabled=true;error.textContent='';
-    try{await api('/auth/signup',{method:'POST',body:{username:values.get('username').trim(),legalName:values.get('legalName').trim(),dateOfBirth:values.get('dateOfBirth'),password:values.get('password')}});await login(values.get('username').trim(),values.get('password'));await start();}
+    try{const paymentPin=validateNewPin(values,'paymentPin','confirmPaymentPin');await api('/auth/signup',{method:'POST',body:{username:values.get('username').trim(),legalName:values.get('legalName').trim(),dateOfBirth:values.get('dateOfBirth'),password:values.get('password'),paymentPin}});await login(values.get('username').trim(),values.get('password'));await start();}
     catch(failure){error.textContent=errorText(failure);button.disabled=false;}
   };
   enhanceForms(card).catch(error=>toast(errorText(error),true));
@@ -110,6 +112,7 @@ async function start(){
   if(!getSession()){signIn();return;}
   try{
     const user=await api('/auth/me');saveSession({...getSession(),user});
+    if(user.userType==='CUSTOMER'&&!(await api('/auth/payment-pin')).configured){showPinSetup(root,start,()=>signIn('You have signed out.'));return;}
     const entry=entryContext(location.pathname,location.search),employee=user.userType!=='CUSTOMER';
     const switched=entry.employee!==employee;
     if(switched)state.page='banking';
@@ -221,7 +224,7 @@ function financialAuditQuery(data){
 function sessionTable(sessions,admin=false,userId=''){return table(['Device / client','Last active','Expiry / status',''],sessions.map(s=>[`${esc(s.deviceRef||'Browser').slice(0,85)}<span class="sub">${esc(s.clientId)} ${s.current?'· This session':''}</span>`,esc(date(s.lastActivityAt)),`${badge(s.status)}<span class="sub">Idle: ${esc(date(s.idleExpiresAt))}</span>`,s.status==='ACTIVE'&&(admin?can('IAM_USER_MANAGE'):true)?`<button class="btn small danger" data-action="${admin?'admin-session':'own-session'}" data-id="${esc(s.sessionId)}" data-user="${esc(userId)}">Revoke</button>`:'']));}
 async function security(){
   const [sessions,factors,user]=await Promise.all([api('/auth/sessions'),api('/iam/factors'),api('/auth/me')]);if(!getSession())return '';saveSession({...getSession(),user});state.factors=factors;const enabled=factors.some(f=>f.status==='ACTIVE');
-  return head('My security','Manage your password, authenticator, and signed-in devices.')+`<div class="security-grid">`+
+  return head('My security','Manage your password, payment PIN, authenticator, and signed-in devices.')+`<div class="security-grid">`+await pinSecurityPanel()+
     panel('Your identity',`<div class="panel-body"><dl class="details">${detail('Username',user.username)}${detail('User type',user.userType)}${detail('Active roles',user.roles.join(', ')||'No assigned role')}${detail('Linked CIFs',user.cifIds.join(', ')||'No linked CIF')}</dl><p class="section-label">Current permissions</p>${tags(user.permissions)}<p class="hint">Permissions are reloaded from Oracle on every authenticated request.</p>${action('Refresh session','refresh-session')}</div>`)+
     panel('Authenticator',`<div class="panel-body"><p>${enabled?badge('ACTIVE'):'Not enabled'}</p><p class="hint">Use a TOTP authenticator app. Your six-digit code is required at sign-in after enrollment. Fresh step-up is valid for five minutes.</p>${enabled?`${action('Verify step-up','step-up')}${factors.filter(f=>f.status==='ACTIVE').map(f=>action('Remove authenticator','revoke-factor',f.factorId,'btn danger')).join('')}`:action('Set up authenticator','enroll-factor','','btn primary')}</div>`)+
     panel('Change password',`<form id="password-form" class="panel-body">${field('Current password','currentPassword','password')}${field('New password','newPassword','password',{minlength:10,maxlength:72})}<p class="hint">Changing your password ends every existing session, including this one.</p><p class="form-error" role="alert"></p><button class="btn primary" type="submit">Change password</button></form>`)+
@@ -235,6 +238,7 @@ function revokeFactor(id){dialog('Remove authenticator',`${field('Your password'
 async function manageMenus(){if(!state.permissions.length)await catalog();state.allMenus=await api('/iam/menus?all=true');dialog('Workspace menus',table(['Label','Route','Status',''],state.allMenus.map(m=>[esc(m.labelKey),esc(m.routePath),badge(m.status),action('Edit','edit-menu',m.menuId)]))+`<p class="hint">This college frontend supports /dashboard, /users, /roles, /access, /audit, and /security.</p>${action('Add menu','new-menu')}`,null);}
 function menuDialog(id){const m=state.allMenus?.find(x=>x.menuId===id);dialog(m?'Edit menu':'Add menu',`<div class="grid2">${field('Label','labelKey','text',{value:m?.labelKey,maxlength:120})}${select('Route','routePath',Object.keys(titles).map(p=>({value:'/'+p,label:titles[p]})),m?.routePath||'/dashboard')}${field('Sort order','sortOrder','number',{value:m?.sortOrder??0,min:0})}${select('Status','status',['ACTIVE','HIDDEN'],m?.status||'ACTIVE')}${select('Required permission','requiredPermissionId',permissionOptions(),m?.requiredPermissionId||'',false)}</div>`,async data=>{await api(m?`/iam/menus/${m.menuId}`:'/iam/menus',{method:m?'PUT':'POST',body:{...Object.fromEntries(data),sortOrder:Number(data.get('sortOrder')),clientId:'MONEYBAGS_WEB',parentMenuId:null,requiredPermissionId:data.get('requiredPermissionId')||null}});toast('Menu saved.');state.menus=await api('/iam/menus');shell();await render();});}
 function bindForms(){
+  bindPinSecurity(render);
   const search=document.querySelector('#user-search');if(search)search.onsubmit=async e=>{e.preventDefault();const d=new FormData(e.target);state.search=d.get('search');state.status=d.get('status');state.userPage=0;await render();};
   const audit=document.querySelector('#audit-search');if(audit)audit.onsubmit=async e=>{e.preventDefault();const form=e.target,b=form.querySelector('button'),target=document.querySelector('#audit-table');b.disabled=true;try{const events=await api('/iam/audit?search='+encodeURIComponent(new FormData(form).get('search')));if(target?.isConnected)target.innerHTML=auditTable(events);}catch(error){if(form.isConnected)toast(errorText(error),true);}finally{b.disabled=false;}};
   const financialAudit=document.querySelector('#financial-audit-search');if(financialAudit)financialAudit.onsubmit=async e=>{e.preventDefault();const form=e.target;if(!await validateJet(form)||!form.isConnected)return;const b=form.querySelector('button'),target=document.querySelector('#financial-audit-table');b.disabled=true;try{const query=financialAuditQuery(new FormData(form));const events=await api('/privacy/financial-audit?'+query);if(target?.isConnected)target.innerHTML=financialAuditTable(events);}catch(error){if(form.isConnected)toast(errorText(error),true);}finally{b.disabled=false;}};

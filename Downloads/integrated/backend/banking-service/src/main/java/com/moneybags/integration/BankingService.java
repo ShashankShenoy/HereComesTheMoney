@@ -12,7 +12,23 @@ import java.util.*;
 @Service
 public class BankingService {
  private final BusinessRepository db;private final BankingAccess access;private final LedgerService ledger;
- public BankingService(BusinessRepository db,BankingAccess access,LedgerService ledger){this.db=db;this.access=access;this.ledger=ledger;}
+ private final Set<String> internalBankCodes;
+ public BankingService(BusinessRepository db,BankingAccess access,LedgerService ledger){this(db,access,ledger,"");}
+ @org.springframework.beans.factory.annotation.Autowired public BankingService(BusinessRepository db,BankingAccess access,LedgerService ledger,@org.springframework.beans.factory.annotation.Value("${moneybags.internal-bank-codes:}") String bankCodes){this.db=db;this.access=access;this.ledger=ledger;this.internalBankCodes=Arrays.stream(bankCodes.split(",")).map(String::trim).filter(s->!s.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());}
+ public record BeneficiaryTransferRequest(@jakarta.validation.constraints.NotNull Long sourceAccountId,
+  @jakarta.validation.constraints.NotBlank String beneficiaryId,
+  @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.DecimalMin("0.01") @jakarta.validation.constraints.Digits(integer=16,fraction=2) BigDecimal amount,
+  @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=100) String requestKey,
+  @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=100) String correlationId){}
+ /** Resolve the customer's verified beneficiary on the server before using the normal ledger workflow. */
+ @Transactional public TransactionView transferByBeneficiary(BeneficiaryTransferRequest r){
+  access.account("TXN_POST",r.sourceAccountId());
+  var b=db.one("SELECT ACCOUNT_TOKEN,BANK_CODE FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=? AND OWNER_USER_ID=? AND STATUS='ACTIVE'",r.beneficiaryId(),CurrentActor.get().userId());
+  if(!internalBankCodes.contains(b.get("BANK_CODE")))
+   throw conflict("This recipient belongs to an external bank");
+  long target=((Number)db.one("SELECT ACCOUNT_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_NUMBER=?",b.get("ACCOUNT_TOKEN")).get("ACCOUNT_ID")).longValue();
+  return transfer(new TransferRequest(r.sourceAccountId(),target,r.amount(),"WEB",r.requestKey(),r.correlationId(),LocalDate.now(ZoneId.of("Asia/Kolkata"))));
+ }
  /** Looks up only account IDs; recipient financial details are never returned to the sender. */
  @Transactional public TransactionView transferByNumber(NumberTransferRequest r){
   long source=((Number)db.one("SELECT ACCOUNT_ID FROM M04_BANK_ACCOUNT WHERE ACCOUNT_NUMBER=?",r.sourceAccountNumber().trim()).get("ACCOUNT_ID")).longValue();

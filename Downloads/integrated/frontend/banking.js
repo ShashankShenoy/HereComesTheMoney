@@ -77,9 +77,9 @@ const allow=p=>!p||getSession()?.user?.permissions?.includes(p)||({TELLER_READ:'
 const checker=()=>getSession()?.user?.roles?.includes('BANK_CHECKER')&&!getSession()?.user?.roles?.includes('BANK_ADMIN');
 const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|approvals\/[^/]+\/decision|payments\/[^/]+\/authorize-simulation|treasury\/(?:work-items\/[^/]+\/decision|reserve-openings\/[^/]+\/confirm)|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/(?:tills\/[^/]+\/(?:close|replenish)|cash-deliveries\/[^/]+\/confirm)|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
 const customerWorkflows=new Set([
- 'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers/by-number',
+ 'GET /banking/transactions','GET /transactions/{id}',
  'GET /beneficiaries','POST /beneficiaries',
- 'GET /payments','GET /payments/{id}','GET /payments/{id}/history','POST /payments/initiate',
+ 'GET /payments','GET /payments/{id}','GET /payments/{id}/history',
  'GET /banking/facilities','GET /loans/applications/{id}','GET /loans/applications/{id}/offers',
  'GET /loans/facilities/{id}','GET /loans/facilities/{id}/schedule','POST /loans/offers/{id}/accept',
  'GET /reporting/statement-requests','GET /reporting/statement-requests/{id}',

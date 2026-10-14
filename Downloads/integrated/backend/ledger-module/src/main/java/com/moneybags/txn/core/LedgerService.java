@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** Owns Module 5's ledger, holds, controls, and transfer write model. */
 @Service
 public class LedgerService {
+    @org.springframework.beans.factory.annotation.Autowired private com.moneybags.integration.PaymentPinGuard paymentPins;
     private final JdbcTemplate db;
     private final ObjectMapper json;
     private final AccountCatalog accounts;
@@ -238,6 +239,7 @@ public class LedgerService {
     /** Creates and immediately posts a same-currency internal transfer with a stable request key. */
     @Transactional
     public TransactionView transfer(TransferRequest request, String actor) {
+        paymentPins.requireForCustomer();
         requireMoney(request.amount());
         if (Objects.equals(request.sourceAccountId(), request.targetAccountId()))
             throw invalid("SAME_ACCOUNT", "Source and target accounts must differ");

@@ -12,9 +12,10 @@ import java.util.*;
 @RestController @RequestMapping("/api/v1")
 public class BankingOperationsController {
  private final BusinessRepository db;private final BankingAccess access;private final CustomerHashService audit;
- public BankingOperationsController(BusinessRepository db,BankingAccess access,CustomerHashService audit){this.db=db;this.access=access;this.audit=audit;}
+ private final Set<String> internalBankCodes;
+ public BankingOperationsController(BusinessRepository db,BankingAccess access,CustomerHashService audit,@org.springframework.beans.factory.annotation.Value("${moneybags.internal-bank-codes:}") String bankCodes){this.db=db;this.access=access;this.audit=audit;this.internalBankCodes=Arrays.stream(bankCodes.split(",")).map(String::trim).filter(s->!s.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());}
  public record BeneficiaryInput(@NotBlank @Size(max=100)String displayName,@NotBlank @Pattern(regexp="[A-Za-z0-9._@-]{4,120}")String accountToken,@NotBlank @Pattern(regexp="[A-Z]{4}0[A-Z0-9]{6}")String bankCode){}
- @GetMapping("/beneficiaries") public List<Map<String,Object>> beneficiaries(){return db.rows("SELECT BENEFICIARY_ID,DISPLAY_NAME,BANK_CODE,STATUS,CREATED_AT FROM MBX_BENEFICIARY WHERE OWNER_USER_ID=? ORDER BY CREATED_AT DESC",CurrentActor.get().userId());}
+ @GetMapping("/beneficiaries") public List<Map<String,Object>> beneficiaries(){var rows=db.rows("SELECT BENEFICIARY_ID,DISPLAY_NAME,BANK_CODE,STATUS,CREATED_AT FROM MBX_BENEFICIARY WHERE OWNER_USER_ID=? ORDER BY CREATED_AT DESC",CurrentActor.get().userId());rows.forEach(b->b.put("TRANSFER_TYPE",internalBankCodes.contains(b.get("BANK_CODE"))?"INTERNAL":"EXTERNAL"));return rows;}
  @PostMapping("/beneficiaries") @Transactional public Map<String,String> beneficiary(@Valid @RequestBody BeneficiaryInput b){
   CurrentActor.require("PAYMENT_CREATE");String id=UUID.randomUUID().toString();
   db.jdbc().update("INSERT INTO MBX_BENEFICIARY(BENEFICIARY_ID,OWNER_USER_ID,DISPLAY_NAME,ACCOUNT_TOKEN,BANK_CODE) VALUES (?,?,?,?,?)",id,CurrentActor.get().userId(),b.displayName(),b.accountToken(),b.bankCode());
