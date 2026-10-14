@@ -52,7 +52,7 @@ export function transactionOtherParty(row){
  if(row.otherPartyName)return row.otherPartyName;
  const type=row.type??row.TXN_TYPE??'';
  if(['INTERNAL_TRANSFER','REVERSAL'].includes(type))return t('Name unavailable');
- const descriptions={OPENING_FUNDING:'Opening funding',DEPOSIT:'Cash deposit',WITHDRAWAL:'Cash withdrawal',FEE:'Bank fee',INTEREST:'Interest',ADJUSTMENT:'Bank adjustment',PAYMENT_DEBIT:'Payment',PAYMENT_REFUND:'Payment refund',SETTLEMENT:'Settlement',RETURN:'Payment return'};
+ const descriptions={OPENING_FUNDING:'Opening funding',DEPOSIT:'Cash deposit',WITHDRAWAL:'Cash withdrawal',FEE:'Bank fee',INTEREST:'Interest',ADJUSTMENT:'Bank adjustment',PAYMENT_DEBIT:'Payment',PAYMENT_REFUND:'Payment refund',EXTERNAL_PAYMENT_SENT:'External payment sent',EXTERNAL_PAYMENT_RECEIVED:'External payment received',SETTLEMENT:'Settlement',RETURN:'Payment return'};
  if(type.startsWith('LOAN_'))return t('Loan activity');
  if(type.startsWith('CARD_'))return t('Credit card activity');
  return t(descriptions[type]||type.replaceAll('_',' ')||'—');

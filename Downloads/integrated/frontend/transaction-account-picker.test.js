@@ -9,7 +9,7 @@ globalThis.window={require:requireJet};
 globalThis.document={documentElement:{lang:''},addEventListener:()=>{},getElementById:()=>null};
 
 const {saveSession}=await import('./api.js');
-const {bankingScreen}=await import('./banking.js');
+const {bankingScreen,transactionDisplayCells}=await import('./banking.js');
 
 function session(userId,userType='CUSTOMER'){
  saveSession({accessToken:'test-token',user:{userId,userType,roles:userType==='EMPLOYEE'?['BANK_ADMIN']:[],permissions:['TXN_READ']}});
@@ -57,4 +57,14 @@ test('customers see an empty or retry state instead of a free-text account field
  assert.match(error,/Could not load your accounts\./);
  assert.match(error,/data-txn-accounts-retry/);
  assert.doesNotMatch(error,/placeholder="Enter an account number"/);
+});
+
+test('account transaction rows preserve payment rail and progress with signed posting',()=>{
+ const cells=transactionDisplayCells({transactionId:'PAYMENT-91',type:'EXTERNAL_PAYMENT_RECEIVED',amount:'50.00',
+  currency:'INR',postedDelta:'50.00',status:'POSTED',paymentStatus:'SETTLED',accountRole:'TARGET',
+  railCode:'IMPS',paymentId:91,valueDate:'2026-10-14'});
+ assert.match(cells[1],/IMPS · Payment 91/);
+ assert.match(cells[2],/External payment received/);
+ assert.match(cells[3],/\+ INR 50\.00/);
+ assert.match(cells[4],/Interbank settlement completed; customer credited/);
 });

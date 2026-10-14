@@ -7,6 +7,8 @@ test('account amount direction follows posted account impact',()=>{
   {text:'− INR 50.00',note:'Money out'});
  assert.deepEqual(transactionAccountImpact({amount:'50.00',currency:'INR',status:'POSTED',postedDelta:'50.00'}),
   {text:'+ INR 50.00',note:'Money in'});
+ assert.deepEqual(transactionAccountImpact({amount:'50.00',currency:'INR',status:'POSTED',type:'EXTERNAL_PAYMENT_SENT',postedDelta:'-50.00'}),
+  {text:'− INR 50.00',note:'Money out'});
  assert.deepEqual(transactionAccountImpact({amount:'50.00',currency:'INR',status:'REJECTED',postedDelta:null}),
   {text:'INR 50.00',note:'No balance change'});
  assert.deepEqual(transactionAccountImpact({amount:'50.00',currency:'INR',status:'APPROVAL_PENDING',postedDelta:null}),
@@ -20,4 +22,5 @@ test('the other-party label is a name only when a transfer has one',()=>{
  assert.equal(transactionOtherParty({type:'REVERSAL',otherPartyName:null}),'Name unavailable');
  assert.equal(transactionOtherParty({type:'FEE',otherPartyName:null}),'Bank fee');
  assert.equal(transactionOtherParty({type:'WITHDRAWAL',otherPartyName:null}),'Cash withdrawal');
+ assert.equal(transactionOtherParty({type:'EXTERNAL_PAYMENT_RECEIVED',otherPartyName:null}),'External payment received');
 });
