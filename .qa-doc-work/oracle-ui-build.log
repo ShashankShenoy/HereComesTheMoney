@@ -1,0 +1,593 @@
+Oracle-only build: compiling backend tests without executing local-database regressions. Run the opt-in Oracle suite separately.
+Offline build: using cached Maven/npm dependencies. Missing dependencies require an online build.
+Building: backend compilation and packaging for Oracle acceptance
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] moneybags-services                                                 [pom]
+[INFO] shared                                                             [jar]
+[INFO] customer-module                                                    [jar]
+[INFO] product-module                                                     [jar]
+[INFO] ledger-module                                                      [jar]
+[INFO] account-module                                                     [jar]
+[INFO] treasury-module                                                    [jar]
+[INFO] cards-module                                                       [jar]
+[INFO] deposit-module                                                     [jar]
+[INFO] local-database                                                     [jar]
+[INFO] identity-service                                                   [jar]
+[INFO] banking-service                                                    [jar]
+[INFO] payments-service                                                   [jar]
+[INFO] loan-service                                                       [jar]
+[INFO] audit-service                                                      [jar]
+[INFO] reporting-service                                                  [jar]
+[INFO] acceptance-tests                                                   [jar]
+[INFO] 
+[INFO] ------------------< com.moneybags:moneybags-services >------------------
+[INFO] Building moneybags-services 1.0.0                                 [1/17]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] ------------------------< com.moneybags:shared >------------------------
+[INFO] Building shared 1.0.0                                             [2/17]
+[INFO]   from shared\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ shared ---
+[INFO] Copying 3 resources from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ shared ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ shared ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\shared\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ shared ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ shared ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ shared ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\shared\target\shared-1.0.0.jar
+[INFO] 
+[INFO] -------------------< com.moneybags:customer-module >--------------------
+[INFO] Building customer-module 1.0.0                                    [3/17]
+[INFO]   from customer-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ customer-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\customer-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\customer-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ customer-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 9 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ customer-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\customer-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ customer-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ customer-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ customer-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\customer-module\target\customer-module-1.0.0.jar
+[INFO] 
+[INFO] --------------------< com.moneybags:product-module >--------------------
+[INFO] Building product-module 1.0.0                                     [4/17]
+[INFO]   from product-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ product-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\product-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\product-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ product-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 10 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ product-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\product-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ product-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ product-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ product-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\product-module\target\product-module-1.0.0.jar
+[INFO] 
+[INFO] --------------------< com.moneybags:ledger-module >---------------------
+[INFO] Building ledger-module 1.0.0                                      [5/17]
+[INFO]   from ledger-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ ledger-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\ledger-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\ledger-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ ledger-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 8 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ ledger-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\ledger-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ ledger-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ ledger-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ ledger-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\ledger-module\target\ledger-module-1.0.0.jar
+[INFO] 
+[INFO] --------------------< com.moneybags:account-module >--------------------
+[INFO] Building account-module 1.0.0                                     [6/17]
+[INFO]   from account-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ account-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\account-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\account-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ account-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 22 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ account-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\account-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ account-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ account-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ account-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\account-module\target\account-module-1.0.0.jar
+[INFO] 
+[INFO] -------------------< com.moneybags:treasury-module >--------------------
+[INFO] Building treasury-module 1.0.0                                    [7/17]
+[INFO]   from treasury-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ treasury-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\treasury-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\treasury-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ treasury-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 11 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ treasury-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\treasury-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ treasury-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ treasury-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ treasury-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\treasury-module\target\treasury-module-1.0.0.jar
+[INFO] 
+[INFO] ---------------------< com.moneybags:cards-module >---------------------
+[INFO] Building cards-module 1.0.0                                       [8/17]
+[INFO]   from cards-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ cards-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\cards-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\cards-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ cards-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 4 source files with javac [debug parameters release 17] to target\classes
+[INFO] /C:/Users/Shubham Amrut Yadav/Downloads/HereComesTheMoney/HereComesTheMoney/Downloads/integrated/backend/cards-module/src/main/java/com/moneybags/creditcard/CreditCardService.java: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\cards-module\src\main\java\com\moneybags\creditcard\CreditCardService.java uses or overrides a deprecated API.
+[INFO] /C:/Users/Shubham Amrut Yadav/Downloads/HereComesTheMoney/HereComesTheMoney/Downloads/integrated/backend/cards-module/src/main/java/com/moneybags/creditcard/CreditCardService.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ cards-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\cards-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ cards-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ cards-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ cards-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\cards-module\target\cards-module-1.0.0.jar
+[INFO] 
+[INFO] --------------------< com.moneybags:deposit-module >--------------------
+[INFO] Building deposit-module 1.0.0                                     [9/17]
+[INFO]   from deposit-module\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ deposit-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\deposit-module\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\deposit-module\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ deposit-module ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 4 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ deposit-module ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\deposit-module\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ deposit-module ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ deposit-module ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ deposit-module ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\deposit-module\target\deposit-module-1.0.0.jar
+[INFO] 
+[INFO] --------------------< com.moneybags:local-database >--------------------
+[INFO] Building local-database 1.0.0                                    [10/17]
+[INFO]   from local-database\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ local-database ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\local-database\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\local-database\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ local-database ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ local-database ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\local-database\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ local-database ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ local-database ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ local-database ---
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ local-database ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\local-database\target\local-database-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] -------------------< com.moneybags:identity-service >-------------------
+[INFO] Building identity-service 1.0.0                                  [11/17]
+[INFO]   from identity-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ identity-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ identity-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 11 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ identity-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\identity-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ identity-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ identity-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ identity-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\identity-service\target\identity-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ identity-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\identity-service\target\identity-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] -------------------< com.moneybags:banking-service >--------------------
+[INFO] Building banking-service 1.0.0                                   [12/17]
+[INFO]   from banking-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ banking-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 4 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ banking-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 23 source files with javac [debug parameters release 17] to target\classes
+[INFO] /C:/Users/Shubham Amrut Yadav/Downloads/HereComesTheMoney/HereComesTheMoney/Downloads/integrated/backend/banking-service/src/main/java/com/moneybags/assistant/AssistantIntentService.java: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\banking-service\src\main\java\com\moneybags\assistant\AssistantIntentService.java uses unchecked or unsafe operations.
+[INFO] /C:/Users/Shubham Amrut Yadav/Downloads/HereComesTheMoney/HereComesTheMoney/Downloads/integrated/backend/banking-service/src/main/java/com/moneybags/assistant/AssistantIntentService.java: Recompile with -Xlint:unchecked for details.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ banking-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\banking-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ banking-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ banking-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ banking-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\banking-service\target\banking-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ banking-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\banking-service\target\banking-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] -------------------< com.moneybags:payments-service >-------------------
+[INFO] Building payments-service 1.0.0                                  [13/17]
+[INFO]   from payments-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ payments-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ payments-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 20 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ payments-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\payments-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ payments-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ payments-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ payments-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\payments-service\target\payments-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ payments-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\payments-service\target\payments-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] ---------------------< com.moneybags:loan-service >---------------------
+[INFO] Building loan-service 1.0.0                                      [14/17]
+[INFO]   from loan-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ loan-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ loan-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 6 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ loan-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\loan-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ loan-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ loan-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ loan-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\loan-service\target\loan-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ loan-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\loan-service\target\loan-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] --------------------< com.moneybags:audit-service >---------------------
+[INFO] Building audit-service 1.0.0                                     [15/17]
+[INFO]   from audit-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ audit-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ audit-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 35 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ audit-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\audit-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ audit-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ audit-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ audit-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\audit-service\target\audit-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ audit-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\audit-service\target\audit-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] ------------------< com.moneybags:reporting-service >-------------------
+[INFO] Building reporting-service 1.0.0                                 [16/17]
+[INFO]   from reporting-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ reporting-service ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ reporting-service ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 17 source files with javac [debug parameters release 17] to target\classes
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ reporting-service ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\reporting-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ reporting-service ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ reporting-service ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ reporting-service ---
+[INFO] Building jar: C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\reporting-service\target\reporting-service-1.0.0.jar
+[INFO] 
+[INFO] --- spring-boot:3.5.16:repackage (repackage) @ reporting-service ---
+[INFO] Attaching repackaged archive C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\reporting-service\target\reporting-service-1.0.0-exec.jar with classifier exec
+[INFO] 
+[INFO] -------------------< com.moneybags:acceptance-tests >-------------------
+[INFO] Building acceptance-tests 1.0.0                                  [17/17]
+[INFO]   from acceptance-tests\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ acceptance-tests ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\acceptance-tests\src\main\resources
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\acceptance-tests\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ acceptance-tests ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ acceptance-tests ---
+[INFO] skip non existing resourceDirectory C:\Users\Shubham Amrut Yadav\Downloads\HereComesTheMoney\HereComesTheMoney\Downloads\integrated\backend\acceptance-tests\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ acceptance-tests ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 13 source files with javac [debug parameters release 17] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ acceptance-tests ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.4.2:jar (default-jar) @ acceptance-tests ---
+[WARNING] JAR will be empty - no content was marked for inclusion!
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for moneybags-services 1.0.0:
+[INFO] 
+[INFO] moneybags-services ................................. SUCCESS [  0.002 s]
+[INFO] shared ............................................. SUCCESS [  2.994 s]
+[INFO] customer-module .................................... SUCCESS [  2.372 s]
+[INFO] product-module ..................................... SUCCESS [  1.581 s]
+[INFO] ledger-module ...................................... SUCCESS [  1.324 s]
+[INFO] account-module ..................................... SUCCESS [  1.870 s]
+[INFO] treasury-module .................................... SUCCESS [  1.201 s]
+[INFO] cards-module ....................................... SUCCESS [  0.856 s]
+[INFO] deposit-module ..................................... SUCCESS [  0.687 s]
+[INFO] local-database ..................................... SUCCESS [  0.431 s]
+[INFO] identity-service ................................... SUCCESS [  1.288 s]
+[INFO] banking-service .................................... SUCCESS [  1.624 s]
+[INFO] payments-service ................................... SUCCESS [  1.192 s]
+[INFO] loan-service ....................................... SUCCESS [  1.487 s]
+[INFO] audit-service ...................................... SUCCESS [  1.946 s]
+[INFO] reporting-service .................................. SUCCESS [  1.304 s]
+[INFO] acceptance-tests ................................... SUCCESS [  2.144 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  24.867 s
+[INFO] Finished at: 2026-10-14T11:36:29+05:30
+[INFO] ------------------------------------------------------------------------
+Building: gateway syntax
+Building: gateway and architecture tests
+✔ every reactor module exists with a matching artifact identity (5.5485ms)
+✔ runtime services depend on libraries without importing another service implementation (1.6471ms)
+✔ all production Java classes have one source location (125.3657ms)
+✔ each runtime service has its own boot entry point and executable packaging (7.681ms)
+✔ domain libraries are reusable jars without executable boot packaging (4.7908ms)
+✔ banking calls payment initiation through the wire contract (1.1275ms)
+✔ routes use complete path segments (1.2388ms)
+✔ streams methods, queries, bearer, access key and idempotency key to the owner (97.9978ms)
+✔ readiness includes every service and fails when one is down (36.2039ms)
+✔ combines OpenAPI paths and schemas and serves gateway Swagger config (18.6316ms)
+✔ unavailable and timed out upstreams return a bounded JSON error (236.1924ms)
+✔ healthy readiness and HEAD responses agree without a body (41.4858ms)
+✔ public documentation and redirect endpoints reject mutating methods (21.9175ms)
+✔ upstream status, error body and correlation header survive the proxy (22.9741ms)
+✔ escaped query strings are forwarded exactly (20.7124ms)
+✔ binary downloads preserve bytes and filename (13.0261ms)
+✔ large multipart upload passes through without altering bytes (45.0984ms)
+✔ hop-by-hop and Connection-nominated headers are stripped both ways (26.6507ms)
+✔ a truncated upstream response does not crash the gateway (239.6878ms)
+✔ client disconnect during an upload does not crash the gateway (42.7392ms)
+✔ malformed or unavailable readiness is DOWN and docs fail explicitly (27.3232ms)
+✔ IPv6 loopback upstreams route correctly (13.9159ms)
+✔ invalid upstream configuration fails before accepting requests (0.397ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1084.0706
+Building: frontend dependencies (npm ci)
+
+added 19 packages in 39s
+
+1 package is looking for funding
+  run `npm fund` for details
+Building: frontend checks
+
+> moneybags-integrated-ui@1.0.0 check
+> node --check design.js && node --check app.js && node --check assistant.js && node --check assistant-markdown.js && node --check presentation.js && node --check api.js && node --check banking.js && node --check customer-payments.js && node --check customer-fx.js && node --check credit-cards.js && node --check domains.js && node --check i18n.js && node --check server.mjs
+
+Building: frontend tests
+
+> moneybags-integrated-ui@1.0.0 test
+> node --test
+
+✔ employee entry does not consume retail product intents (1.877ms)
+✔ retail entry only accepts supported product destinations (0.4805ms)
+✔ workspace follows the authenticated account and identifies checkers (0.4824ms)
+✔ KYC evidence download keeps its server filename and authenticated session (87.3599ms)
+✔ renders account summaries with readable emphasis, lists, and transaction tables (2.2047ms)
+✔ keeps model-supplied HTML inert (0.6143ms)
+✔ the credit card module and stylesheet are served with the correct content types (228.8192ms)
+✔ customer payment screen connects only eligible accounts and verified recipients (62.6689ms)
+✔ customer payment screen blocks incomplete setup before submission (0.626ms)
+✔ currency comparison explicitly stays indicative (0.6656ms)
+✔ currency comparison hides choices when no approved rate is available (0.3605ms)
+✔ customer overview joins account, card and payment progress without exposing another account (2.1201ms)
+✔ customer product view brings governed account and card catalogs together (1.259ms)
+✔ disabled payment initiation keeps existing requests and recipients readable (0.7604ms)
+✔ demo transfers remain available with external simulation disabled and show both account directions (1.1883ms)
+✔ unavailable consent recording preserves notices and read operations (6.6371ms)
+✔ staff catalogs retain shared inquiries and approvals while excluding customer-only routes (2.5795ms)
+✔ customer privacy opens the safe current catalog without reading staff purpose history (0.3241ms)
+✔ failed initial privacy inquiry shows an error instead of an empty result (1.5966ms)
+✔ customer privacy lists readable notices without exposing a digest or staff controls (0.4944ms)
+✔ financial audit displays source, destination and amount for every audit reader (31.2675ms)
+✔ money and rate columns align without treating dates or account numbers as amounts (1.1467ms)
+✔ financial audit displays reversal references, exact authorized amounts and empty/one-sided states (2.3383ms)
+✔ financial audit preserves cents on large decimal-string amounts (1.6738ms)
+✔ financial audit distinguishes missing amounts from zero and preserves currency (2.9794ms)
+✔ financial audit endpoint failure preserves existing security audit and domain event panels (3.1808ms)
+✔ audit page loads the financial endpoint and shows its transaction (2.5478ms)
+✔ financial audit combines both dates with transaction and account filters (2.1691ms)
+✔ financial audit allows open ranges and rejects reversed dates (4.0978ms)
+✔ English, Hindi and Kannada keep API values while translating visible labels (23.0114ms)
+✔ new customer navigation, descriptions and welcome templates translate in both languages (15.9445ms)
+✔ access catalogue includes an identity beyond the first 100 directory rows (2.0478ms)
+✔ catalogue deduplicates rows if the directory changes between pages (0.938ms)
+✔ catalogue stops on an empty result and propagates authorization failures (0.7701ms)
+✔ inquiries retain filters and selected records when switching operations (1.5939ms)
+✔ queue identifiers select the resource rather than its owner (0.7371ms)
+✔ formats large monetary values without losing precision or silently rounding (15.3524ms)
+✔ keeps dates and financial fields distinct from identifiers (5.9421ms)
+✔ checker opens pending reversals with contextual approve and reject buttons (48.8073ms)
+✔ own requests stay visible with disabled decisions (1.0883ms)
+✔ pending reversal queue distinguishes empty results from load failures (0.8542ms)
+✔ each decision submits its row ID and refreshes the pending queue (2.1502ms)
+✔ failed reversal decisions remain visible and can be retried (0.8716ms)
+✔ normal banking page setup binds both reversal buttons and removes decided requests (1.7365ms)
+✔ static HEAD and POST enforce read-only assets and security headers (85.371ms)
+✔ private files and encoded vendor traversal are not exposed (21.874ms)
+✔ gateway outage yields JSON while static workspace stays usable (14.9498ms)
+✔ cancelled downloads release the upstream connection promptly (15.2798ms)
+✔ truncated gateway response fails the download without crashing the frontend (171.9791ms)
+✔ proxy forwards to IPv6 loopback (13.3132ms)
+✔ only loopback HTTP origins are accepted as gateway configuration (792.1329ms)
+✔ malformed request URL returns 400 and the frontend remains alive (145.7395ms)
+ℹ tests 52
+ℹ suites 0
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2078.586
+Building: frontend bundle
+
+> moneybags-integrated-ui@1.0.0 build
+> node tools/build.mjs
+
+Built standalone Oracle JET workspace in frontend/dist. Run node dist/server.mjs.
+Build complete and recorded for VPN launch.

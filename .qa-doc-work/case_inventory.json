@@ -1,0 +1,1684 @@
+[
+  {
+    "code": "M1-AUTH",
+    "title": "Sign in and customer registration",
+    "location": "Customer sign in and Employee sign in",
+    "source": "S1 S3 S4 S8",
+    "cases": [
+      {
+        "id": "M1-AUTH-01",
+        "title": "Valid sign in and workspace routing",
+        "pre": "Active customer C1 and employee E1 without MFA; separate browser profiles.",
+        "steps": [
+          "Open /login and sign in as C1.",
+          "Sign out; open /employee/login and sign in as E1.",
+          "Repeat each identity from the opposite entry page and refresh the resulting workspace."
+        ],
+        "expected": "Authentication succeeds once per submission. The authenticated user type determines the workspace and available navigation. A switched entry gives the routing notice. /auth/me identifies the correct user; no prior user data remains.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-02",
+        "title": "Required inputs and failed login recovery",
+        "pre": "Signed out; known active account and nonexistent username.",
+        "steps": [
+          "Submit blank username or password; then whitespace-only username.",
+          "Try the known username with an incorrect password and the unknown username.",
+          "Correct the credentials and submit again; double-click during a delayed response."
+        ],
+        "expected": "Required fields block empty UI submissions. Invalid credentials receive a safe generic rejection without revealing which account exists. No session is issued. Error is visible; controls recover; the pending button prevents duplicate UI submissions.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-03",
+        "title": "Inactive user states deny authentication",
+        "pre": "Disposable identities in PENDING_ACTIVATION, AUTH_LOCKED, SUSPENDED, DISABLED and CLOSED.",
+        "steps": [
+          "For every state, attempt login using the correct password.",
+          "For a suspended identity retain a token obtained before suspension and call /auth/me.",
+          "Activate a permitted nonterminal identity and retry login."
+        ],
+        "expected": "Every listed inactive state rejects login. The old token fails after deactivation. A permitted reactivation restores login; CLOSED remains terminal. Do not confuse administrative AUTH_LOCKED status with timed credential lockout.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-04",
+        "title": "Failed attempt threshold and timed lockout",
+        "pre": "Disposable ACTIVE identity; record configured max attempts N and lock duration L. Defaults are 5 and 15 minutes.",
+        "steps": [
+          "Fail login N minus 1 times, then once more.",
+          "During L, submit a correct password.",
+          "Advance the isolated test clock beyond expiry or wait; use the correct password.",
+          "Repeat with successful login before the threshold."
+        ],
+        "expected": "At threshold, credential lockout persists even though the request fails. Correct credentials are denied during the lock. Successful login after expiry resets the counter. A successful earlier login also clears failures. Failure audit survives rejection.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-05",
+        "title": "Authenticator challenge and replay at sign in",
+        "pre": "C1 has an ACTIVE TOTP factor; retain unused valid and already-used test codes.",
+        "steps": [
+          "Use correct password with no code, malformed code, expired code and a wrong six-digit code.",
+          "Use a valid unused code; sign out and reuse it.",
+          "Wait for the next code and sign in."
+        ],
+        "expected": "Missing code produces MFA_REQUIRED and opens/focuses the authenticator input. Invalid or stale codes fail; replay produces MFA_CODE_REUSED. A fresh valid code succeeds. Missing MFA does not increment credential failures; invalid/reused codes do.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-06",
+        "title": "Sign up availability and back navigation",
+        "pre": "Two isolated configurations with customer signup enabled and disabled; simulated availability endpoint outage.",
+        "steps": [
+          "Open customer sign in in each configuration; inspect availability text and Create a customer account.",
+          "In enabled mode open signup, enter partial data, then Back to sign in.",
+          "Test an availability failure and call signup directly while disabled."
+        ],
+        "expected": "The enabled flag alone exposes signup. Disabled mode and direct API reject registration with SIGNUP_DISABLED. Outage shows an unavailable message. Back returns to sign in without creating records. Employee sign in does not offer public signup.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-07",
+        "title": "Adult demo signup creates linked identity atomically",
+        "pre": "Signup enabled; unique username and legal name; age at least 18.",
+        "steps": [
+          "Fill all signup fields with matching passwords and submit.",
+          "Inspect the signed-in identity, linked CIF, customer role and own banking entry.",
+          "Check registration records and audit through authorized inspection."
+        ],
+        "expected": "One ACTIVE CUSTOMER, verified demo CIF, SELF link and scoped customer assignment are created together. The browser signs in and routes to personal banking. Audit identifies DEMO_CUSTOMER_SIGNUP and DEMO_KYC_ASSUMED. This is the explicit demo bypass, not evidence of full KYC execution.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-08",
+        "title": "Signup age and field boundaries",
+        "pre": "Signup enabled; independent username for each accepted variant; boundary matrix in appendix.",
+        "steps": [
+          "Try exactly 18 today, one day below 18, future birth date and leap-day birthday variants.",
+          "Try mismatched passwords, duplicate username with changed case, invalid username characters, blank name and limits minus one, at limit and over limit.",
+          "Correct a failed form and resubmit."
+        ],
+        "expected": "Exact adulthood is accepted by date arithmetic; underage applicants receive GUARDIAN_REQUIRED. Required/format/length failures are rejected; duplicate usernames cannot create another identity. Password mismatch is caught in the UI. Rejection leaves no partial CIF, link, role assignment or credential.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUTH-09",
+        "title": "Signup permissions and partial failure rollback",
+        "pre": "Isolated seeded database with controllable signup role and setup dependencies.",
+        "steps": [
+          "Add a staff-only permission to RETAIL_CUSTOMER and register a disposable customer.",
+          "Repeat with a contaminated dedicated signup role, inactive role, missing required permission or missing bootstrap administrator role.",
+          "Inspect all related tables after each failed attempt."
+        ],
+        "expected": "A safe dedicated customer role is used when possible. Unsafe or missing setup fails with SETUP_REQUIRED; public signup never inherits staff privileges. A failed operation rolls back all identity, CIF, link and assignment records.",
+        "priority": "P0",
+        "mode": "API and database"
+      }
+    ]
+  },
+  {
+    "code": "M1-OVR",
+    "title": "Identity and access overview",
+    "location": "Administration > Overview",
+    "source": "S1 S5",
+    "cases": [
+      {
+        "id": "M1-OVR-01",
+        "title": "Overview counters and shortcuts",
+        "pre": "IAM_USER_READ; known users, active roles, submitted requests and live/expired sessions.",
+        "steps": [
+          "Open Overview and compare all four cards with API counts.",
+          "Open each Administrative areas shortcut.",
+          "Open a recent access request and View all; return with navigation."
+        ],
+        "expected": "Total identities, active identities, active roles, pending requests and active sessions match their definitions. Expired sessions are excluded from the live count. Recent requests show at most five; View all opens Access requests; each shortcut opens its named page.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-OVR-02",
+        "title": "One time independent checker setup",
+        "pre": "Fresh isolated fixture with no effective global checker and no approved access request; authorized administrator.",
+        "steps": [
+          "Use Set up checker and create an EMPLOYEE with unique username, employee reference and valid password.",
+          "Sign in separately as the checker; inspect role and available decisions.",
+          "Refresh Overview; repeat setup through UI/API and issue two simultaneous setup attempts in a fresh fixture."
+        ],
+        "expected": "Exactly one ACTIVE checker receives the reserved global checker role. Setup disappears and later attempts receive SETUP_COMPLETE. Nonemployee or incomplete input fails. Concurrent setup cannot bootstrap two checkers. Later access changes use independent approval.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-OVR-03",
+        "title": "Overview load failure and least privilege",
+        "pre": "User without IAM_USER_READ; controlled dashboard or catalog outage.",
+        "steps": [
+          "Attempt direct Overview route and /iam/dashboard without read permission.",
+          "With read permission fail one data request, observe Retry, restore service and retry.",
+          "Navigate away before a delayed result completes."
+        ],
+        "expected": "Unauthorized API access is denied. Failure shows a recoverable error instead of misleading zero counts. Retry restores correct data. An old render cannot replace the newer page.",
+        "priority": "P1",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-USR",
+    "title": "Users and user detail",
+    "location": "Administration > Users > View user",
+    "source": "S1 S5 S8",
+    "cases": [
+      {
+        "id": "M1-USR-01",
+        "title": "User directory search filters and pagination",
+        "pre": "More than 15 users spanning all six directory statuses.",
+        "steps": [
+          "Search by full/partial username, case variants, no match and blank reset.",
+          "Apply each status and combined search/status; navigate Next and Previous.",
+          "Change a filter from a later page; request invalid API page/size values."
+        ],
+        "expected": "Results reflect both filters and show correct total/page. UI page size is 15; first Previous and last Next are disabled. Filtering resets to page one. Empty result is explicit. API rejects negative page or size outside 1 through 100.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-02",
+        "title": "Create employee and service identities",
+        "pre": "IAM_USER_CREATE; signup flag recorded; unique usernames.",
+        "steps": [
+          "Create EMPLOYEE with employee reference and valid password.",
+          "Switch user type to SERVICE and inspect the reference field before saving.",
+          "Open both users; attempt sign in before activation and inspect audit."
+        ],
+        "expected": "Employee reference is required only for EMPLOYEE; switching to SERVICE clears and disables it. Both normal identities start PENDING_ACTIVATION with no implicit grant. Login fails until activated; persisted responses contain no password/hash.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-03",
+        "title": "Create customer in standard and demo modes",
+        "pre": "IAM_USER_CREATE; one fixture with signup disabled and one enabled.",
+        "steps": [
+          "With signup disabled create CUSTOMER and capture the one-time holder key securely.",
+          "With signup enabled choose CUSTOMER, enter legal name and birth date and save.",
+          "Switch CUSTOMER to EMPLOYEE and back before submission to check conditional fields."
+        ],
+        "expected": "Standard creation gives a pending identity and one-time key without inventing a verified CIF. Demo creation gives an ACTIVE linked customer with assumed verified KYC. Legal-name/DOB fields apply only to the demo customer path; hidden values are cleared and not submitted.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-04",
+        "title": "User creation validation and duplicates",
+        "pre": "Create user dialog; disposable data from boundary matrix.",
+        "steps": [
+          "Submit missing employee reference, a reference on nonemployee via API, invalid username characters and 2/3/120/121-character usernames.",
+          "Test passwords at 9/10 characters and 72/73 UTF-8 bytes, including multibyte text.",
+          "Create a duplicate username with case changes; send simultaneous duplicate requests."
+        ],
+        "expected": "All contract violations are rejected without creating user/credential remnants. Password policy uses UTF-8 bytes at the upper bound. Case-insensitive uniqueness holds under concurrency. Errors preserve editable dialog values.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-05",
+        "title": "User detail record and controls",
+        "pre": "Read-only IAM identity plus administrator; a user with assignments, dimensions, links and sessions.",
+        "steps": [
+          "Open View user and compare identity fields, entitlement version, role scopes/validity, customer links and sessions with API data.",
+          "Open as read-only user; inspect all action buttons.",
+          "Close by X and reopen a different user."
+        ],
+        "expected": "Every panel belongs to the selected identity; no stale child record persists. Read access alone exposes no mutation controls. Manage, access-request and session controls appear only with their corresponding permissions; direct unauthorized calls fail.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-06",
+        "title": "Identity lifecycle permitted transitions",
+        "pre": "Fresh disposable identity for each row in the identity transition matrix.",
+        "steps": [
+          "Use Change status for every permitted transition; enter a reason and save.",
+          "After each transition reload the user, test login and inspect prior sessions.",
+          "Exercise invalid transitions and same-state requests directly."
+        ],
+        "expected": "Only matrix transitions succeed, with row version and audit update. Leaving ACTIVE ends sessions and refresh tokens. Reactivation clears failed attempts. CLOSED cannot reactivate; unsupported transitions fail without changing records.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-07",
+        "title": "Identity status self protection and stale edit",
+        "pre": "Two administrators viewing the same user; own admin profile.",
+        "steps": [
+          "Try suspending, disabling, locking and closing your own administrator identity.",
+          "Open two status dialogs for another user; save one then submit the stale version.",
+          "Reload and submit a currently permitted transition."
+        ],
+        "expected": "Self-lockout changes fail. The stale request returns VERSION_CONFLICT and preserves the newer state. Reloading supplies the new version; a valid transition succeeds. No stale change silently overwrites current status.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-08",
+        "title": "Administrative password reset",
+        "pre": "IAM_USER_MANAGE; target active in two browser sessions and another target SUSPENDED.",
+        "steps": [
+          "Open Reset password; test missing reason and invalid new password, then save a valid reset.",
+          "Try old password, new password and both old session/refresh tokens.",
+          "Reset suspended user and repeat; reset your own password last."
+        ],
+        "expected": "Valid reset ends every target session and rotates stored credentials. Old password/tokens fail. Reset does not activate SUSPENDED or DISABLED identities. Self reset returns the current browser to sign in. No password appears in administrative responses or audit.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-09",
+        "title": "Lost MFA reset and administrative session revoke",
+        "pre": "Target with ACTIVE and PENDING factors plus multiple sessions; another administrator.",
+        "steps": [
+          "Use Reset lost MFA with reason; inspect factors and login/session behavior.",
+          "Attempt self reset and unauthorized reset by API.",
+          "Recreate two sessions and revoke one from View user; try a session ID belonging to another target."
+        ],
+        "expected": "Reset revokes all nonrevoked factors and ends all target sessions; new enrollment is possible after sign in. Self reset fails. Session revoke ends only the addressed target session; a mismatched user/session pair is rejected.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-10",
+        "title": "Link existing active CIF to customer identity",
+        "pre": "IAM_USER_MANAGE; unlinked CUSTOMER and ACTIVE verified CIF A.",
+        "steps": [
+          "Use Link existing CIF, enter A and relationship SELF; save.",
+          "Refresh My security as the customer and check linked CIFs.",
+          "Attempt a duplicate active link, an employee/service target, missing CIF and nonactive CIF."
+        ],
+        "expected": "Valid link persists and increments entitlement version. Only CUSTOMER identities can link to an existing ACTIVE CIF. Duplicate/invalid links fail. A digital link alone does not grant account operating authority; SELF permission still needs an effective assignment.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-USR-11",
+        "title": "Revoke link and immediate scope reevaluation",
+        "pre": "Customer linked to two CIFs with SELF access; account fixture for each.",
+        "steps": [
+          "Cancel Revoke link once, then confirm for CIF A.",
+          "Without signing out, call /auth/me, own CIF reads and account reads for A and B.",
+          "Repeat revocation and try another user link ID."
+        ],
+        "expected": "Cancel changes nothing. Confirm preserves history as REVOKED and removes A from effective links on subsequent requests. B remains available where authorized. Link revocation does not close CIF or accounts. Repeated/mismatched revocation cannot affect another link.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-ROLE",
+    "title": "Roles permissions and approval authority",
+    "location": "Administration > Roles & permissions",
+    "source": "S1 S5 S6",
+    "cases": [
+      {
+        "id": "M1-ROLE-01",
+        "title": "Role and permission catalogues",
+        "pre": "IAM_USER_READ; roles with standard/sensitive flags and permissions with/without step-up.",
+        "steps": [
+          "Open both catalogues; compare code, display name, sensitivity, status, resource/action and step-up indicators.",
+          "View a role and inspect permissions and authority rows.",
+          "Repeat without IAM_ROLE_MANAGE."
+        ],
+        "expected": "Role contents and authority currency/amount/rate/validity are accurate. Read-only users can inspect but cannot create/edit/end authority. Empty catalogues and authorities show explicit empty states.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-02",
+        "title": "Create and edit a custom role",
+        "pre": "IAM_ROLE_MANAGE; existing test permissions and a target assigned a custom role.",
+        "steps": [
+          "Create a standard role with selected permissions; create a sensitive variant.",
+          "Edit display name, sensitivity and permission selections.",
+          "Check target authorization on its next request without re-login; then retire the role."
+        ],
+        "expected": "Saved role exactly matches selections. Updates bump affected users entitlements and change live authorization. Retiring removes effective permissions from subsequent requests; historical assignments remain visible. Role code is immutable in edit UI.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-03",
+        "title": "Role validation protection and concurrent edit",
+        "pre": "Two admin sessions and custom role; protected BANK_ADMIN/BANK_CHECKER.",
+        "steps": [
+          "Try invalid/duplicate role code, blank/oversized display name, unknown/duplicate permission IDs and more than 100 IDs.",
+          "Attempt creating reserved codes and editing/retiring reserved roles through API.",
+          "Save two edits using the same rowVersion."
+        ],
+        "expected": "Invalid role definitions fail atomically. Reserved bank administration roles cannot be created, edited or retired through these paths. Only one concurrent versioned edit succeeds; the stale request returns VERSION_CONFLICT.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-04",
+        "title": "Create permission and enforce fresh MFA",
+        "pre": "IAM_ROLE_MANAGE; test code QA_APPROVE and role target without fresh MFA.",
+        "steps": [
+          "Create QA_APPROVE with resource/action and Require fresh MFA set to Yes.",
+          "Add to a test role and approve a target assignment.",
+          "Check target authorization before and after step-up.",
+          "Inspect administrator entitlements."
+        ],
+        "expected": "Permission appears once with MFA REQUIRED. Custom targets need role assignment plus fresh MFA. Creating a permission also adds it to BANK_ADMIN and bumps relevant entitlements, as implemented; test this explicit administrator behavior.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-05",
+        "title": "Permission contract and reserved namespaces",
+        "pre": "Permission creation available.",
+        "steps": [
+          "Try codes with lowercase, invalid symbols, too-short/long values and duplicate code.",
+          "Submit IAM_ and SYSTEM_ prefixes, blank resource/action and over-limit values.",
+          "Set step-up false for a separate valid code."
+        ],
+        "expected": "Validation/uniqueness rejects bad inputs; reserved namespaces remain protected. A valid non-step-up permission shows Not required. Failed creation does not partially grant the permission to any role.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-06",
+        "title": "Add authority and numeric boundaries",
+        "pre": "Custom role; authority QA_APPROVE; current validity window.",
+        "steps": [
+          "Add INR maximum amount 100000.0000 and maximum rate 12.50000000.",
+          "Evaluate amount/rate just below, equal to and above each bound.",
+          "Repeat with amount-only, rate-only and wildcard currency authorities."
+        ],
+        "expected": "Limits are inclusive. All supplied amount/rate checks must fit one authority row on the same scoped assignment. Missing matching currency denies unless wildcard applies. Amount-only cannot satisfy a requested rate lacking a limit and vice versa.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ROLE-07",
+        "title": "Authority validation validity and end action",
+        "pre": "Role with current, future and expired authorities; other role with separate authority.",
+        "steps": [
+          "Submit both limits blank, negative values, excessive precision, invalid currency and end at/before start.",
+          "Check authorization before start, at start, before end and at end.",
+          "Cancel then confirm End for current and future authority; try a mismatched role/authority ID."
+        ],
+        "expected": "Invalid definitions fail. Validity is start-inclusive and end-exclusive. Ending current authority expires it; ending future authority removes that future row in the implementation. Permission remains but limit-based decisions cease. Another role authority cannot be ended accidentally.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-ACC",
+    "title": "Access requests and independent approval",
+    "location": "Administration > Access requests and Users > Request access",
+    "source": "S1 S5 S6",
+    "cases": [
+      {
+        "id": "M1-ACC-01",
+        "title": "Submit scoped access grant",
+        "pre": "Maker E1 with IAM_ACCESS_MANAGE; ACTIVE target E3 and ACTIVE custom role.",
+        "steps": [
+          "Open Request access from the queue, then from the target user.",
+          "Choose BRANCH B1, valid dates and reason; add SAVINGS,CURRENT and INR,USD dimensions.",
+          "Submit and open Review details before approval."
+        ],
+        "expected": "Exactly one SUBMITTED request records target, maker, role, scope, dimensions, validity and reason. User-origin launch preselects the target. Submitted access is not effective before approval. Dimensions are trimmed and uppercased by the UI.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-02",
+        "title": "Scope fields and contract validation",
+        "pre": "Maker and active targets of CUSTOMER/EMPLOYEE types.",
+        "steps": [
+          "Switch GLOBAL, BRANCH, REGION and SELF; inspect scope-reference required/disabled state.",
+          "Try blank branch/region ref, ref on GLOBAL/SELF, SELF for EMPLOYEE, invalid dates, expired validity, blank reason and duplicate dimensions.",
+          "Try retired role and CLOSED target through API."
+        ],
+        "expected": "Reference is mandatory only for branch/region and cleared for global/self. SELF is reserved for customers. Invalid inputs fail without creating a request. UI lists ACTIVE users/roles; API approval also requires ACTIVE target and role.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-03",
+        "title": "Approve grant and propagate effective access",
+        "pre": "SUBMITTED request; independent checker E2, distinct from maker and target.",
+        "steps": [
+          "Review all request fields as E2 and select Approve request.",
+          "Refresh the queue, user assignments, Overview counters and target /auth/me.",
+          "Test an allowed and out-of-scope action with an existing target session."
+        ],
+        "expected": "Request becomes APPROVED with checker and decision time. One assignment carries exact scope, dimensions and validity. Entitlement version changes; subsequent requests use current permissions. In-scope access works only once validFrom is reached; out-of-scope access remains denied.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-04",
+        "title": "Reject request without changing entitlements",
+        "pre": "Separate SUBMITTED grant and revocation requests; independent checker.",
+        "steps": [
+          "Open each request and select Reject request.",
+          "Inspect request status/history, target assignments and effective authorization.",
+          "Reopen the decided request and attempt another decision through API."
+        ],
+        "expected": "Both become REJECTED with maker/checker evidence. Rejected grant adds no access; rejected revocation leaves existing access effective. Decision controls disappear and a second decision fails.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-05",
+        "title": "Maker target and missing permission cannot decide",
+        "pre": "SUBMITTED request; maker, target, unauthorized observer and valid checker.",
+        "steps": [
+          "Open the request under each identity and inspect approval/rejection controls.",
+          "Send APPROVED and REJECTED directly as maker and target.",
+          "Send a decision without IAM_ACCESS_APPROVE; finish as the valid checker."
+        ],
+        "expected": "Maker and target cannot approve or reject their own change even if they hold approval permission. Backend returns MAKER_CHECKER_SEPARATION or SELF_APPROVAL as appropriate. Missing permission is denied. Only the independent authorized checker succeeds.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-06",
+        "title": "Request revocation of exact assignment",
+        "pre": "Active assignment with branch, dates and dimensions; maker and independent checker.",
+        "steps": [
+          "From View user choose Request revoke; review captured assignment and add reason.",
+          "Verify access while request is pending, then approve.",
+          "Submit tampered variants for assignment ID, user, role, scope, dates and dimensions."
+        ],
+        "expected": "Pending revocation leaves access effective. Approval revokes only the exact active assignment and bumps entitlement version. Every mismatched revocation is rejected. Historical assignment/request data remains; no unrelated role is removed.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-07",
+        "title": "Expiry and state changes during review",
+        "pre": "Submitted requests ending soon, targeting a user to suspend, and a role to retire.",
+        "steps": [
+          "Decide an expired request at validTo and just after.",
+          "Suspend target or retire role between submission and attempted approval.",
+          "Restore a permitted state and reload before deciding a still-valid request."
+        ],
+        "expected": "Expired request persists as EXPIRED with REQUEST_EXPIRED and no grant. Inactive user/role prevents approval. Review uses current state, not values cached when submitted. Failed approval creates no assignment.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-08",
+        "title": "Overlapping grants and concurrent decisions",
+        "pre": "Two overlapping requests for same target, role and primary scope; independent reviewers.",
+        "steps": [
+          "Approve first grant, then overlapping second; test adjacent nonoverlapping validity windows separately.",
+          "Send simultaneous approve/approve and approve/reject for one request with identical rowVersion.",
+          "Retry stale decision."
+        ],
+        "expected": "Overlapping active assignments are rejected with OVERLAPPING_ACCESS even if dimensions differ. Adjacent windows can pass. At most one decision/assignment commits per request; stale or already-decided versions fail without duplicate entitlements.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-ACC-09",
+        "title": "Queue completeness and large user catalogue",
+        "pre": "More than 200 requests and more than 100 users, including a target outside the first catalogue fetch.",
+        "steps": [
+          "Verify latest-200 ordering, labels, status, scope and View details.",
+          "Attempt Request access to the target outside the first 100 users, both from queue and its Users detail.",
+          "Record whether the target can be selected correctly."
+        ],
+        "expected": "Queue cap is explicit and detail IDs remain correct. Catalog loading must not cause grants to the wrong target. If a valid target cannot be selected because only 100 users are loaded, record a UI coverage defect; do not count the inaccessible flow as passed.",
+        "priority": "P2",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-SEC",
+    "title": "My security and authorization checks",
+    "location": "Administration or Explore & manage > My security",
+    "source": "S1 S3 S4 S5 S6",
+    "cases": [
+      {
+        "id": "M1-SEC-01",
+        "title": "Identity refresh and refresh token rotation",
+        "pre": "Active identity with a live session; entitlement change performed by another admin.",
+        "steps": [
+          "Inspect username, user type, roles, linked CIFs and permission tags.",
+          "Click Refresh session after the change.",
+          "Reuse the old refresh token via a controlled API client; try the current access and newest refresh token afterwards."
+        ],
+        "expected": "Refresh reloads identity/menu data and rotates the refresh token. Reusing the old token returns REFRESH_REUSE and revokes that session. Session-ended handling returns to sign in and clears local identity/key state.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-02",
+        "title": "Change own password",
+        "pre": "Two sessions for a disposable identity.",
+        "steps": [
+          "Submit wrong current password, unchanged new password and invalid length/byte variants.",
+          "Submit correct current and valid different new password.",
+          "Test both old sessions and refresh tokens, old password and new password."
+        ],
+        "expected": "Invalid attempts leave password unchanged and show field/form errors. Valid change terminates all sessions including current and requires sign in. Old credentials/tokens fail; new password works. No plaintext is logged or exposed.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-03",
+        "title": "Enroll and confirm authenticator",
+        "pre": "Identity with no ACTIVE factor; test authenticator controlled by tester.",
+        "steps": [
+          "Select Set up authenticator; import the displayed secret/URI securely.",
+          "Attempt malformed/wrong code then confirm an unused current six-digit code.",
+          "Reload factors and reenter setup; test another user factor ID by API."
+        ],
+        "expected": "Factor starts PENDING and becomes ACTIVE only on valid confirmation. Confirmation upgrades this session to fresh MFA and ends other sessions/refresh tokens. Secret/URI appear only in enrollment response, never factor listing. Existing active factor blocks second enrollment. Factor ownership is enforced. Subsequent sign in requires MFA.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-04",
+        "title": "Abandoned enrollment and one time code use",
+        "pre": "Identity with no active MFA; two browser sessions.",
+        "steps": [
+          "Start enrollment then cancel. Start again and inspect pending factors.",
+          "Confirm one factor; try re-confirming and replaying its used code for login/step-up.",
+          "Obtain a fresh code and complete the permitted action."
+        ],
+        "expected": "Cancel does not enable MFA. Reenrollment handles pending factors without enabling multiple authenticators. Confirming nonpending factors fails. Used codes cannot authenticate again; a fresh valid code succeeds. Capture status/audit evidence without retaining the secret.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-05",
+        "title": "Fresh MFA step up and exact expiry",
+        "pre": "ACTIVE factor; permission requiring fresh MFA; controlled clock or timed run.",
+        "steps": [
+          "Attempt protected authorization without freshness, then Verify step-up using an unused code.",
+          "Recheck at ages 299, 300 and 301 seconds.",
+          "Test step-up with no active factor, invalid code and another session."
+        ],
+        "expected": "Fresh step-up enables protected checks in the current session. The implementation accepts age 0 through 300 seconds inclusive and denies at 301. No factor returns MFA_NOT_ENABLED; invalid/reused code fails. Freshness does not transfer to unrelated sessions.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-06",
+        "title": "Remove authenticator safely",
+        "pre": "ACTIVE TOTP factor and current password.",
+        "steps": [
+          "Open Remove authenticator; cancel once.",
+          "Try wrong password, blank/wrong/reused code, then correct password plus fresh code.",
+          "Inspect factors and perform a new sign in; try another user factor ID."
+        ],
+        "expected": "Cancel and failed validation keep factor active. Successful removal revokes it and downgrades session MFA level; future sign in uses password unless another active factor exists. Unauthorized factor removal fails. A revoked factor cannot continue generating valid authentication.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-07",
+        "title": "View and revoke own sessions",
+        "pre": "Same user signed in through two independent sessions plus another user session.",
+        "steps": [
+          "Compare device/client, current marker, activity, idle expiry and status.",
+          "Cancel then revoke other own session; exercise its token.",
+          "Revoke current session; test foreign session ID directly."
+        ],
+        "expected": "Other own session becomes unusable while current remains. Current-session revoke signs out immediately. Foreign session revocation is forbidden. Session list and markers refresh accurately; ended sessions offer no live Revoke action.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-08",
+        "title": "Idle and absolute session expiry",
+        "pre": "Record configured idle/absolute limits; defaults 30 minutes and 8 hours; isolated test clock.",
+        "steps": [
+          "Call an authenticated endpoint just before and at idle expiry without intervening activity.",
+          "In a separate session keep activity before idle timeout until absolute expiry.",
+          "Try refresh at expired boundaries and browser refresh on an expired session."
+        ],
+        "expected": "Idle and absolute expiry are enforced at the boundary; activity cannot extend absolute lifetime. Expired sessions/refresh tokens fail, server status becomes EXPIRED and UI signs out without exposing a stale protected page.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-09",
+        "title": "Authorization scope and dimensions matrix",
+        "pre": "Roles covering GLOBAL, B1 BRANCH, R1 REGION and linked-CIF SELF; dimensioned test assignment.",
+        "steps": [
+          "Use Check my authorization with matching, missing and mismatched branch/region/CIF contexts.",
+          "Try SAVINGS or CURRENT with INR or USD, then mismatched product/currency.",
+          "Try unknown permission and unlinked customer CIF."
+        ],
+        "expected": "Only a currently effective assignment covering permission and all context dimensions allows. Same-dimension values are alternatives; different dimensions all must match. Missing required context denies. Result explains allowed/denied and performs no financial transaction.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-SEC-10",
+        "title": "Authorization cannot combine unrelated grants",
+        "pre": "One role has permission in B1; a different role has a large authority or wider scope.",
+        "steps": [
+          "Check permission with amount/rate but no authority code.",
+          "Supply authority from the unrelated role; combine an out-of-scope permission with an in-scope authority.",
+          "Repeat with all requirements on one valid assignment."
+        ],
+        "expected": "Amount/rate needs an authority code. Permission, primary scope, dimensions and limit must all match the same assignment and an eligible authority row. Unrelated grants cannot be combined to elevate access. The complete matching assignment succeeds.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-MENU",
+    "title": "Workspace navigation management",
+    "location": "My security > Workspace navigation > Manage menus",
+    "source": "S1 S5",
+    "cases": [
+      {
+        "id": "M1-MENU-01",
+        "title": "Add and edit workspace menu metadata",
+        "pre": "IAM_ROLE_MANAGE; spare supported route and test permission.",
+        "steps": [
+          "Open Manage menus; add label, supported route, sort order and required permission.",
+          "Edit the label and permission; toggle ACTIVE/HIDDEN.",
+          "Inspect all-menu API and visible menus as authorized and unauthorized users."
+        ],
+        "expected": "Metadata saves and API visibility follows status/permission. Backend authorization still protects hidden or directly requested routes. Compare rendered order/label with saved metadata; frontend uses fixed title/order overrides, so record unmet configurable-label/order expectations as defects rather than assuming they work.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-MENU-02",
+        "title": "Menu validation and hierarchy API",
+        "pre": "Menu management permission; two menus and separate client fixture.",
+        "steps": [
+          "Try invalid route, blank/oversized label, negative and over-99999 sort order and unknown permission.",
+          "Via API attempt cross-client parent, self-parent and an ancestor cycle.",
+          "Repeat save without management permission."
+        ],
+        "expected": "Invalid metadata and cycles are rejected without breaking navigation. Parent must belong to same client. Unauthorized mutation fails. Supported route selection never turns a menu label into executable markup.",
+        "priority": "P1",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M1-AUD",
+    "title": "IAM audit trail",
+    "location": "Administration > Audit trail",
+    "source": "S1 S5 S9",
+    "cases": [
+      {
+        "id": "M1-AUD-01",
+        "title": "Security event search and traceability",
+        "pre": "IAM_AUDIT_READ; known login, password, status, access and authorization events.",
+        "steps": [
+          "Open Security events; search partial event type and exact resource ID, then clear and try no match.",
+          "Compare actor, resource, result, correlation reference and timestamp against the originating actions.",
+          "Try over-120-character search via API."
+        ],
+        "expected": "Latest 200 security events are ordered correctly and searchable. Successful and denied records are distinguished. Correlation links to the originating operation. Long search is rejected. Passwords, MFA secrets and bearer/refresh tokens are absent.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUD-02",
+        "title": "Stored domain events and delivery labels",
+        "pre": "IAM_AUDIT_READ; stored and published outbox fixtures.",
+        "steps": [
+          "Inspect Stored domain events for event, resource and recorded time.",
+          "Compare PUBLISHED and STORED labels with publishedAt.",
+          "Generate a role or access mutation and reload."
+        ],
+        "expected": "Latest 100 rows match persisted outbox state; a committed mutation has corresponding audit/outbox evidence. STORED is not represented as broker delivery. Outbox display does not expose sensitive payload fields.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUD-03",
+        "title": "Financial audit filters and failure isolation",
+        "pre": "Financial audit authority; known transactions on both ends of a date interval; reversible service failure.",
+        "steps": [
+          "Search by transaction ID, account ID, each date and combined filters.",
+          "Try zero/negative IDs and reversed dates; inspect sent query.",
+          "Fail financial-audit service while IAM audit remains available; restore and use Search / refresh."
+        ],
+        "expected": "Valid filters select correct records with inclusive business dates. Invalid input gives a clear error. Financial panel failure does not blank security/outbox panels. Retry restores records. Scope and authorization remain enforced; this panel is an M09 integration surface.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-AUD-04",
+        "title": "Audit privilege and immutable evidence",
+        "pre": "Read-only nonauditor; authorized audit inspector; isolated database for mutation probes.",
+        "steps": [
+          "Attempt audit/outbox endpoints without permission.",
+          "As auditor inspect evidence after a granted and denied operation.",
+          "In a disposable database use a restricted inspection account to test prohibited audit update/delete according to installed controls."
+        ],
+        "expected": "Unauthorized reads fail. Existing evidence cannot be edited through UI/API. Installed immutability controls reject prohibited mutations; record deployment-specific failures separately. A denied business action is not represented as a successful mutation.",
+        "priority": "P0",
+        "mode": "UI API and database"
+      }
+    ]
+  },
+  {
+    "code": "M1-KEY",
+    "title": "Account holder access key",
+    "location": "Account-holder access key page",
+    "source": "S1 S8 S10",
+    "cases": [
+      {
+        "id": "M1-KEY-01",
+        "title": "Generate and rotate own holder key",
+        "pre": "Signed-in CUSTOMER C1 and a scoped officer using C1 old key.",
+        "steps": [
+          "Generate a new account-holder key and securely capture once.",
+          "Reload page and inspect account-key listing/read responses.",
+          "Verify protected access with old versus new key; try rotation as employee."
+        ],
+        "expected": "New key is shown once and cannot be retrieved later. Previous key stops working immediately. Rotation is CUSTOMER-only and applies to the current customer. Own authorized customer reads do not require a key.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-KEY-02",
+        "title": "Use clear and discard key in staff tab",
+        "pre": "Scoped employee; valid key, wrong key and second browser tab.",
+        "steps": [
+          "Save a key using Use key for this tab; load protected account details.",
+          "Clear key and reload details, then save again and sign out.",
+          "Open another independent tab and reload the original page."
+        ],
+        "expected": "Saving only stores the key in memory and does not itself validate access. Clear/sign-out remove it; page reload also clears the in-memory key. It is not persisted in sessionStorage/localStorage and does not appear in the second tab. Protected access is reevaluated.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M1-KEY-03",
+        "title": "Key cannot replace authorization or ownership",
+        "pre": "Scoped staff outside account scope, normal staff in scope, and active global BANK_ADMIN.",
+        "steps": [
+          "Try valid key with missing permission/outside scope, wrong holder key in scope, and valid holder key in scope.",
+          "Test documented global BANK_ADMIN transaction-review exemption.",
+          "Revoke admin assignment while its session remains active and repeat."
+        ],
+        "expected": "Key alone grants no permission or account scope. Only the authorized combination succeeds. Global BANK_ADMIN exemption applies to supported transaction review and remains audited; it must not be assumed for every protected service. Revoked privilege stops working on subsequent requests.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-DIR",
+    "title": "Customer directory and record navigation",
+    "location": "Customers & KYC > Customer directory",
+    "source": "S2 S7",
+    "cases": [
+      {
+        "id": "M2-DIR-01",
+        "title": "Search customer name and CIF",
+        "pre": "CIF_READ scoped to B1; names with case, spaces, Unicode and history; a B2 customer.",
+        "steps": [
+          "Search full/partial current name, historical name and CIF number; use case variants, surrounding spaces, blank reset and no match.",
+          "Open a result and compare CIF, branch, segment, status and effective KYC.",
+          "Search B2 customer explicitly."
+        ],
+        "expected": "Search matches permitted name history/CIF case-insensitively; results remain scope filtered. Directory shows effective KYC expiry, not just stored VERIFIED. No match is explicit. Out-of-scope customer data does not leak.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DIR-02",
+        "title": "All four customer tabs and return behavior",
+        "pre": "Customer A with data in all panels and customer B with mostly empty panels.",
+        "steps": [
+          "Open A; select Profile, KYC and evidence, Relationships and consent, then Audit.",
+          "Open evidence, switch tabs and return.",
+          "Back to directory; open B and inspect selection; then sign out and sign in as another user."
+        ],
+        "expected": "Only the selected tab panel is visible and aria-selected follows selection. All expected panels/actions remain reachable. New customer starts on Profile and clears prior case selection. User switch resets customer/case/tab selections; no data from A leaks into B.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DIR-03",
+        "title": "Directory permissions empty states and cap",
+        "pre": "Read-only CIF user, maker, reviewer, no-CIF user; more than 200 in-scope customers.",
+        "steps": [
+          "Compare Create customer and Expire due reviews visibility by permission.",
+          "Load an empty directory and a populated directory exceeding 200 matches.",
+          "Test status API filter and missing/out-of-scope IDs directly."
+        ],
+        "expected": "Create requires CIF_CREATE; expiry requires KYC_REVIEW. APIs enforce permissions regardless of buttons. List is capped at 200; narrower search can locate a permitted customer. Current UI has name/CIF search, not a status filter or pagination; document any usability gap without inventing those controls.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DIR-04",
+        "title": "Create individual customer and initial case",
+        "pre": "Maker E1 with CIF_CREATE, CIF_READ, CIF_UPDATE and KYC_UPLOAD in B1; fresh unique test data.",
+        "steps": [
+          "Create INDIVIDUAL using legal name, date of birth, B1 and optional segment.",
+          "Save and inspect Profile, Names & history and KYC cases.",
+          "Reload and correlate party, CIF, legal name, onboarding case and audit."
+        ],
+        "expected": "One party, unique CIF number, pending legal name and DRAFT ONBOARDING case are created atomically. Initial normal flow is PROSPECT with unverified KYC. Maker is E1. Record opens successfully and retains dates/branch/segment; no login identity is implied.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DIR-05",
+        "title": "Create organization and switch party type",
+        "pre": "Maker with create/read access; incorporation date not in future.",
+        "steps": [
+          "Select ORGANIZATION; confirm Birth date hides/disables and Incorporation date becomes required.",
+          "Switch back and forth after entering both dates, then create organization.",
+          "Try both dates, neither date, future date and mismatched date type through API."
+        ],
+        "expected": "Only the applicable date is submitted; organization stores incorporation date and no DOB. API rejects INVALID_PARTY_DATES and future INVALID_DATES. Type switching cannot send stale hidden dates. Failed creation leaves no partial records.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DIR-06",
+        "title": "Customer creation boundaries and branch scope",
+        "pre": "Field boundary matrix; B1 maker and B2 branch outside scope.",
+        "steps": [
+          "Try blank/oversized legal name, branch and segment; Unicode name; today and future dates.",
+          "Enter branch with leading/trailing spaces in UI.",
+          "Create in B2 and repeat without CIF_CREATE; cancel a completed dialog."
+        ],
+        "expected": "Contract limits and required fields are enforced. UI trims branch. Authorized valid Unicode data survives roundtrip. Out-of-scope creation fails; cancel has no side effects. Do not assume legal-name uniqueness: distinct customers may share a name.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-PRO",
+    "title": "Profile tab and proposed customer information",
+    "location": "Customer record > Profile",
+    "source": "S2 S7 S11",
+    "cases": [
+      {
+        "id": "M2-PRO-01",
+        "title": "Profile details names and masked history",
+        "pre": "Customer with current/historical names, contacts, identifiers and addresses.",
+        "steps": [
+          "Inspect Customer profile and expand Additional record fields.",
+          "Compare Names & history type, verification, valid-from and valid-to.",
+          "Inspect contacts/identifiers in DOM and API payload, then addresses and evidence reference."
+        ],
+        "expected": "History and current records are distinguishable; dates/status/branch/segment are accurate. Contact and identifier values remain masked. Ciphertext, lookup HMAC and storage paths are absent from safe projections. Masking is verified on network responses, not only displayed cells.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-02",
+        "title": "Propose legal name and segment revision",
+        "pre": "E1 owns editable case on a previously verified customer; record current segment and name.",
+        "steps": [
+          "Use Propose profile change with new legal name, new segment and reason.",
+          "Inspect pending history, CIF rowVersion and case proposed segment.",
+          "Propose again; then follow independent approval and compare current/history records."
+        ],
+        "expected": "Pending revision is associated with the maker case. Effective CIF segment stays unchanged until approval; latest proposal is shown when reopening dialog. Approval promotes latest pending facts and retains dated history. Multiple proposals do not silently erase the previously verified history.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-03",
+        "title": "Profile revision rejection blank segment and concurrency",
+        "pre": "Editable periodic/remediation case; two E1 sessions with same CIF version.",
+        "steps": [
+          "Propose a blank segment to clear it on approval; inspect pending indicator.",
+          "In separate fixtures reject or request more information after proposing a new segment.",
+          "Save competing profile revisions using one rowVersion."
+        ],
+        "expected": "A deliberately blank proposed segment is distinguishable from no proposed change. Approval applies it; rejection leaves original segment and rejects pending facts; request-info allows rework. A stale profile version cannot overwrite a newer proposal.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-04",
+        "title": "Profile editing state and maker restrictions",
+        "pre": "Fixtures with no open case, another maker case, SUBMITTED, UNDER_REVIEW and CLOSED.",
+        "steps": [
+          "Inspect Propose profile change, Add contact, Add identifier and Add address for each state.",
+          "Attempt every mutation through API despite hidden controls.",
+          "Return a submitted case to MORE_INFO_REQUIRED and retry as its maker."
+        ],
+        "expected": "Edits require CIF_UPDATE, nonclosed CIF and own DRAFT/DOCUMENTS_PENDING/MORE_INFO_REQUIRED case. Other makers get CASE_MAKER_ONLY; no editable case gets EDIT_CASE_REQUIRED. Closed history is immutable. Request-info reopens editing only for the original maker.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-05",
+        "title": "Add and replace email and mobile contacts",
+        "pre": "Maker owns editable case; synthetic email and mobile.",
+        "steps": [
+          "Add EMAIL qa.customer@example.test and MOBILE +919876543210.",
+          "Inspect masked hints and pending verification; submit and approve through the checker.",
+          "In a later case add a replacement of the same contact type and approve."
+        ],
+        "expected": "Values are encrypted at rest and masked on read; pending contacts become verified only through KYC approval. Replacement history remains with validity intervals and current record is correct. No workflow claims a live SMS/email verification service.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-06",
+        "title": "Contact syntax and value boundaries",
+        "pre": "Editable own case; field matrix.",
+        "steps": [
+          "Try email missing @, domain dot, embedded spaces and a valid plus-address.",
+          "Try mobile letters, forbidden symbols and values at implementation regex length boundaries.",
+          "Submit blank/type tampering and over-240-character value; inspect rejected persistence."
+        ],
+        "expected": "Supported types are MOBILE/EMAIL. Invalid syntax yields INVALID_CONTACT; length/required rules also apply. The implemented mobile regex permits optional plus and 7 to 20 digits/spaces/hyphens; record any business-quality gap rather than asserting a country-specific phone validator.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-07",
+        "title": "Add identifier with expiry and masking",
+        "pre": "Editable case; unique synthetic TAX_ID value; optional issuer.",
+        "steps": [
+          "Add identifier with future expiry, then another supported free-text type without expiry.",
+          "Inspect uppercase type, masked hint, issuer and expiry.",
+          "Test expiry yesterday, today and tomorrow; complete approval for the valid case."
+        ],
+        "expected": "Type is normalized to uppercase; stored value is encrypted with keyed lookup for duplicate detection. Expiry must be after today when supplied; today/past returns IDENTIFIER_EXPIRED. Valid identifier becomes verified through approval, not a live government lookup.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-08",
+        "title": "Duplicate identifier detection without customer leakage",
+        "pre": "Two editable customers with separate makers; known existing synthetic identifier.",
+        "steps": [
+          "Add the same type/value to the same customer and another customer; include case/spacing variants matching normalization.",
+          "Submit concurrent identical identifiers from two sessions.",
+          "Inspect response, audit and table rows."
+        ],
+        "expected": "Duplicate normalized type/value is rejected with DUPLICATE_IDENTIFIER without revealing the other customer. Concurrency must not persist duplicates. Verify database uniqueness/locking under target deployment; any race is a defect, not a successful duplicate-review flow.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-09",
+        "title": "Add each address type and optional fields",
+        "pre": "Editable case; ADDRESS evidence uploaded to this case.",
+        "steps": [
+          "Create RESIDENTIAL, MAILING and REGISTERED address variants using line1, city, country IN and optional line2, region/postal code.",
+          "Link valid address document ID; repeat without optional evidence.",
+          "Review display and API, then approve KYC."
+        ],
+        "expected": "Each supported type saves as proposed data with correct fields/evidence reference. Optional fields remain optional. Approval retains address history and marks accepted facts verified. Address table shows the documented summary while API retains full allowed details.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-PRO-10",
+        "title": "Address evidence ownership and input validation",
+        "pre": "Two customers, an old approved case, current editable case and IDENTITY/ADDRESS documents.",
+        "steps": [
+          "Try document from another CIF, old/noneditable case, different maker and wrong document type.",
+          "Try unknown ID, invalid/lowercase country, blank required fields and all length boundaries.",
+          "Retry with current same-maker ADDRESS evidence."
+        ],
+        "expected": "Only ADDRESS evidence from this customer editable maker case may be linked. Invalid evidence returns INVALID_EVIDENCE without saving address. Country must be two uppercase letters; DTO limits apply. Valid evidence succeeds.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-KYC",
+    "title": "KYC cases and independent decisions",
+    "location": "Customer record > KYC and evidence",
+    "source": "S2 S7 S11",
+    "cases": [
+      {
+        "id": "M2-KYC-01",
+        "title": "Open and select cases with correct defaults",
+        "pre": "Customers with no cases, approved VERIFIED/EXPIRED KYC and rejected KYC; no nonterminal case.",
+        "steps": [
+          "Use Open new case and inspect default type.",
+          "Create ONBOARDING, PERIODIC and REMEDIATION in separate eligible fixtures.",
+          "Select Open evidence on current and historic cases; switch customers."
+        ],
+        "expected": "Default is ONBOARDING with no case, PERIODIC after verified/expired KYC, otherwise REMEDIATION. Selected case evidence matches case ID and customer. Opening replacement case makes verified KYC PENDING and ACTIVE customer RESTRICTED immediately.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-02",
+        "title": "Only one open case per CIF",
+        "pre": "CIF with DRAFT, DOCUMENTS_PENDING, MORE_INFO_REQUIRED, SUBMITTED or UNDER_REVIEW case; CLOSED fixture.",
+        "steps": [
+          "For each nonterminal state inspect Open new case and attempt API creation.",
+          "Race two new-case requests on a CIF with no open case.",
+          "Try creation for CLOSED CIF and after a terminal case."
+        ],
+        "expected": "Existing open case blocks creation with CASE_EXISTS and hides action. Customer-row locking permits at most one concurrent open case. Closed CIF returns CUSTOMER_CLOSED. A nonclosed CIF can start a new case after APPROVED/REJECTED/EXPIRED.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-03",
+        "title": "Submission completeness identifies missing items",
+        "pre": "Own DRAFT case; isolate one missing item in each variant.",
+        "steps": [
+          "Submit with missing current name, contact, address or identifier.",
+          "Repeat with missing IDENTITY or ADDRESS document and with only OTHER document.",
+          "Add all required records and documents, leaving evidence review PENDING, then submit."
+        ],
+        "expected": "Incomplete variants return KYC_INCOMPLETE naming missing elements and remain editable. Submission needs current nonrejected profile facts plus both document types. Pending scans may be submitted for independent review; scanning is an approval gate, not a prerequisite to submission.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-04",
+        "title": "Submit freezes evidence and proposed data",
+        "pre": "Complete own DRAFT case and separate authorized nonmaker.",
+        "steps": [
+          "Open Submit case; cancel then submit with reason and current version.",
+          "Inspect case/customer statuses and every Profile/Evidence action.",
+          "Attempt upload/profile mutation, duplicate submit and nonmaker submit through API."
+        ],
+        "expected": "Case becomes SUBMITTED with timestamp/version; PROSPECT becomes PENDING_VERIFICATION and KYC becomes PENDING. Editing/upload freeze. Repeated/stale/nonmaker submission fails with state/version/maker guard and does not duplicate events.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-05",
+        "title": "Assign independent eligible officer",
+        "pre": "SUBMITTED case; E2 ACTIVE EMPLOYEE with effective KYC_REVIEW in B1.",
+        "steps": [
+          "Assign E2 using its user ID.",
+          "Inspect UNDER_REVIEW, assigned officer and version.",
+          "As E2 review evidence; as another reviewer inspect actions and call decision API."
+        ],
+        "expected": "Assignment routes review without approving. Only the assigned independent officer can attest/decide once assigned. Current branch/global permission is checked again at decision time. Queue/case shows correct officer and audit.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-06",
+        "title": "Officer assignment invalid and stale variants",
+        "pre": "Submitted case and users who are maker, inactive, customer, wrong branch, region-only, expired or dimension-restricted reviewers.",
+        "steps": [
+          "Attempt assignment to every listed ineligible officer and an unknown ID.",
+          "Try assigning an unsubmitted case or using stale case rowVersion.",
+          "Assign a valid officer, revoke its review grant, then attempt a decision."
+        ],
+        "expected": "Maker separation, employee/active status and effective review scope are enforced. Current assignment eligibility requires global or matching branch scope without product/currency dimensions. Stale/state-invalid requests fail; permission loss prevents later decisions.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-07",
+        "title": "Approve complete onboarding case",
+        "pre": "Submitted/under-review case with complete facts; latest document of every type CLEAN and VERIFIED; E2 independent reviewer.",
+        "steps": [
+          "Open Decide KYC; select APPROVE, LOW risk, future periodic review due, reason code and comments.",
+          "Save and inspect case, customer, profile history, audit and eligibility facts.",
+          "Reload from another session."
+        ],
+        "expected": "Case is APPROVED and retains independent review. Normal PROSPECT/PENDING_VERIFICATION onboarding customer becomes ACTIVE, KYC VERIFIED, risk/due are stored and proposed facts promoted. Approved segment becomes effective. Durable reads agree across tabs and sessions.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-08",
+        "title": "Approval risk and future review date validation",
+        "pre": "Reviewable complete case with clean verified latest documents.",
+        "steps": [
+          "Try APPROVE without risk, without due date, due at current instant and in past.",
+          "Try each LOW/MEDIUM/HIGH risk with a future date in separate fixtures.",
+          "Use blank/oversized reason code/comments and invalid outcome via API."
+        ],
+        "expected": "Approval requires valid risk and strictly future due date; missing/nonfuture values yield REVIEW_DUE_REQUIRED. UI rejects absent approval date before sending. Reason/comments and enum constraints are enforced. Rejected submission does not create a review or change case/customer.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-09",
+        "title": "Latest evidence and identifier expiry gate approval",
+        "pre": "Reviewable case with identity v1 CLEAN/VERIFIED; v2 PENDING; OTHER evidence and identifier near expiry.",
+        "steps": [
+          "Attempt approval with unreviewed v2 despite approved v1.",
+          "Review v2 but leave latest OTHER evidence unreviewed/rejected.",
+          "Test expired current identifier and then a newer valid replacement.",
+          "Complete all latest reviews and retry."
+        ],
+        "expected": "Approval checks the latest version of every uploaded document type, including OTHER, for CLEAN/VERIFIED. Old verified versions cannot satisfy the gate. Current expired identifiers without newer valid replacement block approval. Only complete safe evidence succeeds.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-10",
+        "title": "Request more information and resubmit",
+        "pre": "Submitted case with E2 independent reviewer and original maker E1.",
+        "steps": [
+          "Choose REQUEST_INFO with reason/comments.",
+          "As E1 open review history, correct profile and upload new evidence version.",
+          "Resubmit using refreshed rowVersion; as reviewer review latest documents and approve."
+        ],
+        "expected": "Case becomes MORE_INFO_REQUIRED, decision time remains unset for that interim outcome and feedback is preserved. Original maker can edit; other staff cannot. Resubmission freezes changes again; all review rounds and document versions remain traceable.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-11",
+        "title": "Reject KYC and begin remediation",
+        "pre": "Reviewable case containing proposed name/segment/contact changes.",
+        "steps": [
+          "Choose REJECT with reason/comments, omitting approval-only due/risk.",
+          "Inspect case/customer, pending facts, existing verified history and effective segment.",
+          "Attempt reopening the terminal case by upload/submit; then open a new remediation case."
+        ],
+        "expected": "Case becomes REJECTED; customer KYC REJECTED and an ACTIVE customer is restricted. Pending revisions are rejected; previously verified history and original segment are preserved. Terminal case cannot be edited; a nonclosed customer may start a fresh case.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-KYC-12",
+        "title": "Maker separation and conflicting review decisions",
+        "pre": "Complete reviewable case; maker, assigned reviewer and another reviewer; synchronized API clients.",
+        "steps": [
+          "Try all three outcomes as maker, even with KYC_REVIEW.",
+          "Send simultaneous approve/reject using one case version as authorized reviewer.",
+          "Retry old request and inspect reviews, case state and events."
+        ],
+        "expected": "Maker can never decide its own case. Exactly one current-version decision commits; stale/state-conflicting decisions fail. Review history and resulting facts agree with the committed outcome; there is no second promotion or conflicting terminal state.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-DOC",
+    "title": "KYC evidence upload review and download",
+    "location": "KYC and evidence > Open evidence",
+    "source": "S2 S7 S11",
+    "cases": [
+      {
+        "id": "M2-DOC-01",
+        "title": "Upload supported formats and document versions",
+        "pre": "Own editable case with KYC_UPLOAD; synthetic PDF, PNG and JPEG fixtures.",
+        "steps": [
+          "Upload IDENTITY PDF, ADDRESS PNG and OTHER JPEG.",
+          "Upload replacement IDENTITY and inspect type/version, bytes, MIME, scan and verification.",
+          "Download later after authorized review and compare checksum with original."
+        ],
+        "expected": "Upload recognizes actual file signature; starts with PENDING scan/verification and assigns increasing version per case/type. All versions remain visible. Encrypted storage is used; safe metadata contains no file path. Authorized download bytes match fixture.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DOC-02",
+        "title": "File size and content type boundaries",
+        "pre": "Synthetic valid signature fixtures at 0, 1, 5242879, 5242880 and 5242881 bytes; invalid-signature text renamed .pdf.",
+        "steps": [
+          "Upload every size variant, ensuring nonempty large fixtures contain valid signatures.",
+          "Try renamed text, spoofed submitted MIME, unsupported format and truncated signatures.",
+          "Try missing file and tampered documentType."
+        ],
+        "expected": "Empty and over-5-MiB uploads fail; exactly 5242880 bytes is allowed if format-valid and transport limit permits. Signature, not filename or submitted Content-Type, determines PDF/PNG/JPEG. Invalid signatures/types fail with safe errors and no metadata/file remnants.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DOC-03",
+        "title": "Upload ownership frozen states and concurrent versions",
+        "pre": "Own editable case, another maker case, submitted/terminal cases; simultaneous uploads.",
+        "steps": [
+          "Upload as nonmaker, without KYC_UPLOAD and after submission/closure.",
+          "Concurrently upload same document type to an editable own case.",
+          "Inject isolated storage/database failure during upload and inspect persisted metadata/storage."
+        ],
+        "expected": "Unauthorized/frozen uploads fail. Allowed concurrent uploads receive distinct sequential versions under case lock. Rollback cleans newly written files; failed storage writes do not leave successful metadata. Existing evidence remains readable.",
+        "priority": "P0",
+        "mode": "UI API and isolated fault injection"
+      },
+      {
+        "id": "M2-DOC-04",
+        "title": "Independent evidence attestation combinations",
+        "pre": "Submitted case; assigned independent reviewer; separate document per combination.",
+        "steps": [
+          "Review CLEAN plus VERIFIED, CLEAN plus REJECTED, QUARANTINED plus REJECTED and FAILED plus REJECTED with reasons.",
+          "Try QUARANTINED/FAILED plus VERIFIED, missing reason and invalid enums.",
+          "Refresh evidence table."
+        ],
+        "expected": "Allowed combinations persist with KycDocumentReviewed evidence. Nonclean documents cannot be VERIFIED and return UNSAFE_DOCUMENT. Invalid attempts do not alter prior status. These are explicit checker attestations, not proof that an automated antivirus engine ran.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DOC-05",
+        "title": "Evidence review separation and assignment",
+        "pre": "Document uploaded by maker; another eligible reviewer; assigned-officer fixture.",
+        "steps": [
+          "Review as maker/uploader, without KYC_REVIEW, wrong assigned officer and before submission.",
+          "Try after case APPROVED/REJECTED and with a document from another branch.",
+          "Review valid document as assigned independent officer."
+        ],
+        "expected": "Every unauthorized/state-invalid attempt fails. Both maker and uploader must differ from reviewer. Assigned-officer and scope restrictions apply even when an API request bypasses UI. Valid review changes only the selected evidence.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DOC-06",
+        "title": "Pending clean and unsafe evidence downloads",
+        "pre": "PENDING, CLEAN, QUARANTINED and FAILED documents; maker, read-only user and assigned reviewer.",
+        "steps": [
+          "Download each status through visible controls and direct endpoint.",
+          "For PENDING try before submission, as maker and as wrong officer; then as assigned independent reviewer while reviewable.",
+          "Repeat CLEAN download with CIF_READ and proper scope."
+        ],
+        "expected": "CLEAN downloads require authorized CIF read. PENDING is limited to the independent permitted reviewer while submitted/under review. QUARANTINED/FAILED content is blocked. UI button visibility matches backend policy and never substitutes for it.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-DOC-07",
+        "title": "Download integrity unavailable storage and audit",
+        "pre": "Clean evidence; disposable copy of evidence storage; authorized reviewer.",
+        "steps": [
+          "Download and verify Content-Disposition filename, actual MIME, Cache-Control no-store and bytes.",
+          "In isolated fixture remove file, corrupt encrypted bytes or alter stored digest/reference; retry.",
+          "Expire session before download and inspect audit for successful downloads."
+        ],
+        "expected": "Valid download is a real attachment and emits KycDocumentDownloaded. Missing file or integrity/path failure returns safe error without corrupted content or internal paths. Invalid session signs out through shared handling. Restore the isolated fixture after fault probes.",
+        "priority": "P0",
+        "mode": "UI API and isolated fault injection"
+      }
+    ]
+  },
+  {
+    "code": "M2-LIFE",
+    "title": "Customer status periodic review and closure",
+    "location": "Profile > Change status and directory > Expire due reviews",
+    "source": "S2 S7 S12",
+    "cases": [
+      {
+        "id": "M2-LIFE-01",
+        "title": "Status changes and effective KYC activation gate",
+        "pre": "Verified customer, unverified customer and stored VERIFIED customer whose due date/identifier has expired.",
+        "steps": [
+          "Inspect Change status choices in each fixture.",
+          "Move verified customer to RESTRICTED, DORMANT and ACTIVE with reasons.",
+          "Try ACTIVE for unverified/effectively expired customer through API and test stale rowVersion."
+        ],
+        "expected": "ACTIVE is offered/accepted only with effective VERIFIED KYC. Stored VERIFIED alone is insufficient after expiry. Status changes use current rowVersion and preserve history; KYC_REQUIRED blocks invalid activation. Closed profile offers no changes.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-LIFE-02",
+        "title": "Periodic expiry before and after sweep",
+        "pre": "Verified customers due just before/at/after controlled now; current/expired identifiers; scoped reviewer B1.",
+        "steps": [
+          "Before sweep inspect directory, detail and eligibility-facts around due boundaries.",
+          "Run Expire due reviews; compare returned count and affected customers/cases.",
+          "Repeat sweep, then inspect B2 and CLOSED fixtures."
+        ],
+        "expected": "Effective KYC is EXPIRED immediately when due/identifier expires, even before sweep. Sweep materializes KYC EXPIRED, restricts ACTIVE customers and emits KycExpired within scope. Due approved cases expire as applicable. Repeat returns no extra changes; B2/closed records remain untouched.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-LIFE-03",
+        "title": "Reverify restricted or dormant customer",
+        "pre": "RESTRICTED or DORMANT customer with expired/rejected KYC; new editable case.",
+        "steps": [
+          "Complete a new case, independently attest documents and approve with future due date.",
+          "Inspect banner/status and attempt eligible account/product action.",
+          "Use separate permitted Change status to ACTIVE and retry."
+        ],
+        "expected": "Approval makes KYC VERIFIED but preserves RESTRICTED or DORMANT state. Restricted verified profile shows the staff-review notice. Explicit status review is needed before activation; approval does not silently remove an existing customer restriction.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-LIFE-04",
+        "title": "Closure blocked by every financial dependency",
+        "pre": "Disposable separate customers with open primary/joint accounts, active term deposit, pending card application, live card, open primary/party loan application and live loan facility.",
+        "steps": [
+          "Attempt CLOSED with reason on each fixture.",
+          "Inspect response and all related identity, CIF, case, relationship and consent data.",
+          "Resolve the dependency through its normal workflow and repeat where safe."
+        ],
+        "expected": "Closure fails with OPEN_ACCOUNTS, OPEN_TERM_DEPOSITS, OPEN_CREDIT_CARDS or OPEN_LOANS as appropriate. Primary and related-party exposure are covered. A failed closure does not revoke links/sessions or alter consents/cases. Retest after all obligations reach allowed terminal states.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-LIFE-05",
+        "title": "Successful closure cascades and terminal history",
+        "pre": "No financial obligations; open KYC case, pending facts, granted consent, incoming/outgoing relationships and a linked customer login.",
+        "steps": [
+          "Choose CLOSED with current version and reason; save.",
+          "Inspect every customer tab, linked IAM identity, sessions and refresh tokens.",
+          "Attempt profile/case/consent/relationship creation and reactivation afterward."
+        ],
+        "expected": "CIF becomes CLOSED; open cases EXPIRED; pending facts rejected; active consents withdrawn; active incoming/outgoing relationships ended. IAM links and sessions/refresh tokens are revoked. Closure is terminal and historical rows remain readable only to authorized staff.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-LIFE-06",
+        "title": "Closure handles one or multiple linked CIFs",
+        "pre": "Two login fixtures: one linked only to closing CIF A; another linked to A plus another ACTIVE CIF B.",
+        "steps": [
+          "Close A after clearing obligations for each fixture.",
+          "Inspect login status and existing sessions.",
+          "Attempt fresh sign in and read A/B as appropriate."
+        ],
+        "expected": "All affected customer sessions end. Login with no remaining active CIF becomes DISABLED; login with another active CIF may remain ACTIVE and can sign in again for B. Closed A is absent from effective SELF links. No credential or unrelated CIF is deleted.",
+        "priority": "P0",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-REL",
+    "title": "Relationships and consent tab",
+    "location": "Customer record > Relationships and consent",
+    "source": "S2 S7",
+    "cases": [
+      {
+        "id": "M2-REL-01",
+        "title": "Capture consent with evidence",
+        "pre": "Nonclosed CIF and CIF_UPDATE in scope; new purpose QA_CONTACT.",
+        "steps": [
+          "Select Capture consent; enter purpose, channel and evidence reference.",
+          "Save, reload and compare all three values and GRANTED status.",
+          "Try blank/oversized fields and duplicate active purpose."
+        ],
+        "expected": "Consent evidence persists with capture time and audit. Only one active consent for that CIF/purpose is accepted; duplicate returns CONSENT_ALREADY_ACTIVE. Invalid inputs and closed/out-of-scope CIF create no consent. This capture does not claim a universal cross-domain consent enforcement engine.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-REL-02",
+        "title": "Withdraw and recapture consent",
+        "pre": "GRANTED consent and authorized maker.",
+        "steps": [
+          "Open Withdraw and cancel; reopen and confirm.",
+          "Inspect status/history and repeat withdrawal via API; use another CIF consent ID.",
+          "Capture a fresh grant for the same purpose with new evidence."
+        ],
+        "expected": "Cancel leaves GRANTED. Confirm marks WITHDRAWN with time and keeps original evidence; action disappears. Repeated or mismatched withdrawal returns CONSENT_NOT_ACTIVE. New grant is a separate record, not an overwrite.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-REL-03",
+        "title": "Create party relationship for every authority",
+        "pre": "Distinct nonclosed CIF A and B; source CIF_UPDATE and target CIF_READ.",
+        "steps": [
+          "Create distinct test relationship types with NONE, VIEW, TRANSACT and REPRESENT.",
+          "Test no expiry and future expiry.",
+          "Inspect source and target views, target party ID, authority and validity; reload."
+        ],
+        "expected": "Directed relationship persists with correct source/target and dates; related records appear accurately. These attributes alone create neither a digital customer link nor an account mandate. Target customer visibility is required in addition to source edit permission.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-REL-04",
+        "title": "Relationship negative validation and duplicates",
+        "pre": "A/B customers and one CLOSED/out-of-scope customer.",
+        "steps": [
+          "Try self target, nonexistent/closed target, closed source, no target read permission and past/equal-now expiry.",
+          "Try unsupported authority, blank/oversized type/ID and duplicate active source-target-type.",
+          "Repeat duplicate concurrently."
+        ],
+        "expected": "SELF_RELATIONSHIP, CUSTOMER_CLOSED, INVALID_DATES, RELATIONSHIP_EXISTS or authorization/validation failure protects each invalid case. No duplicate active relationship should survive concurrency; capture any database race as defect. Another customer record is not exposed in errors.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-REL-05",
+        "title": "End outgoing relationship and enforce direction",
+        "pre": "Active future-ended/open-ended outgoing relation and incoming relation.",
+        "steps": [
+          "Cancel then confirm End on the outgoing relation; end a just-created relation.",
+          "Inspect validTo and history; repeat API end.",
+          "Attempt ending the incoming relation from the target CIF; inspect controls after natural expiry."
+        ],
+        "expected": "Only active outgoing relations offer End. End stores a positive validity interval, even immediately after creation; history remains. Repeated/incoming/expired end attempts fail with RELATIONSHIP_NOT_ACTIVE. Source and target selection cannot be swapped accidentally.",
+        "priority": "P1",
+        "mode": "UI and API"
+      }
+    ]
+  },
+  {
+    "code": "M2-AUD",
+    "title": "Customer audit tab and eligibility facts",
+    "location": "Customer record > Audit",
+    "source": "S2 S7",
+    "cases": [
+      {
+        "id": "M2-AUD-01",
+        "title": "Customer audit complete flow trace",
+        "pre": "A customer with creation, profile, evidence, submission, assignment, information request, approval, consent and relationship actions.",
+        "steps": [
+          "Open Audit and compare event/result/actor/time with known operations.",
+          "Switch customers and back; perform another valid action and reload.",
+          "Inspect safe audit/outbox projections through authorized tooling."
+        ],
+        "expected": "Customer timeline is scoped to its CIF and records committed domain events with correct actor/time. No customer names, raw contacts/identifiers or document content is placed in event payloads. UI order and reload are consistent; prior-customer events never persist.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "M2-AUD-02",
+        "title": "Audit and facts cannot bypass customer scope",
+        "pre": "B1 staff, B2 customer, SELF-linked C1 and unlinked C2.",
+        "steps": [
+          "Call each customer audit and eligibility-facts endpoint as permitted and forbidden identities.",
+          "Inspect allowed facts: status, effective KYC, branch, segment, risk, party type, dates and verified country.",
+          "Repeat after link/grant revocation and KYC expiry."
+        ],
+        "expected": "CIF_READ and exact resource scope protect both endpoints. Facts contain only intended integration fields and current effective KYC; no plaintext identity evidence. Authorization updates apply immediately and CustomerFactsRead is audited.",
+        "priority": "P0",
+        "mode": "API and UI"
+      }
+    ]
+  },
+  {
+    "code": "X-FLOW",
+    "title": "End to end flows across modules",
+    "location": "IAM and Customers & KYC plus integration checkpoints",
+    "source": "S1 S2 S5 S6 S7 S8 S12",
+    "cases": [
+      {
+        "id": "X-FLOW-01",
+        "title": "Staff provisioning through first KYC approval",
+        "pre": "Admin A, checker B and fresh employee E1; no customer data yet.",
+        "steps": [
+          "Create and activate E1; create maker role; request B1 grant as A and approve as B.",
+          "Sign in E1; create individual, add contact/identifier, upload identity/address evidence and propose address.",
+          "Submit; assign independent E2, attest and approve.",
+          "Verify ACTIVE/VERIFIED CIF and both module audits."
+        ],
+        "expected": "Every handoff succeeds using only assigned permissions. Maker cannot self-approve at either level. Result is one governed staff assignment and one fully verified customer with complete history; demo assumed-KYC path is not used.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-FLOW-02",
+        "title": "Verified CIF to digital customer self access",
+        "pre": "ACTIVE verified CIF from full KYC flow; standard customer identity, no existing link or grant.",
+        "steps": [
+          "Create/activate digital customer, link verified CIF and independently approve SELF read role.",
+          "Sign in customer; inspect My security and own CIF/API access; attempt other customer CIF.",
+          "Check authorized downstream account eligibility without assuming link grants operation rights."
+        ],
+        "expected": "Customer sees only linked authorized data. IAM identity, M02 customer and account mandates remain distinct. Unlinked data is denied. Failed KYC/inactive CIF or missing role prevents the corresponding protected action.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-FLOW-03",
+        "title": "Privilege revocation during open KYC work",
+        "pre": "Maker/reviewer with case dialog open and valid sessions; independent administrator/checker.",
+        "steps": [
+          "Request and approve revocation of the maker edit grant while its dialog remains open; submit the old form.",
+          "Repeat for reviewer KYC_REVIEW while decision dialog is open.",
+          "Restore via a new governed grant and retry after reload."
+        ],
+        "expected": "Next API request reevaluates current authority and denies stale privileges. No partial profile, document review or KYC decision commits. Freshly restored authority works according to scope; stale UI visibility never authorizes an action.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-FLOW-04",
+        "title": "Periodic revision blocks premature downstream use",
+        "pre": "ACTIVE/VERIFIED CIF with existing segment and an eligible product fixture.",
+        "steps": [
+          "Open periodic case, propose a segment that would qualify for another offer, and query eligibility facts/discovery.",
+          "Request more information then approve corrected evidence.",
+          "Inspect still-restricted status; activate separately and recheck."
+        ],
+        "expected": "Opening case sets KYC PENDING and restricts active CIF. Unapproved segment cannot qualify downstream account/loan offers. Approval applies segment but preserves restriction; eligibility reflects final approved facts plus customer status. No account or loan is opened as a side effect.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-FLOW-05",
+        "title": "Closure and in flight authorization stay atomic",
+        "pre": "CIF ready for closure, linked customer in a live session, no financial obligations; isolated concurrent clients.",
+        "steps": [
+          "Start a protected read and close CIF from staff session.",
+          "After closure commits attempt CIF/account access, refresh and sign in.",
+          "Inject closure transaction failure before commit in a separate fixture and inspect all linked state."
+        ],
+        "expected": "All requests after committed closure honor revoked links/sessions and remaining-CIF login rule. A request already completed before closure is distinguished by timestamps. A failed transaction does not leave half-closed CIF or partially revoked IAM state.",
+        "priority": "P0",
+        "mode": "UI API and isolated fault injection"
+      },
+      {
+        "id": "X-FLOW-06",
+        "title": "Identity and banking service outage recovery",
+        "pre": "Microservice deployment; reversible fault isolation and nonproduction data.",
+        "steps": [
+          "Make identity authorization unavailable and attempt M02 protected reads/writes.",
+          "Restore identity, then fail banking/CIF service while keeping IAM available.",
+          "Retry from each page after recovery and inspect database/audit for partial operations."
+        ],
+        "expected": "Authorization dependency failure never grants access by default. Users see recoverable errors without false success. Service recovery restores correct current state, and failed operations do not leave partial identity/CIF/evidence records. Record actual error contract and correlation reference.",
+        "priority": "P0",
+        "mode": "UI API and isolated fault injection"
+      }
+    ]
+  },
+  {
+    "code": "X-UI",
+    "title": "Shared interaction accessibility and resilience",
+    "location": "Apply to every in-scope page tab and mutation dialog",
+    "source": "S1 S2 S3 S13",
+    "cases": [
+      {
+        "id": "X-UI-01",
+        "title": "Dialog cancel validation and duplicate clicks",
+        "pre": "Run against every mutation dialog listed in the coverage inventory, using fresh disposable data.",
+        "steps": [
+          "Open dialog; cancel through Cancel, X and Escape where supported.",
+          "Submit invalid data, correct it, then save during a delayed response and double-click.",
+          "Reopen and inspect persisted data; test server rejection and retry."
+        ],
+        "expected": "Cancel paths perform no mutation. Error is visible with retained values and usable controls. Save stays disabled while pending; success creates exactly the intended record. APIs without replay guarantees are checked for duplicate impact, not assumed idempotent.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-UI-02",
+        "title": "Keyboard focus and accessible tab semantics",
+        "pre": "Keyboard-only run plus accessibility inspector on supported browser.",
+        "steps": [
+          "Use skip link, navigation search, every tab and all dialog controls without mouse.",
+          "Check tab names, selected state, focus visibility/order, dialog focus containment and return focus.",
+          "Activate tabs with Enter/Space and assess arrow-key behavior against selected accessibility standard."
+        ],
+        "expected": "Every workflow is reachable with visible focus and meaningful accessible labels. Hidden panels are not focusable. Errors/status changes are announced. Tablist relationship and keyboard gaps are filed as accessibility defects; current markup is not assumed to meet the full standard.",
+        "priority": "P1",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-UI-03",
+        "title": "Responsive layout zoom and long content",
+        "pre": "Supported desktop browsers, mobile-width viewport, long synthetic names/IDs/reasons and populated history.",
+        "steps": [
+          "Run main flows at 1440, 1024 and 390 CSS pixels and at 200 percent zoom.",
+          "Open mobile Menu, search pages, clear/no-match query, scroll tables and long dialogs.",
+          "Inspect every M02 tab and M1 security/role/user panels."
+        ],
+        "expected": "Labels, inputs, Save/Cancel and row actions remain reachable and legible. Tables can scroll without hiding controls. Long content wraps safely; no clipped validation or overlapping focus targets. Menu expanded/current-page state remains accurate.",
+        "priority": "P2",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-UI-04",
+        "title": "Localization dates and numeric presentation",
+        "pre": "Each locale listed by the runtime language picker; date/amount/rate fixtures.",
+        "steps": [
+          "Change language before sign in, inside each M1 page and each M2 tab, including open dialogs.",
+          "Inspect status/error translation, Unicode names and date-time roundtrip.",
+          "Compare displayed local dates with submitted UTC instants and documented business timezone."
+        ],
+        "expected": "Language switches preserve identity, tab and unsaved values where supported without altering business data. Labels/errors remain understandable and encoded safely. Due dates and validity boundaries represent the intended instant; amounts/rates retain precision. Record unsupported translations explicitly.",
+        "priority": "P2",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-UI-05",
+        "title": "Safe text rendering and request errors",
+        "pre": "Synthetic markup strings in allowed names/reasons/labels; network/API fault controls.",
+        "steps": [
+          "Enter harmless markup-like text in legal name, reason, role display and menu label; inspect lists, details and errors.",
+          "Simulate network failure, non-JSON response, 401/403 and validation response.",
+          "Retry and change route while earlier load is pending."
+        ],
+        "expected": "Text is escaped and cannot execute script. Failures expose useful safe message/correlation ID without stack trace or sensitive values. Session-ending 401 clears authentication; other errors preserve appropriate state. Late responses cannot overwrite the selected page.",
+        "priority": "P0",
+        "mode": "UI and API"
+      },
+      {
+        "id": "X-UI-06",
+        "title": "Direct API denial and no partial persistence",
+        "pre": "For every protected read/write: valid user, no permission, wrong branch/CIF, expired/revoked session and malformed ID.",
+        "steps": [
+          "Replay one representative valid request per endpoint family from the source inventory using each unauthorized variant.",
+          "Compare before/after business rows and available denial audit.",
+          "Repeat a stale-version mutation and a terminal-state action."
+        ],
+        "expected": "Protected endpoints enforce authentication, permission, resource scope, state and version independently of UI. Denial never creates business success or leaks secrets. Distinguish safe 403/404/validation outcomes by endpoint rather than requiring one universal code.",
+        "priority": "P0",
+        "mode": "API and database"
+      }
+    ]
+  }
+]

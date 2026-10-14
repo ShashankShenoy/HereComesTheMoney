@@ -61,8 +61,7 @@ public class OpenAiResponsesClient {
             try {
                 try(var output=connection.getOutputStream()) { output.write(body.getBytes(StandardCharsets.UTF_8)); }
                 int status=connection.getResponseCode();
-                if(status<200 || status>=300)
-                    throw new BusinessException(HttpStatus.BAD_GATEWAY,"MODEL_UNAVAILABLE","The assistant model is unavailable (provider status "+status+")");
+                if(status<200 || status>=300)throw providerError(status);
                 JsonNode parsed;
                 try(var input=connection.getInputStream()) { parsed=json.readTree(input); }
                 if(!"completed".equals(parsed.path("status").asText()))
@@ -71,6 +70,12 @@ public class OpenAiResponsesClient {
             } finally { connection.disconnect(); }
         } catch(BusinessException e) { throw e; }
           catch(Exception e) { throw new BusinessException(HttpStatus.BAD_GATEWAY,"MODEL_UNAVAILABLE","The assistant model could not be reached"); }
+    }
+    static BusinessException providerError(int status) {
+        if(status==429)return new BusinessException(HttpStatus.TOO_MANY_REQUESTS,"MODEL_RATE_LIMITED",
+                "The assistant provider is rate limited. Try again later.");
+        return new BusinessException(HttpStatus.BAD_GATEWAY,"MODEL_UNAVAILABLE",
+                "The assistant model is unavailable (provider status "+status+")");
     }
     public String model() { return model; }
 }

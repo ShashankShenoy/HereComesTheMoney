@@ -22,7 +22,7 @@ Set `INTERNAL_BANK_CODES` to the comma-separated IFSC codes owned by this Moneyb
    & ./start-local.ps1
    ```
 
-   For the Oracle ALPHA demo, the ignored `.env.ps1` loads the Windows-protected OpenRouter key and sets the provider/model; run `& ./start-oracle-alpha.ps1` instead. OpenAI remains available with `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `AI_MODEL` (or the older `OPENAI_MODEL`). The provider selects a fixed HTTPS host, so an OpenRouter key is never sent to OpenAI or an arbitrary URL.
+   For the shared Oracle ALPHA setup, `start-alpha-team.ps1` loads the provider/model and key from the encrypted team bundle. Run `& ./set-openrouter-key.ps1` at its hidden prompt to save a Windows-protected local key override for that launcher. A direct `start-oracle-alpha.ps1` setup instead reads its ignored `.env.ps1`. OpenAI remains available with `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `AI_MODEL` (or the older `OPENAI_MODEL`). The provider selects a fixed HTTPS host, so an OpenRouter key is never sent to OpenAI or an arbitrary URL.
 
    The Oracle demo asks for Gemma first and uses OpenRouter's `openrouter/free` router if Gemma is rate limited or unavailable. This fallback also selects only free models and filters for tool-capable models. Free capacity and model behavior can vary; the backend still validates every tool call.
 

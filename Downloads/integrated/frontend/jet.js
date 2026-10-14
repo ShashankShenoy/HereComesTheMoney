@@ -122,6 +122,23 @@ export async function enhanceForms(root) {
 }
 
 /** Browser forms await component validation instead of relying on hidden native input constraints. */
+export function syncConditionalField(input, {required, disabled, clear = false}) {
+  const component = input.closest('label.field')?.querySelector(
+    'oj-input-text,oj-input-password,oj-input-date,oj-text-area,oj-select-single',
+  );
+  input.disabled = disabled;
+  input.required = input.dataset.jetSource ? false : required;
+  if (component) {
+    component.required = required;
+    component.disabled = disabled;
+  }
+  if (clear) {
+    input.value = '';
+    if (component) component.value = null;
+    input.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+}
+
 export async function validateJet(root) {
   await enhanceForms(root);
   let valid = true;

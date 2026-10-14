@@ -28,7 +28,9 @@ public class CustomerAccessLifecycle {
     db
       .jdbc()
       .update(
-        "UPDATE M01_IAM_CUSTOMER_LINK SET STATUS='REVOKED',VALID_TO=? WHERE CIF_ID=? AND STATUS='ACTIVE'",
+        // Oracle stores microsecond timestamps and requires a positive link interval.
+        // Revocation is immediate through STATUS even if the minimum end is one tick ahead.
+        "UPDATE M01_IAM_CUSTOMER_LINK SET STATUS='REVOKED',VALID_TO=GREATEST(?,VALID_FROM+INTERVAL '0.000001' SECOND) WHERE CIF_ID=? AND STATUS='ACTIVE'",
         now,
         cifId
       );

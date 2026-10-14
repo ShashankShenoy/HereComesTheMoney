@@ -113,7 +113,10 @@ function organizePanels(html, scope, groups) {
     button.type = "button";
     button.setAttribute("role", "tab");
     button.dataset.domainTab = `${scope}:${id}`;
+    button.id = `domain-tab-${scope}-${id}`;
+    button.setAttribute("aria-controls", `domain-panel-${scope}-${id}`);
     button.setAttribute("aria-selected", String(id === current));
+    button.tabIndex = id === current ? 0 : -1;
     button.textContent = title;
     tabs.append(button);
   }
@@ -121,6 +124,10 @@ function organizePanels(html, scope, groups) {
   const sections = new Map(groups.map(([id]) => {
     const section = document.createElement("div");
     section.className = "record-tab-panel";
+    section.id = `domain-panel-${scope}-${id}`;
+    section.setAttribute("role", "tabpanel");
+    section.setAttribute("aria-labelledby", `domain-tab-${scope}-${id}`);
+    section.tabIndex = 0;
     section.dataset.domainPanel = `${scope}:${id}`;
     section.hidden = id !== current;
     host.append(section);
@@ -139,6 +146,7 @@ function organizePanels(html, scope, groups) {
     if (!available.includes(id)) { button.remove(); section.remove(); continue; }
     section.hidden = id !== visible;
     button.setAttribute("aria-selected", String(id === visible));
+    button.tabIndex = id === visible ? 0 : -1;
   }
   return host.innerHTML;
 }
@@ -664,13 +672,33 @@ export function bindDomainForms() {
 }
 
 /** All actions submit explicit DTOs; dialogs preserve validation errors until corrected. */
+function activateDomainTab(tab) {
+  const [scope, id] = tab.dataset.domainTab.split(":");
+  state[`${scope}Tab`] = id;
+  document.querySelectorAll(`[data-domain-tab^="${scope}:"]`).forEach(button => {
+    const selected = button === tab;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll(`[data-domain-panel^="${scope}:"]`).forEach(panel => {
+    panel.hidden = panel.dataset.domainPanel !== tab.dataset.domainTab;
+  });
+}
+document.addEventListener("keydown", event => {
+  const tab = event.target.closest?.("[data-domain-tab]");
+  if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = [...tab.closest('[role="tablist"]').querySelectorAll('[role="tab"]')];
+  const index = tabs.indexOf(tab);
+  const next = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs.at(-1) :
+    tabs[(index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+  event.preventDefault();
+  activateDomainTab(next);
+  next.focus();
+});
 document.addEventListener("click", async (event) => {
   const tab = event.target.closest("[data-domain-tab]");
   if (tab) {
-    const [scope, id] = tab.dataset.domainTab.split(":");
-    state[`${scope}Tab`] = id;
-    document.querySelectorAll(`[data-domain-tab^="${scope}:"]`).forEach(button => button.setAttribute("aria-selected", String(button === tab)));
-    document.querySelectorAll(`[data-domain-panel^="${scope}:"]`).forEach(panel => { panel.hidden = panel.dataset.domainPanel !== tab.dataset.domainTab; });
+    activateDomainTab(tab);
     return;
   }
   const target = event.target.closest("[data-domain-action]");

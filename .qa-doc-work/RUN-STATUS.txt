@@ -1,0 +1,32 @@
+Module 1 and 2 Oracle QA status — 14 October 2026
+
+User requested a detailed 118-case test plan, execution and fixes against Oracle only. Do not run the H2/demo database suite.
+
+Deliverables
+- Downloads/integrated/docs/MODULE-1-AND-2-DETAILED-TEST-PLAN.docx: 39-page plan covering 118 cases, interactions, flows and all Module 1/2 tabs.
+- Downloads/integrated/docs/MODULE-1-AND-2-ORACLE-TEST-EXECUTION.docx: 6-page Oracle execution report and case matrix. Word rendering and visual inspection passed.
+
+Verified execution
+- Oracle acceptance: 40/40 pass, 0 failures/errors/skips. Evidence: Downloads/integrated/.runtime/oracle-m12/backend-final.xml. The two added checks cover adjacent/overlapping access windows and stale edit/review permission enforcement.
+- Gateway/front-end database-free tests: 23 gateway and 56 frontend/edge pass. Final Oracle-only package build passed with backendTestsExecuted=false, and -CheckOnly verified source/output hashes. Evidence: Downloads/integrated/.runtime/oracle-m12/build-final.log and Downloads/integrated/.runtime/verified-build.json.
+- Oracle read-only schema preflight: 10 pass, 1 fail. Pre-existing account 6 has posted 500000 versus journal-derived 0. No financial record was changed.
+- Browser: Oracle-backed employee sign-in; every Module 1 page; all four Module 2 customer tabs; dialogs, validation, keyboard, paging, conditional fields, responsive widths and localized labels sampled. No full case-level acceptance signoff.
+- Test-plan matrix: 114 Partial, 4 Not run, 0 fully signed off. The two fresh-schema cases cannot be completed because no disposable Oracle schema is available. Financial blocker fixtures, concurrent decisions, a live-browser restoration sequence and controlled outage still need work.
+
+Corrected defects
+- Same-tick customer link closure Oracle constraint.
+- IAM user catalogue pagination after the first 100.
+- Visible Oracle JET conditional field enable/clear behavior.
+- Customer tab ARIA semantics and keyboard navigation.
+- Late audit search writing into a different page.
+- Treasury navigation shown without required permission.
+- Blank account-holder key incorrectly showing saved success.
+- Backend menu labels and sort order ignored by navigation shell. Changed-label live Oracle variant remains open.
+
+Environment cleanup
+- The synthetic Oracle UI fixture was confirmed customer CLOSED, test user DISABLED and test role RETIRED; audit history retained. Evidence: Downloads/integrated/.runtime/oracle-m12/ui-fixture-retired.json.
+- The temporary Oracle-backed gateway/services/frontend stack was stopped with ownership-checked stop-microservices.ps1. The Oracle database itself was not stopped.
+- A later controlled outage attempt did not start: a separate Oracle service run occupied the shared process record on port 5174. Its processes were left untouched.
+- Oracle settings remain Windows-protected in Downloads/integrated/.runtime/oracle-m12/settings.dpapi. Never print or commit credentials, passphrases, tokens or private settings.
+
+No commits or PRs were created. Source changes and test artifacts remain in the working tree.

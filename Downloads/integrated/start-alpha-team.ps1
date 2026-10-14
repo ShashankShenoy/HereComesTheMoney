@@ -45,6 +45,14 @@ if ($CheckOnly) {
 
 $privateRuntime = Join-Path $taskRoot '.runtime'
 New-Item -ItemType Directory -Force -Path $alphaKeys, $privateRuntime | Out-Null
+$openRouterKey = $payload.openrouterApiKey
+$openRouterOverride = Join-Path $privateRuntime 'openrouter-api-key.dpapi'
+if (Test-Path -LiteralPath $openRouterOverride) {
+  $protectedOpenRouterKey = Get-Content -LiteralPath $openRouterOverride -Raw | ConvertTo-SecureString
+  try { $openRouterKey = [System.Net.NetworkCredential]::new('', $protectedOpenRouterKey).Password }
+  finally { $protectedOpenRouterKey.Dispose() }
+  if ([string]::IsNullOrWhiteSpace($openRouterKey)) { throw 'The Windows-protected OpenRouter key override is empty.' }
+}
 foreach ($name in $keys.Keys) {
   $target = Join-Path $alphaKeys $name
   if (-not (Test-Path -LiteralPath $target)) { [IO.File]::WriteAllBytes($target, $keys[$name]) }
@@ -84,7 +92,7 @@ try {
   $env:DB_URL = $payload.dbUrl
   $env:DB_USERNAME = $payload.dbUsername
   $env:DB_PASSWORD = $payload.dbPassword
-  $env:OPENROUTER_API_KEY = $payload.openrouterApiKey
+  $env:OPENROUTER_API_KEY = $openRouterKey
   $env:AI_PROVIDER = $payload.aiProvider
   $env:AI_MODEL = $payload.aiModel
   $env:AI_FALLBACK_MODEL = $payload.aiFallbackModel
@@ -93,4 +101,5 @@ try {
   Write-Host 'ALPHA team workspace is ready. Use ./show-alpha-team-credentials.ps1 to display the team demo logins privately.'
 } finally {
   foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
+  $openRouterKey = $null
 }

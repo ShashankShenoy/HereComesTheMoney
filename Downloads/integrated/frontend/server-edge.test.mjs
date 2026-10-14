@@ -25,6 +25,25 @@ test('static HEAD and POST enforce read-only assets and security headers', async
   assert.match(head.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal((await fetch(url + '/index.html', {method: 'POST', body: 'data'})).status, 405);
 });
+
+test('every application module import is served as JavaScript', async t => {
+  const url = await fixture(t);
+  const visited = new Set();
+  async function verify(modulePath) {
+    if (visited.has(modulePath)) return;
+    visited.add(modulePath);
+    const response = await fetch(url + modulePath);
+    assert.equal(response.status, 200, `Missing module ${modulePath}`);
+    assert.match(response.headers.get('content-type'), /javascript/);
+    const source = await response.text();
+    for (const match of source.matchAll(/\b(?:import|export)\s+(?:\{[^}]*\}|[^;\n]*?)\s+from\s*['"]([.][/][^'"]+[.]js)['"]/g)) {
+      await verify(new URL(match[1], url + modulePath).pathname);
+    }
+  }
+  await verify('/app.js');
+  assert.ok(visited.has('/iam-catalog.js'));
+  assert.ok(visited.has('/domains.js'));
+});
 test('private files and encoded vendor traversal are not exposed', async t => {
   const url = await fixture(t);
   for (const path of ['/package.json', '/package-lock.json', '/server.mjs', '/.env', '/node_modules/knockout/package.json', '/vendor/jet/%2e%2e%5c%2e%2e%5cpackage.json', '/vendor/require/%2e%2e%5c%2e%2e%5cserver.mjs', '/vendor/require/%00.js'])

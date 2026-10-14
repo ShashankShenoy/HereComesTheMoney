@@ -37,9 +37,9 @@ To stop exactly the processes recorded by the starter:
 & ./stop-oracle-alpha.ps1
 ```
 
-The ignored `.env.ps1` selects OpenRouter and the free `google/gemma-4-26b-a4b-it:free` model. It configures `openrouter/free` as an all-free fallback when Gemma is rate limited. It decrypts this workstation's Windows-protected OpenRouter key when the backend starts. The key stays out of the browser, database, and tracked project files. **Ask Moneybags** should report the model as configured. The authenticated MCP endpoint continues to work independently of model availability. Free models may be rate limited or temporarily unavailable; the banking tools and authorization remain on this backend.
+The shared ALPHA team launcher loads OpenRouter settings from its encrypted bundle and prefers this workstation's Windows-protected key override when present. A direct `start-oracle-alpha.ps1` setup uses the ignored `.env.ps1` instead. The configured free model is `google/gemma-4-26b-a4b-it:free`, with `openrouter/free` as a free fallback. The key stays out of the browser, database, and tracked project files. **Ask Moneybags** should report the model as configured. The authenticated MCP endpoint continues to work independently of model availability. Free models may be rate limited or temporarily unavailable; the banking tools and authorization remain on this backend.
 
-To replace or rotate the OpenRouter key, run `& ./set-openrouter-key.ps1` in your own PowerShell console. It accepts hidden input and saves a new Windows-protected copy. Then run `& ./stop-oracle-alpha.ps1` followed by `& ./start-oracle-alpha.ps1`.
+To replace or rotate the OpenRouter key, run `& ./set-openrouter-key.ps1` in your own PowerShell console. It accepts hidden input and saves a new Windows-protected copy in `.runtime/openrouter-api-key.dpapi`. `start-alpha-team.ps1` uses this local key in preference to the key in the encrypted team bundle. Restart the workspace to load it. If using `start-oracle-alpha.ps1` directly, load the protected key from `.env.ps1` into `OPENROUTER_API_KEY` before startup.
 
 ## Get the demo logins
 

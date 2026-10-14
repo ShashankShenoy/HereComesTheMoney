@@ -134,6 +134,8 @@ On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** 
 
 Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, places ALPHA's CIF/MFA keys in the dedicated ignored `.runtime/alpha-keys/` directory, saves **all seven demo logins in one Windows-protected file** at `.runtime/alpha-team-credentials.dpapi`, builds the app, and starts it at [localhost:5174](http://localhost:5174). Existing `runtime/cif.key` and `runtime/mfa.key` files from another local demo are left alone. The database password is passed to the backend through its process environment. Run `./show-alpha-team-credentials.ps1` in your own console to display all seven usernames, roles, passwords, and any customer access keys together. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
 
+To use your own OpenRouter key with this team launcher, run `./set-openrouter-key.ps1` in PowerShell 7 and enter the key at its hidden prompt. It saves a Windows-protected override in `.runtime/openrouter-api-key.dpapi`; the next `./start-alpha-team.ps1` run uses that key instead of the bundle's key. The browser and tracked files never need the key.
+
 | Staff demo login | Active ALPHA role | Sign-in |
 | --- | --- | --- |
 | `admin` | Global `BANK_ADMIN`; general maker and administration | `/employee/login` |

@@ -1,4 +1,4 @@
-param([switch]$CheckOnly, [switch]$Offline)
+param([switch]$CheckOnly, [switch]$Offline, [switch]$OracleTestsOnly)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $mavenRepository = Join-Path $env:USERPROFILE '.m2\repository'
@@ -73,13 +73,19 @@ function Invoke-BuildStep {
 }
 
 $mavenArguments = @('-f', (Join-Path $taskRoot 'backend\pom.xml'), "-Dmaven.repo.local=$mavenRepository", 'clean', 'verify')
+if ($OracleTestsOnly) {
+  # Maven tracks changed sources; retain compiled test artifacts and Oracle evidence.
+  $mavenArguments = @($mavenArguments | Where-Object { $_ -ne 'clean' })
+  $mavenArguments += '-DskipTests'
+  Write-Host 'Oracle-only build: compiling backend tests without executing local-database regressions. Run the opt-in Oracle suite separately.'
+}
 $npmArguments = @('--prefix', (Join-Path $taskRoot 'frontend'), 'ci')
 if ($Offline) {
   $mavenArguments = @('-o') + $mavenArguments
   $npmArguments += @('--offline', '--no-audit')
   Write-Host 'Offline build: using cached Maven/npm dependencies. Missing dependencies require an online build.'
 }
-Invoke-BuildStep 'backend (Maven clean verify)' 'mvn' $mavenArguments
+Invoke-BuildStep $(if ($OracleTestsOnly) { 'backend compilation and packaging for Oracle acceptance' } else { 'backend (Maven clean verify)' }) 'mvn' $mavenArguments
 Invoke-BuildStep 'gateway syntax' 'node' @('--check', (Join-Path $taskRoot 'gateway/server.mjs'))
 Invoke-BuildStep 'gateway and architecture tests' 'node' @('--test', (Join-Path $taskRoot 'gateway/gateway.test.mjs'), (Join-Path $taskRoot 'gateway/architecture.test.mjs'))
 Invoke-BuildStep 'frontend dependencies (npm ci)' 'npm' $npmArguments
@@ -91,5 +97,6 @@ foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Maven
   sourceHash = Get-SourceHash
   servicesHash = Get-FileSetHash @( $jars | ForEach-Object { Get-Item -LiteralPath $_ } )
   frontendHash = Get-FrontendHash
+  backendTestsExecuted = (-not $OracleTestsOnly)
 } | ConvertTo-Json | Set-Content -LiteralPath $buildRecord
 Write-Host 'Build complete and recorded for VPN launch.'

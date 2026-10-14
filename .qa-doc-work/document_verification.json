@@ -1,0 +1,15 @@
+{
+  "cases": 118,
+  "pages": 39,
+  "module1": 58,
+  "module2": 48,
+  "shared_and_integrated": 12,
+  "priorities": {
+    "P0": 88,
+    "P1": 27,
+    "P2": 3
+  },
+  "status": "Document inventory, contents fields, margins and visual layout verified",
+  "application_test_execution": "Not performed; all application test cases are Not run",
+  "file_bytes": 118903
+}

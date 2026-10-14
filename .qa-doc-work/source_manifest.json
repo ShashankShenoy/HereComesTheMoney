@@ -1,0 +1,152 @@
+[
+  {
+    "source": "S1",
+    "path": "frontend/app.js",
+    "sha256": "5623186c94cdc0566e4752f938ffc2dec07e33aec27c4b1483b23bd5612c2cdc"
+  },
+  {
+    "source": "S2",
+    "path": "frontend/domains.js",
+    "sha256": "6d84f4bedf70fc88e3f3d730c5896e1f50fd8f8e379f6b62ea160659c4f95e84"
+  },
+  {
+    "source": "S3",
+    "path": "frontend/api.js",
+    "sha256": "44113606251aa349c71bb0a23a5ee1188a33fbffff45da346028172ee425dc6b"
+  },
+  {
+    "source": "S3",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/controller/AuthController.java",
+    "sha256": "cda748276c4ca36d1cd2640b1f5101a471b7d2f28c6e1217ab32015f751c03b4"
+  },
+  {
+    "source": "S3",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/service/LoginService.java",
+    "sha256": "5bb6733628d30d33f0af67660fbbe55e3f1bfbfedd889ea387e16a237e8b5b22"
+  },
+  {
+    "source": "S4",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/service/MfaService.java",
+    "sha256": "8814a7797489535f701c2d0b5158393bc47507d7e5dc37cb7f7935ed1c2a9c50"
+  },
+  {
+    "source": "S4",
+    "path": "backend/shared/src/main/java/com/moneybags/iam/security/MfaFreshness.java",
+    "sha256": "1f69f1d2f2bf304807bdc984b1e80edfd750a7f91ea0f3db1dcd132fcf2859be"
+  },
+  {
+    "source": "S5",
+    "path": "backend/shared/src/main/java/com/moneybags/iam/dto/IamDtos.java",
+    "sha256": "4dce8d1cb4a43594e42c8dfd95e46e31e2f7604d299feda8286aeb9c80a9b227"
+  },
+  {
+    "source": "S5",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/controller/IamController.java",
+    "sha256": "7273f1a9f9e605e222034a319b789e28fcc24846425e2186dc0f5572935d08ff"
+  },
+  {
+    "source": "S5",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/service/IamAdminService.java",
+    "sha256": "4c7e2ff34f07006e097a48e4cabe8c87a8118b08607f0db0b5fae566dadb3048"
+  },
+  {
+    "source": "S6",
+    "path": "backend/shared/src/main/java/com/moneybags/iam/service/AccessDecisionService.java",
+    "sha256": "4b59f796d9e7dc13849182d46d45eead16bf1a1ec7bb72c090a24408ef298ae0"
+  },
+  {
+    "source": "S7",
+    "path": "backend/customer-module/src/main/java/com/moneybags/cif/controller/CifController.java",
+    "sha256": "ee05c722e39d486aa58638ba8c8141fb3599c8e8c4ac4bb8fe797dc1fbeb6631"
+  },
+  {
+    "source": "S7",
+    "path": "backend/customer-module/src/main/java/com/moneybags/cif/dto/CifDtos.java",
+    "sha256": "565ef20c0ffc90f2e178632a020116eba60235b071ec75d63c0b14807bb1b39b"
+  },
+  {
+    "source": "S7",
+    "path": "backend/customer-module/src/main/java/com/moneybags/cif/service/CifService.java",
+    "sha256": "da7cd5ebce3b9640b3d5ee73be132cd3ad87f52de58b7af1e35d78435d5deb84"
+  },
+  {
+    "source": "S8",
+    "path": "backend/identity-service/src/main/java/com/moneybags/iam/service/CustomerSignupService.java",
+    "sha256": "4596e117f7558f82617cf14c09aab1233e164da2ae4e9cce48684a8a0d633642"
+  },
+  {
+    "source": "S8",
+    "path": "backend/identity-service/src/main/java/com/moneybags/integration/CustomerHashController.java",
+    "sha256": "11beab422e4e4799a715639d670d50ba1039540ef5fcdccff46c141fbd1b619f"
+  },
+  {
+    "source": "S9",
+    "path": "frontend/financial-audit.test.js",
+    "sha256": "8fdb5a47e6b84ad12b76b98ce3a2dd709e1e3c1a7860799cb05f392a00463521"
+  },
+  {
+    "source": "S9",
+    "path": "docs/FINANCIAL-AUDIT-TESTING.txt",
+    "sha256": "6d910c32fc9fd44a41dc20467defa2d708d1a4e7499eec3a1f363684155f39fa"
+  },
+  {
+    "source": "S10",
+    "path": "frontend/banking.js",
+    "sha256": "5fa05d46e3b32640da28e68c21965f4c5ff758d11ae4929743ad60cb415094f5"
+  },
+  {
+    "source": "S10",
+    "path": "backend/shared/src/main/java/com/moneybags/integration/CustomerHashService.java",
+    "sha256": "4210ad2ec9c45dc29df9009cccdd5b7197735c5f9c647cffe45d651817ba0fc0"
+  },
+  {
+    "source": "S11",
+    "path": "backend/customer-module/src/main/java/com/moneybags/cif/service/KycDocumentService.java",
+    "sha256": "86a9023eb56e8dab15b846ba87c611d9841c5a0b983fa45f0f4c1f0ea704a333"
+  },
+  {
+    "source": "S11",
+    "path": "backend/shared/src/main/java/com/moneybags/common/security/PrivateData.java",
+    "sha256": "37029f35b432e86f33a564243b621bd9ae3b0b960eaf992fa8bedf3c5dc8b392"
+  },
+  {
+    "source": "S12",
+    "path": "backend/shared/src/main/java/com/moneybags/iam/service/CustomerAccessLifecycle.java",
+    "sha256": "c968a160e3d22b75f65f4917fe2aedc512d4c1242bb636a85140b3097512a45c"
+  },
+  {
+    "source": "S13",
+    "path": "frontend/ui.js",
+    "sha256": "7f352c125f9a344ad5cac55c924603e003a96922e7ca75a5436173134ee08056"
+  },
+  {
+    "source": "S13",
+    "path": "frontend/jet.js",
+    "sha256": "7fcdf94aeabc828127611b7372b07f61202dd06adeb069e56058484f95c388e5"
+  },
+  {
+    "source": "S13",
+    "path": "frontend/i18n.js",
+    "sha256": "2977f448b3db2aae9235249fa2a917c877f7054ae3a83abb144798f765246f0b"
+  },
+  {
+    "source": "S13",
+    "path": "frontend/design.js",
+    "sha256": "5dd16e96bbd3d2be214274e8c7ef2bea8f0cb331f85477fc2a15610f7ce7bb9d"
+  },
+  {
+    "source": "S14",
+    "path": "README.md",
+    "sha256": "a6cf4d6aab1a7a5a5c285dcf7a1c6a49f278b3f707cff7350fac6b9e91b3a045"
+  },
+  {
+    "source": "S14",
+    "path": "docs/FEATURE-COVERAGE.md",
+    "sha256": "5a5bdb3517b7aec0e1ede1f3ab3252072b68362c4f7a93dbe68c6f7cc9f6b82c"
+  },
+  {
+    "source": "S14",
+    "path": "docs/MICROSERVICES.md",
+    "sha256": "3851b0ee374196678ae411037ce1e5463a5e4bbc907f4b6be0f854f055707cda"
+  }
+]
