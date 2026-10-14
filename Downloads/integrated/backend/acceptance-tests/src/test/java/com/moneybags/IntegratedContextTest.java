@@ -120,7 +120,8 @@ class IntegratedContextTest {
   mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+admin))
    .andExpect(status().isOk()).andExpect(jsonPath("$[0].amount").isNumber());
   mvc.perform(get("/api/v1/banking/transactions?accountNumber=MB000000001").header("Authorization","Bearer "+viewer))
-   .andExpect(status().isOk()).andExpect(jsonPath("$[0].amount").doesNotExist());
+   .andExpect(status().isOk()).andExpect(jsonPath("$[0].amount").doesNotExist())
+   .andExpect(jsonPath("$[0].otherPartyName").doesNotExist()).andExpect(jsonPath("$[0].postedDelta").doesNotExist());
   mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+viewer)).andExpect(status().isForbidden());
   mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+viewer).header("X-Customer-Hash",HASH)).andExpect(status().isOk());
   mvc.perform(get("/api/v1/banking/transactions/1/details?accountNumber=MB000000001").header("Authorization","Bearer "+admin))
@@ -1458,6 +1459,11 @@ class IntegratedContextTest {
   assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
   assertEquals("POSTED",ledger.decideReversal(id,approve,checker).status());
   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE TXN_ID=? AND REVERSAL_OF_JOURNAL_ID IS NOT NULL",Integer.class,id));
+  JsonNode approvedRows=value(mvc.perform(get("/api/v1/banking/transactions").param("accountId","1")
+    .header("Authorization","Bearer "+login("admin"))).andExpect(status().isOk()));
+  JsonNode approvedRow=java.util.stream.StreamSupport.stream(approvedRows.spliterator(),false)
+    .filter(row->row.path("transactionId").asLong()==id).findFirst().orElseThrow();
+  assertEquals(0,BigDecimal.ONE.compareTo(new BigDecimal(approvedRow.path("postedDelta").asText())));
   var opposite=assertThrows(com.moneybags.txn.api.ApiException.class,()->ledger.decideReversal(id,
     new com.moneybags.txn.api.Contracts.ApprovalDecision("REJECTED","Changed"),checker));
   assertEquals("APPROVAL_CLOSED",opposite.code());
@@ -1472,6 +1478,11 @@ class IntegratedContextTest {
   mvc.perform(get("/api/v1/transactions/reversal-requests").header("Authorization","Bearer "+token))
     .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.TXN_ID == "+rejected+")]").isEmpty());
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_GL_JOURNAL WHERE TXN_ID=?",Integer.class,rejected));
+  JsonNode rejectedRows=value(mvc.perform(get("/api/v1/banking/transactions").param("accountId","1")
+    .header("Authorization","Bearer "+login("admin"))).andExpect(status().isOk()));
+  JsonNode rejectedRow=java.util.stream.StreamSupport.stream(rejectedRows.spliterator(),false)
+    .filter(row->row.path("transactionId").asLong()==rejected).findFirst().orElseThrow();
+  assertTrue(rejectedRow.path("postedDelta").isNull());
  }
 
  /** Exercise the full loan path with equal persisted offer timestamps in one transaction. */
@@ -2074,10 +2085,21 @@ class IntegratedContextTest {
   send("/transactions/transfers/by-number",customer,body).andExpect(status().isOk());
   assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance(1)));
   long txn=value(result).path("transactionId").asLong();
-  mvc.perform(get("/api/v1/banking/transactions").param("accountId","1").header("Authorization","Bearer "+customer))
-    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.transactionId == "+txn+")].accountRole").value(org.hamcrest.Matchers.contains("SOURCE")));
-  mvc.perform(get("/api/v1/banking/transactions").param("accountId","2").header("Authorization","Bearer "+other))
-    .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.transactionId == "+txn+")].accountRole").value(org.hamcrest.Matchers.contains("TARGET")));
+  JsonNode sourceRows=value(mvc.perform(get("/api/v1/banking/transactions").param("accountId","1").header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
+  JsonNode sourceRow=java.util.stream.StreamSupport.stream(sourceRows.spliterator(),false)
+    .filter(row->row.path("transactionId").asLong()==txn).findFirst().orElseThrow();
+  assertEquals("SOURCE",sourceRow.path("accountRole").asText());
+  assertEquals("Mira Shah (demo)",sourceRow.path("otherPartyName").asText());
+  assertEquals(0,new BigDecimal("-1.00").compareTo(new BigDecimal(sourceRow.path("postedDelta").asText())));
+  JsonNode targetRows=value(mvc.perform(get("/api/v1/banking/transactions").param("accountId","2").header("Authorization","Bearer "+other)).andExpect(status().isOk()));
+  JsonNode targetRow=java.util.stream.StreamSupport.stream(targetRows.spliterator(),false)
+    .filter(row->row.path("transactionId").asLong()==txn).findFirst().orElseThrow();
+  assertEquals("TARGET",targetRow.path("accountRole").asText());
+  assertEquals("Aarav Mehta (demo)",targetRow.path("otherPartyName").asText());
+  assertEquals(0,BigDecimal.ONE.compareTo(new BigDecimal(targetRow.path("postedDelta").asText())));
+  JsonNode detail=value(mvc.perform(get("/api/v1/banking/transactions/"+txn+"/details").param("accountId","1").header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
+  assertEquals("Mira Shah (demo)",detail.path("otherPartyName").asText());
+  assertEquals(0,new BigDecimal("-1.00").compareTo(new BigDecimal(detail.path("postedDelta").asText())));
   send("/transactions/transfers/by-number",customer,Map.of("sourceAccountNumber","MB000000001",
     "targetAccountNumber","MB000000002","amount",before.add(new BigDecimal("1000000")).toPlainString(),
     "requestKey",UUID.randomUUID().toString(),"correlationId",UUID.randomUUID().toString())).andExpect(status().is4xxClientError());

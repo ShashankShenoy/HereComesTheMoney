@@ -7,7 +7,7 @@ import {customerFxScreen,bindCustomerFx} from './customer-fx.js';
 import {api,getSession,getCustomerHash,setCustomerHash} from './api.js';
 import {esc,table,field,select,badge,errorText,toast,dialog} from './ui.js';
 import {enhanceForms,validateJet,jetReady} from './jet.js';
-import {formatAmount,formatDecimal,formatDate,fieldKind,rowCurrency} from './presentation.js';
+import {formatAmount,formatDecimal,formatDate,fieldKind,rowCurrency,transactionOtherParty,transactionAccountImpact} from './presentation.js';
 import {t,tField} from './i18n.js';
 export const bankingPages={
  simulator:{title:'RBI / NPCI simulator',permission:'PAYMENT_READ',staffOnly:true,icon:'◈',intro:'Simulated participating bank reserves, incoming instructions and settlement confirmations.',prefix:[]},
@@ -30,7 +30,7 @@ let operationResults={},operationValues={},operationRecords=[],operationCollecti
 let renderApp, contract, contractLoad, operations=[], selected={}, results={}, active='banking';
 let transactionAccountNumber='',transactionAccountId='',transactionLegacy=false,transactionRows=null,transactionDetail=null,transactionVisibleCount=25;
 let transactionSection='accounts';
-let keyHolderAccountNumber='',keyHolders=null,accountOptions=[],accountOptionsFetchedAt=0,accountOptionsPending=null,accountOptionsActor=null;
+let keyHolderAccountNumber='',keyHolders=null,accountOptions=[],accountOptionsFetchedAt=0,accountOptionsPending=null,accountOptionsActor=null,accountOptionsError=false;
 let reserveAccountId='',reserveAccounts=[],reservePosition=null,reserveReconciliation=null,reserveLedger=null,reserveOffset=0;
 let glLedgerAccountId='',glLedger=null,glLedgerJournal=null,glLedgerAccounts=null,glLedgerOffset=0;
 let customerPurposeNotices=[];
@@ -40,22 +40,27 @@ function accountHints(id){return '<datalist id="'+id+'">'+accountOptions.map(a=>
 function resetAccountOptionsForActor(){
  const actor=getSession()?.user?.userId;
  if(actor===accountOptionsActor)return;
- accountOptionsActor=actor;accountOptions=[];accountOptionsFetchedAt=0;accountOptionsPending=null;
+ accountOptionsActor=actor;accountOptions=[];accountOptionsFetchedAt=0;accountOptionsPending=null;accountOptionsError=false;
  transactionAccountNumber='';transactionAccountId='';transactionLegacy=false;transactionRows=null;transactionDetail=null;transactionVisibleCount=25;transactionSection=allow('TXN_REVERSE_APPROVE')?'reversals':'accounts';
  keyHolderAccountNumber='';keyHolders=null;reserveAccountId='';reserveAccounts=[];reservePosition=null;reserveReconciliation=null;reserveLedger=null;reserveOffset=0;
  glLedgerAccountId='';glLedger=null;glLedgerJournal=null;glLedgerAccounts=null;glLedgerOffset=0;
  cashLedgerAccounts=null;cashLedgerError='';
  selected={};results={};operationResults={};operationValues={};customerPurposeNotices=[];
 }
-function loadAccountOptions(){
+function loadAccountOptions(force=false){
  resetAccountOptionsForActor();
- if(accountOptionsPending||Date.now()-accountOptionsFetchedAt<60000)return;
+ if(accountOptionsPending)return accountOptionsPending;
+ if(!force&&Date.now()-accountOptionsFetchedAt<60000)return Promise.resolve();
  const actor=accountOptionsActor;
  accountOptionsPending=api('/banking/accounts').then(accounts=>{
   if(actor!==accountOptionsActor)return;
-  accountOptions=accounts;accountOptionsFetchedAt=Date.now();
+  accountOptions=accounts;accountOptionsFetchedAt=Date.now();accountOptionsError=false;
+  if(getSession()?.user?.userType==='CUSTOMER'&&transactionAccountNumber&&!accounts.some(a=>a.ACCOUNT_NUMBER===transactionAccountNumber)){
+   transactionAccountNumber='';transactionAccountId='';transactionRows=null;transactionDetail=null;
+  }
   for(const id of ['bank-account-numbers','key-account-numbers']){const list=document.getElementById(id);if(list)list.innerHTML=accountOptions.map(a=>'<option value="'+esc(a.ACCOUNT_NUMBER)+'">'+esc(a.ACCOUNT_STATUS||'Account')+'</option>').join('');}
- }).catch(()=>{if(actor===accountOptionsActor)accountOptionsFetchedAt=Date.now();}).finally(()=>{if(actor===accountOptionsActor)accountOptionsPending=null;});
+ }).catch(()=>{if(actor===accountOptionsActor){accountOptions=[];accountOptionsFetchedAt=0;accountOptionsError=true;}}).finally(()=>{if(actor===accountOptionsActor)accountOptionsPending=null;});
+ return accountOptionsPending;
 }
 async function legacyAccountId(number){const account=await api('/accounts/by-number/'+encodeURIComponent(number));return String(account.id);}
 const depositAccountFields=new Set(['accountId','bankAccountId','sourceAccountId','targetAccountId','destinationAccountId','repaymentAccountId','disbursementAccountId','depositAccountId']);
@@ -76,7 +81,7 @@ const allow=p=>!p||getSession()?.user?.permissions?.includes(p)||({TELLER_READ:'
 const checker=()=>getSession()?.user?.roles?.includes('BANK_CHECKER')&&!getSession()?.user?.roles?.includes('BANK_ADMIN');
 const checkerDecisionPath=/^\/(?:iam\/access-requests\/[^/]+\/decision|products\/approvals\/[^/]+\/decision|transactions\/[^/]+\/reversal-decision|period-closes\/[^/]+\/decision|approvals\/[^/]+\/decision|payments\/[^/]+\/authorize-simulation|treasury\/(?:work-items\/[^/]+\/decision|reserve-openings\/[^/]+\/confirm)|accounts\/[^/]+\/(?:closures\/[^/]+\/(?:approve|reject)|majority-reviews\/decisions|override-approvals\/[^/]+\/decision)|cif\/(?:cases\/[^/]+\/review|documents\/[^/]+\/review)|loans\/(?:applications\/[^/]+\/(?:decisions|documents\/[^/]+\/verify)|disbursements\/[^/]+\/approve)|teller\/(?:tills\/[^/]+\/(?:close|replenish)|cash-deliveries\/[^/]+\/confirm)|beneficiaries\/[^/]+\/verify|fx\/rates\/[^/]+\/decision|privacy\/(?:purposes\/[^/]+\/approval|holds\/[^/]+\/(?:activation|release-approval)|evidence-exports\/[^/]+\/approval)|catalog\/(?:masking-profiles|narrations)\/[^/]+\/approve)$/;
 const customerWorkflows=new Set([
- 'GET /banking/transactions','GET /transactions/{id}','POST /transactions/transfers/by-number',
+ 'GET /banking/transactions','GET /transactions/{id}',
  'GET /beneficiaries','POST /beneficiaries',
  'GET /payments','GET /payments/{id}','GET /payments/{id}/history','POST /payments/initiate',
  'GET /banking/facilities','GET /loans/applications/{id}','GET /loans/applications/{id}/offers',
@@ -177,17 +182,29 @@ function renderRows(value){
 }
 function transactionPanel(){
  const bankAdmin=getSession().user.roles?.includes('BANK_ADMIN');
- const hints=accountHints('bank-account-numbers');
+ const customer=getSession().user.userType==='CUSTOMER';
+ const customerAccounts=customer?accountOptions.filter(a=>a.ACCOUNT_NUMBER):[];
+ const hints=customer?'':accountHints('bank-account-numbers');
+ const selectedAccount=customerAccounts.some(a=>a.ACCOUNT_NUMBER===transactionAccountNumber);
+ const accountChoice=customer
+  ?'<label class="field">'+esc(t('Account number'))+'<select name="accountNumber" required '+(customerAccounts.length?'':'disabled')+'><option value="" disabled '+(selectedAccount?'':'selected')+'>'+esc(t('Select an account'))+'</option>'+customerAccounts.map(a=>'<option value="'+esc(a.ACCOUNT_NUMBER)+'" '+(a.ACCOUNT_NUMBER===transactionAccountNumber?'selected':'')+'>'+esc(a.ACCOUNT_NUMBER)+' · '+esc(a.PRODUCT_NAME||a.PRODUCT_TYPE||t('Account'))+' · '+esc(t(a.ACCOUNT_STATUS||''))+'</option>').join('')+'</select></label>'
+  :'<label class="field">Account number<input name="accountNumber" list="bank-account-numbers" maxlength="20" required value="'+esc(transactionAccountNumber)+'" placeholder="Enter an account number"></label>';
+ const accountNotice=customer?(accountOptionsError?'<p class="form-error" role="alert">'+esc(t('Could not load your accounts.'))+' <button type="button" class="btn small" data-txn-accounts-retry>'+esc(t('Retry'))+'</button></p>':customerAccounts.length?'':'<p class="hint">'+esc(t('No linked accounts available.'))+'</p>'):'';
  const visibleRows=transactionRows?.slice(0,transactionVisibleCount)||[];
- const rows=transactionRows===null?'<div class="empty">Choose an account to load its transactions.</div>':transactionRows.length?table(['Transaction','Type','Amount','Status','Value date','Details'],visibleRows.map(t=>[
-  esc(t.transactionId),esc(t.type??'—'),t.amount==null?'Protected':esc(formatAmount(t.amount,t.currency)),badge(t.status),esc(formatDate(t.valueDate)),
-  t.amount==null?'<span class="muted">Details protected</span>':'<button type="button" class="btn small" data-txn-detail="'+esc(t.transactionId)+'">View details</button>'
- ]))+'<div class="form-actions"><span class="muted">Showing '+visibleRows.length+' of '+transactionRows.length+' recent transactions</span>'+(visibleRows.length<transactionRows.length?'<button class="btn small" type="button" data-txn-more>Show more</button>':'')+'</div>':'<div class="empty">No transactions found for this account.</div>';
+ const displayRows=visibleRows.map(row=>{
+  const impact=row.amount==null?null:transactionAccountImpact(row);
+  const amountCell=impact?'<span class="amount-value">'+esc(impact.text)+'</span><br><small class="muted">'+esc(impact.note)+'</small>':esc(t('Protected'));
+  return [esc(row.transactionId),esc(row.type??'—'),impact?esc(transactionOtherParty(row)):esc(t('Protected')),amountCell,
+   badge(row.status),esc(formatDate(row.valueDate)),
+   impact?'<button type="button" class="btn small" data-txn-detail="'+esc(row.transactionId)+'">View details</button>':'<span class="muted">Details protected</span>'];
+ });
+ const rows=transactionRows===null?'<div class="empty">Choose an account to load its transactions.</div>':transactionRows.length?table(['Transaction','Type',t('Other party / description'),'Amount','Status','Value date','Details'],displayRows)+'<div class="form-actions"><span class="muted">Showing '+visibleRows.length+' of '+transactionRows.length+' recent transactions</span>'+(visibleRows.length<transactionRows.length?'<button class="btn small" type="button" data-txn-more>Show more</button>':'')+'</div>':'<div class="empty">No transactions found for this account.</div>';
+ const detailImpact=transactionDetail&&transactionDetail.accountRole!=='INTERNAL'?transactionAccountImpact(transactionDetail):null;
  const detail=transactionDetail?'<section class="panel"><div class="panel-heading"><div><p class="eyebrow">'+(transactionDetail.accountRole==='INTERNAL'?'INTERNAL LEDGER DETAIL':'ACCOUNT-SCOPED DETAIL')+'</p><h3>Transaction '+esc(transactionDetail.transactionId)+'</h3></div>'+badge(transactionDetail.STATUS)+'</div><div class="panel-body"><dl class="details result-details">'+[
-  ['Account role',transactionDetail.accountRole],['Type',transactionDetail.TXN_TYPE],['Amount',formatAmount(transactionDetail.AMOUNT,transactionDetail.CURRENCY_CODE)],['Value date',formatDate(transactionDetail.VALUE_DATE)],['Created',formatDate(transactionDetail.CREATED_AT)],['Updated',formatDate(transactionDetail.UPDATED_AT)],['Failure code',transactionDetail.FAILURE_CODE],['Reversal of',transactionDetail.REVERSAL_OF_TXN_ID]
- ].map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v??'—')+'</dd></div>').join('')+'</dl><h4>Status history</h4>'+table(['From','To','Reason','Changed'],(transactionDetail.statusHistory||[]).map(h=>[esc(h.FROM_STATUS??'Start'),badge(h.TO_STATUS),esc(h.REASON_TEXT||h.REASON_CODE||'—'),esc(formatDate(h.CHANGED_AT))]),'No status history recorded.')+'<h4>Linked journals</h4>'+(transactionDetail.journals||[]).map(j=>'<div class="ledger-journal"><div><strong>Journal '+esc(j.JOURNAL_ID)+'</strong> · '+esc(j.JOURNAL_TYPE)+' · '+esc(formatDate(j.BOOKED_AT))+' · '+(j.control?.IS_BALANCED==='Y'?'Balanced':'Check balance')+'</div><p class="hint">Debits '+esc(formatAmount(j.control?.DEBIT_TOTAL,'INR'))+' · Credits '+esc(formatAmount(j.control?.CREDIT_TOTAL,'INR'))+'</p>'+table(['Line','GL account','Side','Amount'],(j.accountPostings||[]).map(p=>[esc(p.LINE_NO),esc(p.GL_ACCOUNT_ID),badge(p.ENTRY_SIDE),esc(formatAmount(p.AMOUNT,'INR'))]),'No posting line belongs to the selected account.')+'</div>').join('')+'</div></section>':'';
+  ['Account role',transactionDetail.accountRole],['Type',transactionDetail.TXN_TYPE],['Other party / description',detailImpact?transactionOtherParty(transactionDetail):'—'],['Amount',detailImpact?detailImpact.text+' · '+detailImpact.note:formatAmount(transactionDetail.AMOUNT,transactionDetail.CURRENCY_CODE)],['Value date',formatDate(transactionDetail.VALUE_DATE)],['Created',formatDate(transactionDetail.CREATED_AT)],['Updated',formatDate(transactionDetail.UPDATED_AT)],['Failure code',transactionDetail.FAILURE_CODE],['Reversal of',transactionDetail.REVERSAL_OF_TXN_ID]
+ ].map(([k,v])=>'<div><dt>'+esc(t(k))+'</dt><dd>'+esc(v??'—')+'</dd></div>').join('')+'</dl><h4>Status history</h4>'+table(['From','To','Reason','Changed'],(transactionDetail.statusHistory||[]).map(h=>[esc(h.FROM_STATUS??'Start'),badge(h.TO_STATUS),esc(h.REASON_TEXT||h.REASON_CODE||'—'),esc(formatDate(h.CHANGED_AT))]),'No status history recorded.')+'<h4>Linked journals</h4>'+(transactionDetail.journals||[]).map(j=>'<div class="ledger-journal"><div><strong>Journal '+esc(j.JOURNAL_ID)+'</strong> · '+esc(j.JOURNAL_TYPE)+' · '+esc(formatDate(j.BOOKED_AT))+' · '+(j.control?.IS_BALANCED==='Y'?'Balanced':'Check balance')+'</div><p class="hint">Debits '+esc(formatAmount(j.control?.DEBIT_TOTAL,'INR'))+' · Credits '+esc(formatAmount(j.control?.CREDIT_TOTAL,'INR'))+'</p>'+table(['Line','GL account','Side','Amount'],(j.accountPostings||[]).map(p=>[esc(p.LINE_NO),esc(p.GL_ACCOUNT_ID),badge(p.ENTRY_SIDE),esc(formatAmount(p.AMOUNT,'INR'))]),'No posting line belongs to the selected account.')+'</div>').join('')+'</div></section>':'';
  const internal=allow('GL_RECONCILE')?'<details class="ledger-internal"><summary>Look up an internal ledger transaction</summary><p class="hint">For a transaction with no customer account, such as a reserve opening or a bank adjustment. For account transactions, use the list above.</p><form id="internal-transaction-form" class="module-search"><label class="field">Transaction ID<input name="transactionId" inputmode="numeric" pattern="[0-9]+" required placeholder="Enter a transaction ID"></label><button type="submit" class="btn">View internal transaction</button></form><p id="internal-transaction-error" class="form-error" role="alert"></p></details>':'';
- return '<div id="transaction-activity"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSACTION ACTIVITY</p><h3>Account transactions</h3></div></div><div class="panel-body"><p class="hint">'+(bankAdmin?'An active, global BANK_ADMIN assignment can review account transactions without a holder key. Access is recorded in the audit trail.':getSession().user.userType==='CUSTOMER'?'Your sign-in gives access to accounts linked to you.':'Your role and account scope are checked. An account holder must also provide a key for protected details.')+'</p>'+(!bankAdmin&&getSession().user.userType!=='CUSTOMER'?'<p class="hint">'+(getCustomerHash()?'A key is saved in this tab. Reload this account to check it.':'No account-holder key is saved in this tab.')+'</p><button type="button" class="btn small" data-action="nav" data-id="customerAccess">Open account-holder key section</button>':'')+'<form id="transaction-search-form" class="module-search"><label class="field">Account number<input name="accountNumber" list="bank-account-numbers" maxlength="20" required value="'+esc(transactionAccountNumber)+'" placeholder="Enter an account number"></label>'+hints+'<button type="submit" class="btn primary">Load transactions</button></form><p id="transaction-error" class="form-error" role="alert"></p>'+rows+internal+'</div></section>'+detail+'</div>';
+ return '<div id="transaction-activity"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSACTION ACTIVITY</p><h3>Account transactions</h3></div></div><div class="panel-body"><p class="hint">'+(bankAdmin?'An active, global BANK_ADMIN assignment can review account transactions without a holder key. Access is recorded in the audit trail.':getSession().user.userType==='CUSTOMER'?'Your sign-in gives access to accounts linked to you.':'Your role and account scope are checked. An account holder must also provide a key for protected details.')+'</p>'+(!bankAdmin&&getSession().user.userType!=='CUSTOMER'?'<p class="hint">'+(getCustomerHash()?'A key is saved in this tab. Reload this account to check it.':'No account-holder key is saved in this tab.')+'</p><button type="button" class="btn small" data-action="nav" data-id="customerAccess">Open account-holder key section</button>':'')+'<form id="transaction-search-form" class="module-search">'+accountChoice+hints+'<button type="submit" class="btn primary" '+(customer&&!customerAccounts.length?'disabled':'')+'>'+esc(t('Load transactions'))+'</button></form>'+accountNotice+'<p id="transaction-error" class="form-error" role="alert"></p>'+rows+internal+'</div></section>'+detail+'</div>';
 }
 function glLedgerPanel(){
  if(!allow('GL_RECONCILE'))return '';
@@ -236,12 +253,14 @@ function bindReversalForms(){
  });
 }
 function transactionTabs(){
- const tabs=[['accounts','Account transactions'],...(allow('TXN_REVERSE_APPROVE')?[['reversals','Pending reversals']]:[]),...(allow('GL_RECONCILE')?[['gl','GL account ledger']]:[]),['operations','Operations']];
+ const tabs=[['accounts','Account transactions'],...(allow('TXN_REVERSE_APPROVE')?[['reversals','Pending reversals']]:[]),...(allow('GL_RECONCILE')?[['gl','GL account ledger']]:[]),...(getSession().user.userType==='CUSTOMER'?[]:[['operations','Operations']])];
  if(!tabs.some(([id])=>id===transactionSection))transactionSection='accounts';
+ if(tabs.length===1)return '';
  return '<div class="transaction-tabs" role="tablist" aria-label="'+esc(t('Transactions & ledger sections'))+'">'+tabs.map(([id,title])=>'<button type="button" role="tab" id="transaction-tab-'+id+'" aria-controls="transaction-section-'+id+'" aria-selected="'+(transactionSection===id)+'" tabindex="'+(transactionSection===id?'0':'-1')+'" data-transaction-tab="'+id+'">'+esc(t(title))+'</button>').join('')+'</div>';
 }
 function transactionTabPanel(section,content){
- const sections=['accounts',...(allow('TXN_REVERSE_APPROVE')?['reversals']:[]),...(allow('GL_RECONCILE')?['gl']:[]),'operations'];
+ const sections=['accounts',...(allow('TXN_REVERSE_APPROVE')?['reversals']:[]),...(allow('GL_RECONCILE')?['gl']:[]),...(getSession().user.userType==='CUSTOMER'?[]:['operations'])];
+ if(sections.length===1)return content;
  return sections.map(id=>'<div id="transaction-section-'+id+'" role="tabpanel" aria-labelledby="transaction-tab-'+id+'" tabindex="0"'+(id===section?'':' hidden')+'>'+(id===section?content:'')+'</div>').join('');
 }
 function treasuryPanel(){
@@ -414,7 +433,10 @@ export async function bankingScreen(page){
  if(page==='transactions'){
   const tabs=transactionTabs();
   if(transactionSection==='reversals'&&allow('TXN_REVERSE_APPROVE'))return head+tabs+transactionTabPanel('reversals',await pendingReversalsPanel());
-  if(transactionSection==='accounts')return head+tabs+transactionTabPanel('accounts',transactionPanel());
+  if(transactionSection==='accounts'){
+   if(customer)await loadAccountOptions();
+   return head+tabs+transactionTabPanel('accounts',transactionPanel());
+  }
   if(transactionSection==='gl')return head+tabs+transactionTabPanel('gl',glLedgerPanel());
  }
  await loadContract();
@@ -701,6 +723,13 @@ function bindGlLedgerForms(){
 function bindTransactionForms(){
  const transactionForm=document.querySelector('#transaction-search-form');
  transactionForm?.querySelector('input[name="accountNumber"]')?.addEventListener('focus',loadAccountOptions,{once:true});
+ transactionForm?.querySelector('select[name="accountNumber"]')?.addEventListener('change',event=>{
+  transactionAccountNumber=event.currentTarget.value;transactionAccountId='';transactionLegacy=false;
+  transactionRows=null;transactionDetail=null;transactionVisibleCount=25;refreshTransactionPanel();
+ });
+ document.querySelector('[data-txn-accounts-retry]')?.addEventListener('click',async event=>{
+  event.currentTarget.disabled=true;await loadAccountOptions(true);refreshTransactionPanel();
+ });
  if(transactionForm)transactionForm.onsubmit=async e=>{e.preventDefault();const button=transactionForm.querySelector('button');button.disabled=true;document.querySelector('#transaction-error').textContent='';try{const number=String(new FormData(transactionForm).get('accountNumber')).trim();let rows;transactionLegacy=false;transactionAccountId='';try{rows=await api('/banking/transactions?'+new URLSearchParams({accountNumber:number}));}catch(error){if(error.code!=='ACCOUNT_REQUIRED')throw error;transactionAccountId=await legacyAccountId(number);rows=await api('/banking/transactions?'+new URLSearchParams({accountId:transactionAccountId}));transactionLegacy=true;}transactionRows=rows;transactionAccountNumber=number;transactionDetail=null;transactionVisibleCount=25;refreshTransactionPanel();}catch(error){const output=document.querySelector('#transaction-error');if(output)output.textContent=errorText(error);}finally{button.disabled=false;}};
  const more=document.querySelector('[data-txn-more]');
  if(more)more.onclick=()=>{transactionVisibleCount+=25;refreshTransactionPanel();};
