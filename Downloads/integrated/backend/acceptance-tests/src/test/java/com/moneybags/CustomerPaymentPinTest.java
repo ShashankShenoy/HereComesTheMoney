@@ -29,6 +29,7 @@ class CustomerPaymentPinTest {
   send("/auth/signup",null,Map.of("username",name,"legalName","PIN fixture","dateOfBirth","1990-01-01","password",PASSWORD,"paymentPin",PIN),null).andExpect(status().isOk());
   user=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME=?",String.class,name);token=login(name,PASSWORD);admin=login("admin","LocalBanking!2026");checker=login("checker","LocalBanking!2026");
   db.update("INSERT INTO M01_IAM_CUSTOMER_LINK(LINK_ID,USER_ID,CIF_ID,RELATIONSHIP_TYPE,STATUS,VALID_FROM) VALUES (?,?,'demo-cif-1','SELF','ACTIVE',SYSTIMESTAMP)",UUID.randomUUID().toString(),user);
+  token=login(name,PASSWORD);
   beneficiary=value(send("/beneficiaries",token,Map.of("displayName","PIN recipient","accountToken","EXT-"+UUID.randomUUID(),"bankCode","HDFC0000001"),null)).path("beneficiaryId").asText();
   send("/beneficiaries/"+beneficiary+"/verify",checker,Map.of(),null).andExpect(status().isOk());
  }
@@ -79,5 +80,21 @@ class CustomerPaymentPinTest {
   for(int n=0;n<5;n++)send("/auth/payment-pin/reset",token,Map.of("currentPassword","wrong-password","newPin","684207"),null).andExpect(status().isForbidden());
   send("/auth/payment-pin/reset",token,Map.of("currentPassword",PASSWORD,"newPin","684207"),null).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("PIN_RESET_LOCKED"));
   send("/payments/initiate",token,payment(UUID.randomUUID().toString()),PIN).andExpect(status().isOk());
+ }
+ @Test void ownBankBeneficiaryUsesPinProtectedIdempotentInternalLedger()throws Exception{
+  String internal=value(send("/beneficiaries",token,Map.of("displayName","Internal recipient","accountToken","MB000000002","bankCode","MCPB0000002"),null)).path("beneficiaryId").asText();
+  send("/beneficiaries/"+internal+"/verify",checker,Map.of(),null).andExpect(status().isOk());
+  var rows=value(mvc.perform(get("/api/v1/beneficiaries").header("Authorization","Bearer "+token)).andExpect(status().isOk()));
+  assertTrue(rows.toString().contains("INTERNAL"));
+  String key=UUID.randomUUID().toString();var body=Map.of("sourceAccountId",1,"beneficiaryId",internal,"amount","1","requestKey",key,"correlationId",key);
+  BigDecimal before=balance();BigDecimal target=db.queryForObject("SELECT POSTED_BALANCE FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=2",BigDecimal.class);
+  int payments=db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION",Integer.class);
+  send("/transactions/transfers/by-beneficiary",token,body,null).andExpect(status().isForbidden());assertEquals(0,before.compareTo(balance()));
+  send("/transactions/transfers/by-beneficiary",token,body,PIN).andExpect(status().isOk());send("/transactions/transfers/by-beneficiary",token,body,PIN).andExpect(status().isOk());
+  assertEquals(0,before.subtract(BigDecimal.ONE).compareTo(balance()));assertEquals(0,target.add(BigDecimal.ONE).compareTo(db.queryForObject("SELECT POSTED_BALANCE FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=2",BigDecimal.class)));
+  assertEquals(payments,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION",Integer.class));
+  send("/transactions/transfers/by-beneficiary",token,Map.of("sourceAccountId",1,"beneficiaryId",beneficiary,"amount","1","requestKey",UUID.randomUUID().toString(),"correlationId",key),PIN).andExpect(status().isConflict());
+  db.update("UPDATE MBX_BENEFICIARY SET STATUS='DISABLED' WHERE BENEFICIARY_ID=?",internal);
+  send("/transactions/transfers/by-beneficiary",token,body,PIN).andExpect(status().isNotFound());
  }
 }
