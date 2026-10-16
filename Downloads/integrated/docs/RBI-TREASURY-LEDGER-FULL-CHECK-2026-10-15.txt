@@ -1,0 +1,133 @@
+RBI, TREASURY AND LEDGER FULL CHECK
+15 October 2026 | Connected Oracle database and running local application
+
+FOLLOW-UP: Both remaining UI issues were subsequently fixed and verified.
+See RBI-TREASURY-LEDGER-UI-FIXES-2026-10-15.txt. The findings below preserve
+the state observed during the original full check.
+
+RESULT
+The tested financial workflows, reconciliation rules and API access controls
+passed. Two existing UI issues remain: invalid treasury assignee choices and
+manual journal/evidence IDs. This audit did not change application code or
+commit financial test transactions.
+
+SCOPE AND ENVIRONMENT
+Frontend: http://localhost:5174
+Gateway: http://localhost:8091
+All six services and gateway health were UP at completion.
+RBI coverage concerns the application's simulated RBI/NPCI environment and
+local reserve mirror. This is not certification of a live RBI connection or
+regulatory compliance.
+
+FRESH TEST RESULTS
+Local backend regression: 169 passed, 0 failed, 0 errors.
+  Includes 130 acceptance tests and 39 upstream shared-module tests.
+  59 opt-in Oracle cases were skipped in the local run. The RBI suite was
+  then executed separately against actual Oracle, as detailed below.
+Frontend: 80 passed, 0 failed.
+Gateway: 24 passed, 0 failed.
+Actual Oracle RBI/treasury/ledger suite: 16 passed, 0 failed, 0 skipped.
+  Duration: 252.377 seconds. Every test transaction rolls back.
+  The 16 include the two inherited Oracle settlement smoke cases.
+  Other opt-in payment-PIN/privacy suites are outside this audit's scope.
+Total automated tests executed and passed: 289.
+Live API inquiries: 174 passed, 0 failed.
+  Admin 79; checker 79; customer 14; anonymous 2.
+Previous-fix verification through live APIs: 18 passed, 0 failed.
+Total live API checks: 192 passed, 0 failed.
+Database financial integrity: 20/20 passed before and after testing.
+Oracle schema/readiness: 11/11 passed.
+Browser inquiries: 10 passed; 2 UI requirements remain unmet.
+Browser console: no captured errors after verification.
+
+ACTUAL ORACLE WORKFLOW COVERAGE
+- Incoming and outgoing UPI, IMPS, NEFT and RTGS; immediate versus deferred
+  customer posting; cycle settlement; participant fund conservation.
+- Incoming reference replay and changed-payload conflicts; no double credit.
+- Invalid routing, absent accounts, insufficient external funds, RTGS minimum
+  and excess decimal precision; no instruction created on rejected inputs.
+- Independent high-value approval and rejection; self-approval rejection;
+  rejection replay without a customer debit.
+- Zero-net settlement and exact retry without a second reserve movement.
+- Liquidity scope validation and duplicate payload conflicts.
+- Synthetic reserve opening with independent checker and balanced books.
+- Journal exact replay; Oracle protection against posting-history mutation;
+  unbalanced/future journal rejection without postings.
+- Invalid or reused reserve GL mappings; empty settlement-cycle rejection.
+- Treasury work creation defaults, submission, independent decision and
+  stale-version protection, including existing work records.
+- Period close: self-approval and unreconciled balances rejected; independent
+  approval of a reconciled ledger and exact replay succeed.
+- RBI cash delivery: counted amount, checker independence, liquidity and
+  confirmation replay.
+
+LIVE API AND DATABASE COVERAGE
+Checked reserve configuration, balances, reconciliation, every GL account
+ledger, all eight existing reserve movements, evidence and journal controls;
+cycles and items, work items, holds and exception inquiries; pagination and
+invalid parameters; missing records; staff access, customer masking and
+forbidden access, and anonymous rejection.
+Expected HTTP 400/401/403/404/422 responses count as successful negative tests.
+No unexpected invalid codes or response shapes failed these checks.
+
+All journal controls balance. Customer positions equal immutable postings.
+Reserve positions agree with treasury movements and their asset GL. Holds
+match active reservations. Evidence is verified, amount/scope matched and
+consumed at most once. Simulator movements conserve funds. Confirmed reserve
+openings and cash deliveries have independent checkers. Posting fences exist.
+No open settlement cycles, reconciliation mismatches, or recent settlement,
+ledger or reserve error records were returned by the final diagnostics.
+Oracle objects, constraints, triggers and immutable audit protection pass.
+
+REMAINING UI ISSUES
+1. Treasury > Create treasury work item > Owner Id includes customer accounts
+   (including adipil and demo customers) and a DISABLED QA user. Restrict the
+   choices to eligible active employees. The dropdown contents were verified;
+   no work item was submitted with an invalid owner during this audit.
+2. Transactions & ledger > Operations > Get journal balance control requires
+   a typed Journal Id. Treasury > Treasury Settlement Evidence > View requires
+   a typed Id. These still do not meet the requested record-dropdown behavior.
+   Both inquiries return correct results when given valid IDs: journal 227
+   shows two lines, debit 500000, credit 500000, difference 0, balanced Y;
+   evidence 56 is VERIFIED for the IMPS inward movement of 5000.
+
+Other browser checks passed: simulator tables and history; matched reserve
+ledger with eight verified movements; settlement-cycle listing; empty reserve
+and account reconciliation exception lists; GL running balances and journal
+details; empty pending-reversal queue; account selection and transaction
+history. The old employee session expired at the beginning and normal sign-in
+renewed it before these checks.
+
+PRESERVATION
+Before/after row counts and SHA-256 content hashes match for all 12 audited
+financial tables: customer positions, journals, postings, transaction log,
+reserve positions, treasury ledger, liquidity holds, payment instructions,
+settlement cycles, simulator banks, settlements and movements.
+Account 6's existing 500000 balance was preserved. RBI confirmed and available
+reserve remain 544989; holds remain 0. No financial repair tool was run.
+Rollback GL, beneficiary and treasury-work fixtures remaining: 0 each.
+Normal authentication/read-audit records and Oracle sequence advancement are
+not financial balance changes and are outside those 12 table hashes.
+
+EVIDENCE (relative to Downloads/integrated)
+.runtime/rbi-full-local-results.json
+.runtime/rbi-full-local.log
+.runtime/rbi-full-frontend.log
+.runtime/rbi-full-gateway.log
+.runtime/rbi-full-oracle-tests.xml
+.runtime/rbi-full-oracle-cases.json
+.runtime/rbi-full-oracle-tests.log
+.runtime/rbi-full-api-results.json
+.runtime/rbi-full-fix-status.json
+.runtime/rbi-full-api.log
+.runtime/rbi-full-fix-status.log
+.runtime/rbi-full-before.json
+.runtime/rbi-full-after.json
+.runtime/rbi-full-preservation.json
+.runtime/rbi-full-readiness.json
+.runtime/rbi-full-health.json
+.runtime/rbi-full-ui-results.json
+.runtime/rbi-full-owner-options.png
+.runtime/rbi-full-journal-control.png
+
+Existing reports and prior API evidence were preserved.

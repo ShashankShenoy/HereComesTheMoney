@@ -22,10 +22,11 @@ export async function api(path,{method='GET',body,headers:extraHeaders={}}={}){
   }
   let value;try{value=await response.json();}catch{throw new ApiFailure({status:response.status,message:response.status===403?`Request rejected (HTTP 403). Check the backend frontend-origin setting for ${window.location.origin}.`:'Server returned an unexpected response.'});}
   if(!response.ok){
-    if(response.status===401&&['SESSION_INVALID','LOGIN_REQUIRED','REFRESH_REUSE'].includes(value.code)){saveSession(null);window.dispatchEvent(new Event('session-ended'));}
-    throw new ApiFailure(value);
+    const error=value&&typeof value==='object'?value:{};
+    if(response.status===401&&['SESSION_INVALID','LOGIN_REQUIRED','REFRESH_REUSE'].includes(error.code)){saveSession(null);window.dispatchEvent(new Event('session-ended'));}
+    throw new ApiFailure({status:response.status,message:`Request failed (HTTP ${response.status}).`,...error});
   }
-  return Object.hasOwn(value,'data')?value.data:value;
+  return value&&typeof value==='object'&&Object.hasOwn(value,'data')?value.data:value;
 }
 export async function login(username,password,otp){const value=await api('/auth/login',{method:'POST',body:{username,password,otp:otp||null,clientId:'MONEYBAGS_WEB',deviceRef:navigator.userAgent.slice(0,160)}});saveSession(value);return value;}
 export async function refresh(){if(!session)throw new Error('Sign in first');const value=await api('/auth/refresh',{method:'POST',body:{refreshToken:session.refreshToken}});saveSession(value);return value;}

@@ -20,10 +20,7 @@ import static com.moneybags.iam.repository.IamRepository.map;
 @Service
 public class CustomerSignupService {
     @org.springframework.beans.factory.annotation.Autowired private com.moneybags.integration.PaymentPinService paymentPins;
-    private static final List<String> CUSTOMER_PERMISSIONS=List.of(
-        "ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE",
-        "STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW",
-        "FX_READ","LOAN_READ","LOAN_APPLY","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY");
+    private static final List<String> CUSTOMER_PERMISSIONS=BankRolePolicy.CUSTOMER_PERMISSIONS;
     private final JdbcTemplate jdbc;
     private final SchemaRepository schema;
     private final PasswordEncoder passwords;
@@ -72,8 +69,17 @@ public class CustomerSignupService {
             "SUBMITTED_AT",now,"DECIDED_AT",now));
         schema.insert(SchemaTable.M01_IAM_CUSTOMER_LINK,map("LINK_ID",UUID.randomUUID().toString(),"USER_ID",user,
             "CIF_ID",cif,"RELATIONSHIP_TYPE","SELF","STATUS","ACTIVE","VALID_FROM",now));
-        schema.insert(SchemaTable.M01_IAM_USER_ROLE,map("ASSIGNMENT_ID",UUID.randomUUID().toString(),"USER_ID",user,
+        String assignment=UUID.randomUUID().toString();
+        schema.insert(SchemaTable.M01_IAM_USER_ROLE,map("ASSIGNMENT_ID",assignment,"USER_ID",user,
             "ROLE_ID",role,"SCOPE_TYPE","SELF","STATUS","ACTIVE","VALID_FROM",now));
+        var reference=jdbc.queryForList("""
+            SELECT A.ASSIGNMENT_ID FROM M01_IAM_USER_ROLE A JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID
+            WHERE LOWER(U.USERNAME) IN ('adipil','adipillai','adipilla') AND U.USER_TYPE='CUSTOMER' AND U.STATUS='ACTIVE'
+              AND A.ROLE_ID=? AND A.STATUS='ACTIVE' AND A.SCOPE_TYPE='SELF'
+              AND A.VALID_FROM<=SYSTIMESTAMP AND (A.VALID_TO IS NULL OR A.VALID_TO>SYSTIMESTAMP)
+            ORDER BY A.CREATED_AT FETCH FIRST 1 ROWS ONLY
+            """,String.class,role);
+        if(!reference.isEmpty())jdbc.update("INSERT INTO M01_IAM_USER_ROLE_SCOPE(ASSIGNMENT_ID,DIMENSION_CODE,SCOPE_VALUE) SELECT ?,DIMENSION_CODE,SCOPE_VALUE FROM M01_IAM_USER_ROLE_SCOPE WHERE ASSIGNMENT_ID=?",assignment,reference.get(0));
         schema.insert(SchemaTable.M01_IAM_AUDIT_EVENT,map("AUDIT_ID",UUID.randomUUID().toString(),"EVENT_TYPE",adminUserId==null?"DEMO_CUSTOMER_SIGNUP":"DEMO_CUSTOMER_ADMIN_CREATED",
             "ACTOR_USER_ID",adminUserId==null?user:adminUserId,"RESOURCE_TYPE","IAM_USER","RESOURCE_ID",user,"RESULT","SUCCESS",
             "REASON_CODE","DEMO_KYC_ASSUMED","CORRELATION_ID",UUID.randomUUID().toString()));
@@ -82,32 +88,18 @@ public class CustomerSignupService {
     }
 
     private String customerRole(){
-        var roles=jdbc.queryForList("SELECT ROLE_ID,STATUS FROM M01_IAM_ROLE WHERE ROLE_CODE='RETAIL_CUSTOMER'");
+        var roles=jdbc.queryForList("SELECT ROLE_ID,STATUS FROM M01_IAM_ROLE WHERE ROLE_CODE=?",BankRolePolicy.CUSTOMER);
         if(!roles.isEmpty()){
             if(!"ACTIVE".equals(roles.get(0).get("STATUS")))
                 throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Customer role is unavailable");
             String role=(String)roles.get(0).get("ROLE_ID");
             var granted=jdbc.queryForList("SELECT P.PERMISSION_CODE FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE RP.ROLE_ID=?",String.class,role);
             if(!CUSTOMER_PERMISSIONS.containsAll(granted))
-                return dedicatedSignupRole();
+                throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","The unified customer role needs review");
             grantMissingCustomerPermissions(role,granted);
             return role;
         }
-        return createCustomerRole("RETAIL_CUSTOMER");
-    }
-
-    /** Keep public signup scoped when staff have added wider grants to the retail role. */
-    private String dedicatedSignupRole(){
-        var roles=jdbc.queryForList("SELECT ROLE_ID,STATUS FROM M01_IAM_ROLE WHERE ROLE_CODE='RETAIL_CUSTOMER_SIGNUP'");
-        if(roles.isEmpty())return createCustomerRole("RETAIL_CUSTOMER_SIGNUP");
-        if(!"ACTIVE".equals(roles.get(0).get("STATUS")))
-            throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Signup role is unavailable");
-        String role=(String)roles.get(0).get("ROLE_ID");
-        var granted=jdbc.queryForList("SELECT P.PERMISSION_CODE FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE RP.ROLE_ID=?",String.class,role);
-        if(!CUSTOMER_PERMISSIONS.containsAll(granted))
-            throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE,"SETUP_REQUIRED","Signup role needs review");
-        grantMissingCustomerPermissions(role,granted);
-        return role;
+        return createCustomerRole(BankRolePolicy.CUSTOMER);
     }
 
     private String createCustomerRole(String code){

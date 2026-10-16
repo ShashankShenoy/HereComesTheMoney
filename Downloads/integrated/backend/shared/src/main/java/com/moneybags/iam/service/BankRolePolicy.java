@@ -8,6 +8,12 @@ public final class BankRolePolicy {
     private BankRolePolicy() {}
 
     public static final String CHECKER = "BANK_CHECKER";
+    public static final String CUSTOMER = "BANK_CUSTOMER";
+    public static final List<String> CUSTOMER_PERMISSIONS = List.of(
+        "ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE",
+        "STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW",
+        "FX_READ","LOAN_READ","LOAN_APPLY","LOAN_ACCEPT","CIF_READ","PRODUCT_READ",
+        "CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY");
 
     public static final List<String> CHECKER_PERMISSIONS = List.of(
         "CC_READ", "CC_APPROVE", "CC_PRODUCT_APPROVE", "SYSTEM_SCHEMA_READ", "IAM_USER_READ", "IAM_AUDIT_READ", "CIF_READ",

@@ -54,8 +54,8 @@ Keep `moneybags.payment-simulation.enabled=true` for the demo. `moneybags.paymen
 Stop project-managed services before rebuilding executable JARs:
 
 ```powershell
-./stop-microservices.ps1
-./build-before-start.ps1 -Offline
+./stop-oracle-alpha.ps1
+./start-alpha-team.ps1 -BuildOnly -Offline
 ```
 
 Local tests cover approval boundaries, automatic processing, scheduled and early cycles, replacement cycles after approval, routing rejection, incoming credit timing, insufficient funds/reserves, duplicate references, mixed settlement rejection, zero net and balanced participant movements. JDBC regression tests run real Spring parameter binding with a driver mock that fails if parameter metadata is requested.

@@ -1,12 +1,13 @@
 #requires -Version 7.0
 param([switch]$SkipBuild,[switch]$Offline,[securestring]$Passphrase,[string]$PassphraseFile)
 $ErrorActionPreference='Stop'
-$taskRoot=$PSScriptRoot
+$taskRoot=Split-Path -Parent $PSScriptRoot
 $runtime=Join-Path $taskRoot '.runtime'
 $resultsRoot=Join-Path $runtime 'environment-tests'
 New-Item -ItemType Directory -Force -Path $resultsRoot|Out-Null
 if(Test-Path -LiteralPath (Join-Path $runtime 'microservices-processes.json')){throw 'Stop the existing stack before running Oracle environment checks.'}
-. (Join-Path $taskRoot 'tools/alpha-team-crypto.ps1')
+Import-Module (Join-Path $PSScriptRoot 'alpha-team-crypto.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'oracle-runtime.psm1') -Force
 $results=[Collections.Generic.List[object]]::new()
 $names=@('DB_URL','DB_USERNAME','DB_PASSWORD','BOOTSTRAP_ADMIN','CUSTOMER_SIGNUP_ENABLED','DEPOSIT_INTEREST_ENABLED','PAYMENT_SIMULATION_ENABLED','OPENROUTER_API_KEY','OPENAI_API_KEY')
 $saved=@{};foreach($envName in $names){$saved[$envName]=[Environment]::GetEnvironmentVariable($envName,'Process')}
@@ -42,7 +43,7 @@ try{
     $parts=$row[0].TrimEnd("`r") -split "`t";@{username=$username;password=$parts[1]}
   })
   $payload=$null
-  & (Join-Path $taskRoot 'build-before-start.ps1') -CheckOnly:$SkipBuild -Offline:$Offline
+  Invoke-OracleBuild -ProjectRoot $taskRoot -CheckOnly:$SkipBuild -Offline:$Offline
   $dependencies=Join-Path $runtime 'oracle-dependencies';New-Item -ItemType Directory -Force -Path $dependencies|Out-Null
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $archive=[IO.Compression.ZipFile]::OpenRead((Join-Path $taskRoot 'backend/banking-service/target/banking-service-1.0.0-exec.jar'))
@@ -64,10 +65,10 @@ try{
     if(-not $credential.canLogin){$identityExit=1}
   }
   try{
-    & (Join-Path $taskRoot 'test-financial-audit-oracle.ps1') -OracleEnvFile (Join-Path $runtime 'no-env-file') -DependencyDirectory $dependencies *> (Join-Path $resultsRoot 'oracle-audit.log')
+    & (Join-Path $PSScriptRoot 'test-financial-audit-oracle.ps1') -OracleEnvFile (Join-Path $runtime 'no-env-file') -DependencyDirectory $dependencies *> (Join-Path $resultsRoot 'oracle-audit.log')
     Record-OracleCheck 'financial audit acceptance suite rolls back every test write' $true
   }catch{Record-OracleCheck 'financial audit acceptance suite rolls back every test write' $false}
-  & (Join-Path $taskRoot 'start-microservices.ps1') -Database Oracle -GatewayPort 18090 -IdentityPort 18092 -ReportingPort 18093 -BankingPort 18094 -PaymentsPort 18095 -LoanPort 18096 -AuditPort 18097 -FrontendPort 15173 -SkipBuild -CifKeyFile (Join-Path $keyRoot 'cif.key') -MfaKeyFile (Join-Path $keyRoot 'mfa.key') *> (Join-Path $resultsRoot 'oracle-startup.log')
+  Start-OracleServices -ProjectRoot $taskRoot -GatewayPort 18090 -IdentityPort 18092 -ReportingPort 18093 -BankingPort 18094 -PaymentsPort 18095 -LoanPort 18096 -AuditPort 18097 -FrontendPort 15173 -SkipBuild -CifKeyFile (Join-Path $keyRoot 'cif.key') -MfaKeyFile (Join-Path $keyRoot 'mfa.key') *> (Join-Path $resultsRoot 'oracle-startup.log')
   $owned=$true
   $run=Get-Content -LiteralPath (Join-Path $runtime 'microservices-processes.json') -Raw|ConvertFrom-Json
   Record-OracleCheck 'Oracle startup launches eight components and no H2 database process' ($run.database -eq 'Oracle' -and $run.processes.Count -eq 8 -and @($run.processes|Where-Object{$_.name -eq 'local-database'}).Count -eq 0)
@@ -81,7 +82,7 @@ try{
   $credentials=$null;$payload=$null;$plainPassphrase=$null
   if($owned){
     try{
-      & (Join-Path $taskRoot 'stop-microservices.ps1') *> (Join-Path $resultsRoot 'oracle-shutdown.log')
+      Stop-OracleServices -ProjectRoot $taskRoot *> (Join-Path $resultsRoot 'oracle-shutdown.log')
       $released=-not(Test-Path -LiteralPath (Join-Path $runtime 'microservices-processes.json'))
       foreach($port in @(18090,18092,18093,18094,18095,18096,18097,15173)){
         $client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port);$released=$false}catch [Net.Sockets.SocketException]{}finally{$client.Dispose()}

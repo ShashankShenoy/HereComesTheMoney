@@ -33,8 +33,15 @@ public class TransactionPrivacyAdvice implements ResponseBodyAdvice<Object> {
    var row=db.one("SELECT SOURCE_ACCOUNT_ID,DESTINATION_ACCOUNT_ID AS TARGET_ACCOUNT_ID FROM M06_PAYMENT_INSTRUCTION WHERE PAYMENT_ID=?",id);
    if(!visiblePayment(row,hash))return Map.of("paymentId",id);
   }
-  if(path.matches("/api/v1/journals/\\d+/control")){
+  if(body instanceof Map<?,?> control&&control.containsKey("IS_BALANCED")&&path.matches("/api/v1/journals/\\d+/control")){
    long id=Long.parseLong(path.split("/")[4]);
+   // Reconciliation staff already have bank-wide GL inquiry authority. Customer
+   // access below continues to require ownership or a valid holder proof.
+   if("EMPLOYEE".equals(CurrentActor.get().userType()))try{
+    access.global("GL_RECONCILE");
+    hashes.audit("JOURNAL_CONTROL_VIEWED","JOURNAL",Long.toString(id),"GL_RECONCILE");
+    return body;
+   }catch(com.moneybags.common.api.BusinessException denied){/* check account-scoped visibility */}
    var lines=db.rows("SELECT BANK_ACCOUNT_ID AS SOURCE_ACCOUNT_ID FROM M05_GL_POSTING WHERE JOURNAL_ID=? AND BANK_ACCOUNT_ID IS NOT NULL",id);
    if(lines.isEmpty()||lines.stream().noneMatch(r->visible(r,hash)))return Map.of("journalId",id);
   }

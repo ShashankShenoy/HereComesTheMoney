@@ -4,10 +4,22 @@ const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({
 }[char]));
 
 function inline(value){
-  return escapeHtml(value)
+  const format=text=>escapeHtml(text)
     .replace(/`([^`\n]+)`/g,'<code>$1</code>')
     .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>');
+  // Only local statement endpoints become controls; model-supplied URLs stay inert.
+  const endpoint='/api/v1/reporting/statements/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/download(?:\\?format=(?:PDF|CSV|HTML))?';
+  const downloads=new RegExp('\\[[^\\]\\n]*\\]\\(('+endpoint+')\\)|`('+endpoint+')`|(?<![\\w/:])('+endpoint+')(?![\\w/?&#=:%-])','g');
+  let html='',offset=0;
+  for(const match of String(value).matchAll(downloads)){
+    html+=format(value.slice(offset,match.index));
+    const [path,query]=(match[1]||match[2]||match[3]).slice('/api/v1'.length).split('?');
+    const formats=query?[query.slice('format='.length)]:['PDF','CSV','HTML'];
+    html+=formats.map(kind=>`<button type="button" class="btn small" data-assistant-download="${escapeHtml(path+'?format='+kind)}">Download ${kind}</button>`).join(' ');
+    offset=match.index+match[0].length;
+  }
+  return html+format(value.slice(offset));
 }
 
 const cells=line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(cell=>cell.trim());

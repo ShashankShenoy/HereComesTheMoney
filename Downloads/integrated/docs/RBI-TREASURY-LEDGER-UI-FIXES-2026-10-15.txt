@@ -1,0 +1,78 @@
+RBI, TREASURY AND LEDGER UI FIXES
+15 October 2026
+
+Both UI issues from the full check are fixed and loaded in the local app.
+
+TREASURY WORK OWNERS
+The owner dropdown now uses a treasury-specific directory. Eligible users must
+be active employees with an active, currently effective global role granting
+TREASURY_RECONCILE or TREASURY_WORK_APPROVE. Customers, disabled users and
+expired or future assignments are excluded. The directory returns only user
+IDs and usernames and does not require general IAM user-directory access.
+Work creation checks eligibility again and rejects an invalid or stale owner
+with HTTP 422 / INVALID_WORK_OWNER before inserting the work item.
+The live dropdown contains admin, checker, checker1 and mcp_demo_checker.
+
+JOURNAL AND EVIDENCE INQUIRIES
+Journal balance control now offers the existing journals in a dropdown with
+their journal type, value date and description. Settlement evidence inquiries
+offer actual evidence records with their external settlement reference,
+status and amount. The same reference sources support journal/evidence ID
+fields in related operations. Record ID mapping selects the journal/evidence
+identifier rather than a related account or owner identifier.
+New reference APIs retain the corresponding staff access checks; customer and
+anonymous access is denied. The evidence list and detail inquiry have distinct
+operation labels.
+
+VERIFICATION
+- Full regression run: 170 backend, 83 frontend and 24 gateway tests passed;
+  277 total, zero failures. Local Oracle-only tests were explicitly skipped.
+- Actual Oracle: two targeted rollback cases passed, covering valid work
+  creation/independent approval and invalid/stale work-owner rejection.
+- Final deployed app: 13 read-only API checks passed, including admin/checker
+  inquiries, all listed evidence details, customer/anonymous restrictions,
+  journal 227 balance control and distinct operation descriptions.
+- Browser: eligible owner dropdown; populated evidence selection and its
+  record; journal 227 at 500000 debit/credit, and switching to journal 170
+  showing three lines and 20000 debit/credit with difference zero.
+- Final Oracle integrity: all 20 checks passed.
+- All 12 financial table row counts and SHA-256 content hashes match the
+  baseline. Account 6's existing 500000 balance and journal history remain
+  unchanged. RBI reserve remains 544989, with no reconciliation difference.
+- All six services and gateway health are UP.
+
+The final package adds two API operation descriptions after the full regression
+run. Backend compilation and frontend/gateway checks passed again; the final
+source, executable JARs and frontend output passed launcher fingerprint checks.
+Windows required stopping the running app to release its service JARs during
+rebuilds. The app has been restarted with its existing Oracle settings and keys.
+No financial repair, role migration, user removal or committed test work item
+was applied. Temporary Oracle test changes rolled back.
+
+IMPLEMENTATION
+backend/shared/src/main/java/com/moneybags/iam/service/TreasuryWorkOwnerDirectory.java
+backend/treasury-module/src/main/java/com/moneybags/treasury/service/TreasuryService.java
+backend/treasury-module/src/main/java/com/moneybags/treasury/repository/TreasuryRepository.java
+backend/treasury-module/src/main/java/com/moneybags/treasury/api/TreasuryController.java
+backend/banking-service/src/main/java/com/moneybags/integration/BankingController.java
+frontend/banking.js
+frontend/operation-state.js
+
+EVIDENCE (relative to Downloads/integrated)
+.runtime/rbi-ui-fixes-local-results.json
+.runtime/rbi-ui-fixes-build-final.log
+.runtime/rbi-ui-fixes-targeted.xml
+.runtime/rbi-ui-fixes-oracle.xml
+.runtime/rbi-ui-fixes-api-results.json
+.runtime/rbi-ui-fixes-final-package.log
+.runtime/rbi-ui-fixes-final-start.log
+.runtime/rbi-ui-fixes-before.json
+.runtime/rbi-ui-fixes-after.json
+.runtime/rbi-ui-fixes-preservation.json
+.runtime/rbi-ui-fixes-health.json
+.runtime/rbi-ui-fixes-ui-results.json
+.runtime/rbi-ui-fixes-owner-dropdown.png
+.runtime/rbi-ui-fixes-journal-dropdown.png
+
+tools/rbi-reference-api-audit.mjs reproduces the read-only API verification,
+using existing credentials privately supplied through stdin.

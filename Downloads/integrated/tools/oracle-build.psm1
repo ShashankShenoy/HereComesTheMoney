@@ -1,10 +1,11 @@
-param([switch]$CheckOnly, [switch]$Offline, [switch]$OracleTestsOnly)
+function Invoke-OracleBuild {
+param([Parameter(Mandatory)][string]$ProjectRoot, [switch]$CheckOnly, [switch]$Offline, [switch]$OracleTestsOnly)
 $ErrorActionPreference = 'Stop'
-$taskRoot = $PSScriptRoot
+$taskRoot = $ProjectRoot
 $mavenRepository = Join-Path $env:USERPROFILE '.m2\repository'
 $runtime = Join-Path $taskRoot '.runtime'
 $buildRecord = Join-Path $runtime 'verified-build.json'
-$serviceModules = @('local-database','identity-service','reporting-service','banking-service','payments-service','loan-service','audit-service')
+$serviceModules = @('identity-service','reporting-service','banking-service','payments-service','loan-service','audit-service')
 $jars = @($serviceModules | ForEach-Object { Join-Path $taskRoot "backend/$_/target/$_-1.0.0-exec.jar" })
 $frontendDist = Join-Path $taskRoot 'frontend\dist'
 
@@ -52,10 +53,10 @@ function Get-FrontendHash {
 }
 
 if ($CheckOnly) {
-  if (-not (Test-Path -LiteralPath $buildRecord)) { throw 'No verified build record exists. Disconnect the VPN, run build-before-start.ps1, then reconnect and start with -SkipBuild.' }
-  foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Missing service JAR: $jar. Run build-before-start.ps1." } }
+  if (-not (Test-Path -LiteralPath $buildRecord)) { throw 'No verified build record exists. Disconnect the VPN, run start-alpha-team.ps1 -BuildOnly, then reconnect and start with -SkipBuild.' }
+  foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Missing service JAR: $jar. Run start-alpha-team.ps1 -BuildOnly." } }
   $record = Get-Content -LiteralPath $buildRecord -Raw | ConvertFrom-Json
-  if ($record.sourceHash -ne (Get-SourceHash)) { throw 'Source files changed since the last build. Run build-before-start.ps1 before connecting the VPN.' }
+  if ($record.sourceHash -ne (Get-SourceHash)) { throw 'Source files changed since the last build. Run start-alpha-team.ps1 -BuildOnly before connecting the VPN.' }
   if ($record.servicesHash -ne (Get-FileSetHash @( $jars | ForEach-Object { Get-Item -LiteralPath $_ } ))) { throw 'The service JARs changed since the last verified build. Rebuild before starting.' }
   if ($record.frontendHash -ne (Get-FrontendHash)) { throw 'The frontend output changed since the last verified build. Rebuild before starting.' }
   Write-Host 'Verified build matches all service sources, executable JARs, gateway and frontend output.'
@@ -72,7 +73,7 @@ function Invoke-BuildStep {
   if ($LASTEXITCODE -ne 0) { throw "$Label failed with exit code $LASTEXITCODE. Startup stopped." }
 }
 
-$mavenArguments = @('-f', (Join-Path $taskRoot 'backend\pom.xml'), "-Dmaven.repo.local=$mavenRepository", 'clean', 'verify')
+$mavenArguments = @('-f', (Join-Path $taskRoot 'backend\pom.xml'), "-Dmaven.repo.local=$mavenRepository", '-pl', (($serviceModules + 'acceptance-tests') -join ','), '-am', 'clean', 'verify')
 if ($OracleTestsOnly) {
   # Maven tracks changed sources; retain compiled test artifacts and Oracle evidence.
   $mavenArguments = @($mavenArguments | Where-Object { $_ -ne 'clean' })
@@ -100,3 +101,6 @@ foreach ($jar in $jars) { if (-not (Test-Path -LiteralPath $jar)) { throw "Maven
   backendTestsExecuted = (-not $OracleTestsOnly)
 } | ConvertTo-Json | Set-Content -LiteralPath $buildRecord
 Write-Host 'Build complete and recorded for VPN launch.'
+
+}
+Export-ModuleMember -Function Invoke-OracleBuild

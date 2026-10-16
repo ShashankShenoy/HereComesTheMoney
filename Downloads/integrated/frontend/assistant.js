@@ -1,6 +1,6 @@
-import {api,getSession} from './api.js';
+import {api,download,getSession} from './api.js';
 import {paymentPinField,withPaymentPin} from './payment-pin.js';
-import {esc,errorText,dialog} from './ui.js';
+import {esc,errorText,dialog,toast} from './ui.js';
 import {renderAssistantMarkdown} from './assistant-markdown.js';
 import {locale,t} from './i18n.js';
 
@@ -125,6 +125,15 @@ export function bindAssistant(){
     }catch(failure){if(identity===owner){error.textContent=errorText(failure);button.disabled=false;}}
   };
   feed.onclick=async event=>{
+    const file=event.target.closest('[data-assistant-download]');
+    if(file){
+      event.preventDefault();if(file.disabled)return;
+      file.disabled=true;
+      try{await download(file.dataset.assistantDownload);}
+      catch(error){toast(errorText(error),true);}
+      finally{file.disabled=false;}
+      return;
+    }
     const suggestion=event.target.closest('[data-assistant-suggestion]');
     if(suggestion){const input=form.querySelector('textarea');input.value=suggestion.dataset.assistantSuggestion;input.focus();return;}
     const cancel=event.target.closest('[data-assistant-cancel]');

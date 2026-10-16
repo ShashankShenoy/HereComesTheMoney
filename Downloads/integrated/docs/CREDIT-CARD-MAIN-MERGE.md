@@ -1,5 +1,8 @@
 # Credit card integration with updated main
 
+> Startup scripts were consolidated on 14 October 2026. Use start-alpha-team.ps1, stop-oracle-alpha.ps1, and set-openrouter-key.ps1 in Downloads/integrated. Build-only is start-alpha-team.ps1 -BuildOnly; Oracle diagnostic runners now live under tools/. Older script names below describe historical verification.
+
+
 ## Preserved histories
 
 The integration combines remote main commit `da8929e` (payments, teller, treasury and ledger changes) with credit card feature commit `78ea458`, including implementation commit `870df77`. It uses a merge commit, preserving both histories. The original credit card tip is also saved locally as `backup/credit-card-before-main-20261007`.

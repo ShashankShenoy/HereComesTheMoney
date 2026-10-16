@@ -135,12 +135,12 @@ public class IamAdminService {
     private void permissionIds(List<String> ids){if(new HashSet<>(ids).size()!=ids.size())bad("Duplicate permissions");for(String pid:ids)if(db.count("SELECT COUNT(*) FROM M01_IAM_PERMISSION WHERE PERMISSION_ID=?",pid)!=1)bad("Unknown permission");}
     private void setPermissions(String role,List<String> ids){db.jdbc().update("DELETE FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=?",role);for(String pid:ids)db.insert(SchemaTable.M01_IAM_ROLE_PERMISSION,map("ROLE_ID",role,"PERMISSION_ID",pid));}
     @Transactional public M01IamRoleRow createRole(UserPrincipal actor,RoleInput r){
-        guard.require(actor,"IAM_ROLE_MANAGE");if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER).contains(r.roleCode()))bad("The bank administration roles are reserved");permissionIds(r.permissionIds());
+        guard.require(actor,"IAM_ROLE_MANAGE");if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER,BankRolePolicy.CUSTOMER).contains(r.roleCode()))bad("The bank roles are reserved");permissionIds(r.permissionIds());
         String rid=id();db.insert(SchemaTable.M01_IAM_ROLE,map("ROLE_ID",rid,"ROLE_CODE",r.roleCode(),"DISPLAY_NAME",r.displayName(),"SENSITIVE_FLAG",r.sensitive()?"Y":"N"));setPermissions(rid,r.permissionIds());
         event(actor,"ROLE_CREATED","IAM_ROLE",rid,null,r.roleCode());return role(rid,false);
     }
     @Transactional public M01IamRoleRow updateRole(UserPrincipal actor,String rid,RoleUpdate r){
-        guard.require(actor,"IAM_ROLE_MANAGE");var old=role(rid,true);if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER).contains(old.roleCode()))bad("The bank administration roles cannot be edited or retired");
+        guard.require(actor,"IAM_ROLE_MANAGE");var old=role(rid,true);if(Set.of("BANK_ADMIN",BankRolePolicy.CHECKER,BankRolePolicy.CUSTOMER).contains(old.roleCode()))bad("The bank roles cannot be edited or retired");
         if(!old.rowVersion().equals(r.rowVersion()))conflict("Role changed; reload before saving");permissionIds(r.permissionIds());
         db.jdbc().update("UPDATE M01_IAM_ROLE SET DISPLAY_NAME=?,SENSITIVE_FLAG=?,STATUS=?,ROW_VERSION=ROW_VERSION+1 WHERE ROLE_ID=?",r.displayName(),r.sensitive()?"Y":"N",r.status(),rid);
         setPermissions(rid,r.permissionIds());bumpRoleUsers(rid);event(actor,"ROLE_UPDATED","IAM_ROLE",rid,old.status(),r.status());return role(rid,false);

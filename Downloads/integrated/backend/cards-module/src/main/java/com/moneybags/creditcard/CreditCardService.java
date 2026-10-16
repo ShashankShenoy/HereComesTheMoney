@@ -32,6 +32,7 @@ import static com.moneybags.creditcard.CreditCardMath.*;
 /** Credit card commands and their ledger effects commit together in the shared database. */
 @Service
 public class CreditCardService {
+    @org.springframework.beans.factory.annotation.Autowired private com.moneybags.integration.PaymentPinGuard paymentPins;
     private static final BigDecimal ZERO=new BigDecimal("0.00");
     private static final SecureRandom RANDOM=new SecureRandom();
     private final BusinessRepository db;
@@ -204,6 +205,7 @@ public class CreditCardService {
 
     @Transactional
     public Map<String,Object> purchase(String id,Purchase r) {
+        paymentPins.requireForCustomer();
         lockActor();var c=cardRow(id,true);require(c,"CC_SPEND");
         return command(r.requestKey(),"purchase/"+id,r,()->{
             state(c,"ACTIVE");unexpired(c);eligible(cif(str(c,"CIF_ID"),false));currentCycle(c);accrue(c,today());
@@ -218,6 +220,7 @@ public class CreditCardService {
 
     @Transactional
     public Map<String,Object> repay(String id,Repayment r) {
+        paymentPins.requireForCustomer();
         lockActor();var c=cardRow(id,true);require(c,"CC_REPAY");
         // Recheck account ownership even on retries; a request key never grants authority.
         long account=number(c,"REPAYMENT_ACCOUNT_ID");var a=banking.account("TXN_POST",account);

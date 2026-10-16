@@ -1,0 +1,126 @@
+RBI AND LEDGER AUDIT - 15 OCTOBER 2026
+
+Follow-up: the three functional issues below have been repaired. See
+RBI-LEDGER-FIXES-2026-10-15.txt for the resolution and final passing checks.
+The original observations below are retained as historical audit evidence.
+
+RESULT: Three confirmed functional issues remain. The application is not fully passing.
+
+Test target
+  Running app: http://localhost:5174, gateway 8091 and six Spring services.
+  Actual Oracle database plus isolated H2 acceptance tests.
+  RBI/NPCI functionality is the application's simulation and local reserve mirror.
+  This audit does not establish connectivity to external RBI/NPCI systems.
+
+CONFIRMED FAILURES
+
+1. HIGH - Customer position does not reconcile with the immutable ledger.
+   Account ID: 6. Stored posted balance: INR 500,000.00.
+   Ledger-derived balance: INR 0.00. Difference: INR 500,000.00.
+   Its two posting lines net to zero. The mismatch existed before this audit
+   and remains unchanged afterwards.
+   Reproduced in M05_V_ACCOUNT_POSITION_RECON, GET /api/v1/reconciliation/positions
+   and Transactions & ledger > Operations > List account position exceptions.
+   Impact: period-close approval is blocked with RECONCILIATION_OPEN. A rollback
+   Oracle test verified this behavior with a distinct checker. The close stays
+   pending. No balance or opening-funding repair was attempted.
+
+2. HIGH - Creating treasury work items fails before the approval workflow begins.
+   POST /api/v1/treasury/work-items with a valid RECONCILIATION / RESERVE_ACCOUNT
+   request returns HTTP 409 DATA_CONFLICT.
+   Oracle service test: ORA-01400, cannot insert NULL into
+   M07_TREASURY_WORK_ITEM.STATUS.
+   TreasuryRepository.insertWorkItem uses SimpleJdbcInsert without restricting
+   inserted columns. Defaulted columns receive explicit nulls.
+   Impact: new treasury reconciliation/funding work cannot reach maker/checker
+   review through the normal creation flow.
+   An explicitly inserted rollback fixture separately verified self-approval
+   rejection, stale-version rejection and successful independent-checker decision.
+   The failed HTTP creation left no QA work item behind.
+
+3. MEDIUM - The journal balance-control inquiry hides its result from staff.
+   GET /api/v1/journals/{journalId}/control returns HTTP 200 with only journalId,
+   without IS_BALANCED, DEBIT_TOTAL, CREDIT_TOTAL, LINE_COUNT or difference.
+   Reproduced for eight existing reserve journals with both admin and checker1:
+   16 failing API assertions, representing one underlying problem.
+   Reproduced in Transactions & ledger > Operations > Get journal balance control
+   with journal 20: the screen displays only JOURNAL ID 20.
+   TransactionPrivacyAdvice applies account-holder visibility to this endpoint;
+   internal GL journals with no customer posting lines always become ID-only.
+   The separate GL account ledger and /banking/journals/{id} detail view work.
+   Customer ID-only masking was checked and remains effective.
+
+ADDITIONAL UI OBSERVATIONS
+  Journal balance control and Treasury Settlement Evidence > View still require
+  manually entering an ID. Other treasury record inquiries provide selectors.
+  The treasury work-owner selector includes customer and disabled user records.
+  These are usability/assignment-validation gaps to review.
+
+TEST RESULTS
+  Existing automated tests: 233 passed, zero failed.
+    Backend: 129 passed; frontend: 80 passed; gateway: 24 passed.
+    Opt-in Oracle suites were excluded from the existing-suite count.
+  New actual-Oracle flow cases: 15 unique cases; 14 passed; 1 failed.
+    Failure: normal treasury work-item creation (issue 2).
+    Initial test-fixture issues were corrected and their affected cases rerun;
+    final results are consolidated by test name across the focused runs.
+  Live app/API checks: 173; 156 passed; 17 failed.
+    16 journal-control result failures (issue 3), one work-item creation (issue 2).
+  Read-only Oracle integrity checks: 20; 19 passed; 1 failed (issue 1).
+
+PASSED COVERAGE
+  Incoming and outgoing UPI, IMPS, NEFT and RTGS; immediate versus deferred
+  customer credit; clearing-cycle membership; independent high-value approval;
+  duplicate references and changed-payload rejection; settlement retries with
+  one debit/credit and one confirmation; rejection before debit; zero-net cycles;
+  wrong account/branch/IFSC routing; RTGS minimum and decimal validation;
+  insufficient external reserves; liquidity scope and duplicate-payload rejection;
+  invalid hold transitions; dedicated reserve GL validation; empty-cycle rejection;
+  synthetic reserve opening and independent approval; RBI cash delivery count,
+  independent checker, insufficient-liquidity rejection and idempotent replay;
+  balanced journal posting and exact replay; changed posting-key rejection;
+  invalid/future journals; Oracle immutable journal/posting update/delete guards;
+  existing treasury-work approval/version controls; period-close maker/checker
+  and reconciliation blocking; admin/checker reads, customer masking and access
+  denial; reserve/GL pagination and invalid parameters; missing-record responses;
+  balanced treasury evidence, reserve GL/position/mirror reconciliation and
+  conservation of simulated participant funds.
+
+  Browser checks covered treasury reserve/cycle/hold/opening/reconciliation
+  inquiries and detail/empty states, the work-item form, account reconciliation,
+  journal-control result, RBI asset GL postings/detailed journal and simulator.
+  Financial submissions were exercised in rollback service tests.
+
+PRESERVATION AND HEALTH
+  SHA-256 snapshots and row counts of all 12 selected financial tables match
+  before and after: account positions, GL journals, GL postings, transaction logs,
+  reserve positions, treasury entries, treasury liquidity holds, payments,
+  settlement cycles, simulator participants, confirmations and movements.
+  Remaining audit GL master fixtures: 0; beneficiaries: 0; treasury work items: 0.
+  All six services and gateway health are UP after testing.
+  No production application behavior, credentials, roles or balances were changed
+  by this audit. Only test/diagnostic sources and this report were added.
+
+EVIDENCE (relative to Downloads/integrated)
+  .runtime/rbi-ledger-local-test-results.json
+  .runtime/rbi-ledger-oracle-test-results.json
+  .runtime/rbi-ledger-api-results.json
+  .runtime/rbi-ledger-oracle-before.json
+  .runtime/rbi-ledger-oracle-after.json
+  .runtime/rbi-ledger-balance-preservation.json
+  .runtime/rbi-ledger-ui-results.json
+  .runtime/rbi-ledger-position-mismatch.png
+  .runtime/rbi-ledger-journal-control-failure.png
+  .runtime/rbi-ledger-local-tests.log
+  .runtime/rbi-ledger-oracle-tests.log
+  .runtime/rbi-ledger-oracle-focused-tests.log
+  .runtime/rbi-ledger-oracle-close-approval-tests.log
+  .runtime/rbi-ledger-api-tests.log
+
+REPRODUCTION TOOLS
+  tools/OracleRbiLedgerAudit.java: read-only consistency checks and snapshots.
+  tools/rbi-ledger-api-audit.mjs: existing credentials privately through stdin;
+    no funds movements; one marked operational work-item creation attempt.
+  backend/acceptance-tests/src/test/java/com/moneybags/OracleRbiLedgerAuditTest.java
+    Opt-in RUN_ALPHA_PAYMENT_TESTS=true; actual Oracle; all fixtures roll back.
+    The work-item creation case remains failing to preserve the regression.

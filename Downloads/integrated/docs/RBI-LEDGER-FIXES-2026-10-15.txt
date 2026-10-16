@@ -1,0 +1,81 @@
+RBI / LEDGER FIXES - 15 OCTOBER 2026
+
+The three functional failures from the audit have been corrected.
+
+1. Treasury work-item creation
+   TreasuryRepository now specifies the insert columns. Oracle supplies OPEN,
+   OPENED_AT and VERSION_NO defaults instead of receiving explicit null values.
+   Creation and independent checker decisions pass on Oracle with rollback
+   fixtures. HTTP regression coverage verifies creation, defaults, self-approval
+   rejection, stale-version rejection and use of the authenticated checker.
+
+2. Journal balance-control inquiry
+   Current employees with existing global GL_RECONCILE authority can read the
+   full journal control result. Customer and ordinary transaction-viewer masking
+   remains enforced. The inquiry exposes balanced status and debit/credit totals
+   to admin and checker, and preserves the correct missing-journal error.
+
+3. Account 6 synthetic opening funding
+   The user confirmed that the pre-existing INR 500,000 was intended as synthetic
+   demo opening funds. The missing opening funding is now recorded explicitly:
+     Transaction 110, type OPENING_FUNDING, status POSTED.
+     Journal 227, posting key demo-opening:account-6:20261015.
+     Debit INR 500,000 to dedicated asset GL 35, DEMO_OPENING_FUNDS.
+     Credit INR 500,000 to the account's existing customer-liability GL.
+   The opening funding uses a dedicated synthetic asset. It does not represent
+   a physical cash receipt or an RBI reserve movement.
+   The existing unjournaled seed offset was rebased inside the locked transaction
+   before the ledger service posted the journal. The final customer posted and
+   spendable balances both remain INR 500,000; no duplicate credit occurred.
+   Module 4's ordered projection was updated through its projection policy/store.
+   Account position and ledger-derived balance are now both INR 500,000, with
+   zero difference. Period-close approval now succeeds with a separate checker.
+
+   Earlier in this session, the separately approved rebuild to zero committed.
+   At the user's request, the previous INR 500,000 was restored immediately.
+   Both operations remain audited. The final synthetic-funding correction above
+   preserves INR 500,000 and leaves all previous journal/posting rows intact.
+
+Validation
+   Full build: 130 backend, 80 frontend and 24 gateway tests passed.
+   Focused Oracle tests: 4 passed, all transactional fixtures rolled back:
+     - normal work-item creation and independent approval;
+     - existing-work approval and version controls;
+     - self-approval and reconciliation failure blocking period close;
+     - clean period close and exact decision replay.
+   Broad live API checks: 172 passed after the code fixes; no work-item creation
+   or financial writes were performed by that read-only verification.
+   Final Oracle integrity checks: 20 passed, zero exceptions.
+   Additional post-funding live checks: 18 passed. They cover the new journal, synthetic funding
+   GL, zero reconciliation queues, customer privacy, unchanged reserve position
+   and opening-funding activity. Oracle evidence verifies the preserved posted
+   and spendable balances. See rbi-fixes-final-api-results.json.
+
+Preservation
+   All original GL journals and postings are unchanged.
+   Other customer account positions and RBI reserve positions are unchanged.
+   The demo opening repair adds one funding transaction, one balanced journal,
+   two posting lines, one dedicated synthetic GL and its projection/audit events.
+   Replay protection prevents another opening credit for the same repair key.
+   No bank accounting period was permanently closed by the regression checks.
+   Roles, credentials and encryption keys were preserved.
+
+Evidence relative to Downloads/integrated
+   .runtime/rbi-fixes-build.log
+   .runtime/rbi-fixes-local-test-results.json
+   .runtime/rbi-fixes-oracle-work-tests.xml
+   .runtime/rbi-fixes-oracle-close-tests.xml
+   .runtime/rbi-fixes-api-results.json
+   .runtime/rbi-fixes-final-api-results.json
+   .runtime/rbi-fixes-oracle-final.json
+   .runtime/rbi-fixes-demo-opening-rehearsal.json
+   .runtime/rbi-fixes-demo-opening-applied.json
+   .runtime/rbi-fixes-account6-repair-applied.json
+   .runtime/rbi-fixes-account6-restored.json
+   .runtime/rbi-fixes-account6-provenance.json
+   .runtime/rbi-fixes-final-build.log
+   .runtime/rbi-fixes-final-startup.log
+
+The original audit report remains a record of the failures observed before
+these changes. Its additional manual-ID and owner-selector UI observations
+were outside these three functional fixes.

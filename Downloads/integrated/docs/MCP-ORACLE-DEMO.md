@@ -24,10 +24,10 @@ This internal path uses Module 5's banking transfer and balanced journal workflo
 From this `integrated` directory in PowerShell:
 
 ```powershell
-& ./start-oracle-alpha.ps1
+& ./start-alpha-team.ps1
 ```
 
-Open <http://localhost:5174>. The backend is at <http://127.0.0.1:8091>. This script reads the ignored `.env.ps1`, starts Java and Node in hidden windows, and waits for backend health. It uses the normal Oracle profile; `start-local.ps1` is the separate in-memory H2 demo.
+Open <http://localhost:5174>. The backend is at <http://127.0.0.1:8091>. This script unlocks the encrypted ALPHA bundle, starts six Oracle services plus gateway/frontend in hidden windows, and waits for readiness. H2 startup has been removed.
 
 This is the normal Moneybags application connected to Oracle, not a separate MCP server. The MCP endpoint and Ask Moneybags run inside the same backend. The four `mcp_demo_*` logins are optional synthetic fixtures for repeatable checks; authorized administrators can create other users through the IAM screens, assign permissions, link customers to CIFs and accounts, and test with those logins. Creating a login alone does not grant account or assistant access.
 
@@ -37,16 +37,16 @@ To stop exactly the processes recorded by the starter:
 & ./stop-oracle-alpha.ps1
 ```
 
-The shared ALPHA team launcher loads OpenRouter settings from its encrypted bundle and prefers this workstation's Windows-protected key override when present. A direct `start-oracle-alpha.ps1` setup uses the ignored `.env.ps1` instead. The configured free model is `google/gemma-4-26b-a4b-it:free`, with `openrouter/free` as a free fallback. The key stays out of the browser, database, and tracked project files. **Ask Moneybags** should report the model as configured. The authenticated MCP endpoint continues to work independently of model availability. Free models may be rate limited or temporarily unavailable; the banking tools and authorization remain on this backend.
+The shared ALPHA team launcher loads OpenRouter settings from its encrypted bundle and prefers this workstation's Windows-protected key override when present. There is one application launcher: `start-alpha-team.ps1`. The configured free model is `google/gemma-4-26b-a4b-it:free`, with `openrouter/free` as a free fallback. The key stays out of the browser, database, and tracked project files. **Ask Moneybags** should report the model as configured. The authenticated MCP endpoint continues to work independently of model availability. Free models may be rate limited or temporarily unavailable; the banking tools and authorization remain on this backend.
 
-To replace or rotate the OpenRouter key, run `& ./set-openrouter-key.ps1` in your own PowerShell console. It accepts hidden input and saves a new Windows-protected copy in `.runtime/openrouter-api-key.dpapi`. `start-alpha-team.ps1` uses this local key in preference to the key in the encrypted team bundle. Restart the workspace to load it. If using `start-oracle-alpha.ps1` directly, load the protected key from `.env.ps1` into `OPENROUTER_API_KEY` before startup.
+To replace or rotate the OpenRouter key, run `& ./set-openrouter-key.ps1` in your own PowerShell console. It accepts hidden input and saves a new Windows-protected copy in `.runtime/openrouter-api-key.dpapi`. `start-alpha-team.ps1` uses this local key in preference to the key in the encrypted team bundle. Restart the workspace to load it. Use `stop-oracle-alpha.ps1` and `start-alpha-team.ps1` to restart after replacing the saved key.
 
 ## Get the demo logins
 
-Run this only in your own PowerShell console:
+Normal startup automatically displays all seven demo logins after you enter the team passphrase. To display them again in your own PowerShell console:
 
 ```powershell
-& ./show-alpha-team-credentials.ps1
+& ./start-alpha-team.ps1 -ShowCredentials
 ```
 
 It decrypts the single locally stored ALPHA team credential file with the current Windows user's DPAPI key and displays all seven demo logins, roles, passwords, and any account-holder access keys in that console. Another Windows user or machine cannot decrypt this file. Do not paste the keys into chat text, screenshots, or a repository. A customer needs only their own login to view linked balances and transactions. The access key is for an authorized officer viewing protected financial details.

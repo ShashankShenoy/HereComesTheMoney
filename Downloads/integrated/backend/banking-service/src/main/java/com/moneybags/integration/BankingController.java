@@ -8,6 +8,14 @@ import java.util.*;
 public class BankingController {
  private final BusinessRepository db;private final BankingAccess access;private final CustomerHashService hashes;private final LedgerService ledger;
  public BankingController(BusinessRepository db,BankingAccess access,CustomerHashService hashes,LedgerService ledger){this.db=db;this.access=access;this.hashes=hashes;this.ledger=ledger;}
+ @GetMapping("/branches") public List<Map<String,Object>> branches(){
+  var actor=CurrentActor.get();
+  if("CUSTOMER".equals(actor.userType()))return accounts().stream().map(a->Map.<String,Object>of("BRANCH_CODE",a.get("BRANCH_CODE"))).distinct().toList();
+  var permissions=List.of("ACCOUNT_READ","LOAN_READ","TELLER_READ","TELLER_OPERATE","CIF_READ","PRODUCT_READ");
+  if(permissions.stream().noneMatch(actor.permissions()::contains))throw new com.moneybags.common.api.BusinessException(HttpStatus.FORBIDDEN,"PERMISSION_REQUIRED","Branch access required");
+  return db.rows("SELECT BRANCH_CODE FROM M04_BANK_ACCOUNT UNION SELECT HOME_BRANCH_REF AS BRANCH_CODE FROM M02_CIF_CUSTOMER UNION SELECT BRANCH_CODE FROM M08_LOAN_APPLICATION UNION SELECT BRANCH_CODE FROM MBX_BRANCH_VAULT ORDER BY BRANCH_CODE").stream()
+   .filter(row->row.get("BRANCH_CODE")!=null&&permissions.stream().filter(actor.permissions()::contains).anyMatch(permission->{try{access.branch(permission,(String)row.get("BRANCH_CODE"));return true;}catch(com.moneybags.common.api.BusinessException denied){return false;}})).toList();
+ }
  @GetMapping("/overview") public Map<String,Object> overview(){
   var u=CurrentActor.get();
   if("CUSTOMER".equals(u.userType()))return Map.of("mode","Customer banking","accounts",accounts().size(),"user",u.username());
@@ -223,7 +231,7 @@ public class BankingController {
   hashes.audit("TRANSACTION_DETAIL_VIEWED","TRANSACTION",Long.toString(id),accountId==null?"GL_RECONCILE":access.bankAdminTransactionRead()?"BANK_ADMIN":hashes.proofLabel());
   return detail;
  }
- @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){try{access.global("GL_READ");}catch(com.moneybags.common.api.BusinessException denied){try{access.global("GL_RECONCILE");}catch(com.moneybags.common.api.BusinessException reconcileDenied){access.global("GL_ADMIN");}}return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
+ @GetMapping("/gl-accounts") public List<Map<String,Object>> gl(){try{access.global("GL_READ");}catch(com.moneybags.common.api.BusinessException denied){try{access.global("GL_RECONCILE");}catch(com.moneybags.common.api.BusinessException reconcileDenied){access.global("GL_ADMIN");}}return db.rows("SELECT GL_ACCOUNT_ID,GL_CODE,GL_NAME,ACCOUNT_CLASS,NORMAL_SIDE,CURRENCY_CODE,ACTIVE_FLAG FROM M05_GL_ACCOUNT ORDER BY GL_CODE");}
  private void requireGlLedgerAccess(){
   if(!"EMPLOYEE".equals(CurrentActor.get().userType()))throw new com.moneybags.common.api.BusinessException(HttpStatus.FORBIDDEN,"STAFF_ONLY","The GL register is for authorized bank staff");
   access.global("GL_RECONCILE");
@@ -250,6 +258,11 @@ public class BankingController {
   var balance=db.jdbc().queryForObject("SELECT COALESCE(SUM(CASE WHEN ENTRY_SIDE=? THEN AMOUNT ELSE -AMOUNT END),0) FROM M05_GL_POSTING WHERE GL_ACCOUNT_ID=?",java.math.BigDecimal.class,account.get("NORMAL_SIDE"),id);
   hashes.audit("GL_LEDGER_VIEWED","GL_ACCOUNT",Long.toString(id),"GL_RECONCILE");
   return Map.of("account",account,"balance",balance,"total",total,"limit",limit,"offset",offset,"postings",postings);
+ }
+ /** Journal references for staff reconciliation selectors. */
+ @GetMapping("/journals") public List<Map<String,Object>> journals(){
+  requireGlLedgerAccess();
+  return db.rows("SELECT JOURNAL_ID,JOURNAL_TYPE,VALUE_DATE,DESCRIPTION FROM M05_GL_JOURNAL ORDER BY JOURNAL_ID DESC");
  }
  /** The paired lines and balance control for a journal selected from the GL register. */
  @GetMapping("/journals/{id}") public Map<String,Object> glJournal(@PathVariable long id){

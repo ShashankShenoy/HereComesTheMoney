@@ -4,7 +4,7 @@ const requireJet=(modules,ready)=>ready({}, {whenDocumentReady:()=>Promise.resol
 requireJet.config=()=>{};
 globalThis.window={require:requireJet};
 globalThis.document={documentElement:{lang:''},addEventListener:()=>{}};
-const {syncConditionalField}=await import('./jet.js');
+const {syncConditionalField,constraintValidator}=await import('./jet.js');
 
 test('branch scope enables and requires the visible JET field without invalidating its hidden source',()=>{
   const component={disabled:true,required:false};
@@ -28,4 +28,12 @@ test('native conditional fields retain their required constraint before enhancem
   const input={disabled:true,required:false,dataset:{},closest:()=>({querySelector:()=>null})};
   syncConditionalField(input,{required:true,disabled:false});
   assert.equal(input.required,true);assert.equal(input.disabled,false);
+});
+test('visible JET controls enforce payment PIN and numerical constraints',()=>{
+ const pin=constraintValidator({pattern:'[0-9]{6}',minLength:6,maxLength:6},'Payment PIN');
+ for(const value of ['12345','abcdef','1234567'])assert.throws(()=>pin.validate(value));
+ pin.validate('000123');pin.validate(null);
+ const amount=constraintValidator({type:'number',min:1,max:12,step:1},'Tenure');
+ for(const value of ['zero','0','13','1.5'])assert.throws(()=>amount.validate(value));
+ amount.validate('12');
 });

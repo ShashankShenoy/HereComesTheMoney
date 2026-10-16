@@ -166,7 +166,7 @@ test('staff catalogs retain shared inquiries and approvals while excluding custo
  assert.ok(accounts.includes('get/api/v1/banking/accounts'));
  assert.ok(!accounts.some(id=>id.includes('/accounts/self')||id.includes('/term-deposits/my')||id==='post/api/v1/term-deposits'));
  assert.ok(!loans.some(id=>id.includes('/loans/my')));assert.ok(loans.includes('get/api/v1/loans/collections'));
- saveSession({accessToken:'test-token',user:{userId:'menu-checker',userType:'EMPLOYEE',roles:['BANK_CHECKER'],permissions:['ACCOUNT_READ','LOAN_READ']}});workflowResponses();
+ saveSession({accessToken:'test-token',user:{userId:'menu-checker',userType:'EMPLOYEE',roles:['BANK_CHECKER'],permissions:['ACCOUNT_READ','LOAN_READ','LOAN_DECIDE']}});workflowResponses();
  const checkerLoans=operationIds(await bankingScreen('loans')),checkerAccounts=operationIds(await bankingScreen('accounts'));
  assert.ok(!checkerLoans.includes('get/api/v1/loans/collections'));
  assert.ok(checkerLoans.includes('post/api/v1/loans/applications/{id}/decisions'));

@@ -77,39 +77,42 @@ IAM and financial domains write their own audit/outbox evidence within the trans
 
 This remains a **shared-schema service extraction**. Oracle tables, foreign keys, cross-domain read models and installation keys are retained. Reporting reads posted ledger data; authorization and privacy decisions read current shared facts. A database outage affects every service. Separate Oracle schemas or databases would require ownership-specific database roles, explicit events/outbox consumers, replacement read models, and compensation/reconciliation designs before removing existing cross-domain transactions and foreign keys.
 
-Local H2 is initialized and seeded only by banking's local profile. Other services never initialize it. Oracle startup uses `oracle-microservices` with SQL initialization disabled and never runs the local seed.
+H2 fixtures remain in regression sources; the application launcher requires Oracle. Oracle startup uses `oracle-microservices` with SQL initialization disabled and never runs the local seed.
 
 ## Start and stop
 
-From the repository root:
+Use PowerShell 7 in `Downloads/integrated`. The three user-facing scripts are:
 
 ```powershell
-./start.ps1
-./stop.ps1
+./set-openrouter-key.ps1
+./start-alpha-team.ps1
+./stop-oracle-alpha.ps1
 ```
 
-From `Downloads/integrated`:
+The start script prompts for the encrypted ALPHA team passphrase, loads the original Oracle connection and installation keys, automatically displays all seven team logins in the console, and calls the internal Oracle lifecycle module in `tools/oracle-runtime.psm1`. It validates all ports, prerequisites, and source/artifact fingerprints; starts banking, identity, payments, loans, audit, reporting, gateway, and frontend; waits for readiness; and cleans up a partial failure. Every Java service uses `oracle-microservices` with SQL initialization disabled. The gateway remains on 8091 and frontend on 5174.
+
+The launcher records each PID with its creation time, serializes startup/shutdown with an OS lock, and restores the parent environment. Shutdown uses the ownership record in reverse order and refuses to stop a reused PID. It can also stop a recorded run from an older launcher. No database process, database volume, or installation key is removed.
+
+Use `-BackendPort` and `-FrontendPort` for alternate gateway/frontend ports. Internal domain service ports remain 8092–8097. Logs are `.runtime/<component>.log` and `.runtime/<component>.err.log`; ownership is `.runtime/microservices-processes.json`.
+
+For builds before connecting a restrictive VPN:
 
 ```powershell
-./build-before-start.ps1 -Offline
-./start-microservices.ps1 -SkipBuild
-./stop-microservices.ps1
+./start-alpha-team.ps1 -BuildOnly
+# Connect the ALPHA VPN.
+./start-alpha-team.ps1 -SkipBuild
 ```
 
-The launcher validates all ports, prerequisites and source/artifact fingerprints; starts H2 in local mode; waits for banking's seeded readiness; starts identity, payments, loans, audit and reporting; then starts gateway and frontend. It records each PID with its creation time, serializes startup/shutdown with an OS lock, restores parent environment overrides and cleans up a partial failure. Shutdown uses the saved ownership record in reverse order and refuses to stop a reused PID. No database volume or installation key is removed.
-
-Custom ports are supported through `-GatewayPort`, `-IdentityPort`, `-ReportingPort`, `-BankingPort`, `-PaymentsPort`, `-LoanPort`, `-AuditPort`, `-DatabasePort` and `-FrontendPort`. Root startup also forwards `-CifKeyFile` and `-MfaKeyFile`. Logs are `.runtime/<component>.log` and `.runtime/<component>.err.log`; ownership is `.runtime/microservices-processes.json`.
-
-For the existing Oracle team environment, use `./start-alpha-team.ps1 -SkipBuild`; it prompts for the encrypted bundle passphrase and loads the original Oracle and encryption settings privately. Existing Oracle entry points delegate to the six-service launcher. Their gateway remains on 8091 and frontend on 5174. Alternatively configure `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` privately and run `./start-microservices.ps1 -Database Oracle` with the installation's existing keys.
+Add `-Offline` to build with cached dependencies. `-ShowCredentials` displays saved team logins without restarting. H2 and alternate Oracle launcher scripts have been removed; H2 fixtures remain only in development/regression sources.
 
 ## Verification
 
 ```powershell
-./build-before-start.ps1 -Offline
-./test-environment.ps1 -SkipBuild
-./test-oracle-environment.ps1 -SkipBuild
+./start-alpha-team.ps1 -BuildOnly -Offline
+./tools/test-oracle-startup.ps1
+./tools/test-oracle-environment.ps1 -SkipBuild
 ```
 
-Build verification runs the backend regression suite, HTTP client failure/retry tests, architecture/dependency checks, gateway tests, frontend tests and standalone frontend build. The local environment suite runs six JVMs with disposable H2, complete domain flows, invalid requests, transfer races, MFA, every service outage/recovery, shared database failure, startup cleanup, artifact checks and Windows PowerShell 5.1 compatibility. The Oracle suite guards credentials with a read-only preflight, starts all six services without H2, checks API ownership/security and performs the financial audit in a rollback-only transaction.
+Build verification runs the backend regression suite, HTTP client failure/retry tests, architecture/dependency checks, gateway tests, frontend tests, and standalone frontend build. The launcher suite checks preflight, partial startup cleanup, Oracle service arguments, process ownership, encrypted settings, and environment restoration without connecting to a database. The opt-in Oracle suite requires the ALPHA network and team passphrase; it checks the schema and credentials, starts all six services without H2, checks API ownership/security, and performs the financial audit in a rollback-only transaction.
 
-See the [current test report](MICROSERVICES-TEST-REPORT.md), [case inventory](MICROSERVICES-TEST-CASES.csv) and [structured results](MICROSERVICES-TEST-RESULTS.json) for exact counts, measured workloads, skipped checks and unresolved Oracle findings. Tests do not grant permanent shared roles, reset shared passwords or repair Oracle financial balances.
+The earlier local H2 environment runners were removed with the H2 launchers. Their existing [test report](MICROSERVICES-TEST-REPORT.md), [case inventory](MICROSERVICES-TEST-CASES.csv), and [structured results](MICROSERVICES-TEST-RESULTS.json) remain historical evidence. Tests do not grant permanent shared roles, reset shared passwords, or repair Oracle financial balances.

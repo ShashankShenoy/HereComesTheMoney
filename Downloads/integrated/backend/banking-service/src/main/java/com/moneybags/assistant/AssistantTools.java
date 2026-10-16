@@ -23,6 +23,9 @@ import java.util.UUID;
 /** One allowlist and one dispatcher serve the chat agent and the MCP endpoint. */
 @Service
 public class AssistantTools {
+    private static final Set<String> CHECKER_READ_TOOLS=Set.of(
+        "list_scoped_accounts","get_account_position","list_recent_transactions",
+        "search_customers","list_pending_beneficiaries");
     public record Definition(String name,String description,Map<String,Object> inputSchema,String audience,String permission) {
         public Map<String,Object> mcp() { return Map.of("name",name,"description",description,"inputSchema",inputSchema); }
         public Map<String,Object> model() { return Map.of("type","function","name",name,"description",description,"parameters",inputSchema,"strict",true); }
@@ -68,8 +71,10 @@ public class AssistantTools {
     public List<Definition> available() {
         var user=CurrentActor.get();
         if(!"CUSTOMER".equals(user.userType()) && !"EMPLOYEE".equals(user.userType()))return List.of();
+        boolean checker=user.roles().contains("BANK_CHECKER")&&!user.roles().contains("BANK_ADMIN");
         return DEFINITIONS.stream().filter(d->("BOTH".equals(d.audience()) || d.audience().equals(user.userType()))
-                && user.permissions().contains(d.permission())).toList();
+                && user.permissions().contains(d.permission())
+                && (!checker || CHECKER_READ_TOOLS.contains(d.name()))).toList();
     }
     public Object invoke(String name,JsonNode args,String customerHash) {
         Definition definition=available().stream().filter(d->d.name().equals(name)).findFirst()

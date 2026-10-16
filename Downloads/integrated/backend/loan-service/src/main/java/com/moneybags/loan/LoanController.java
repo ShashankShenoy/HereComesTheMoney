@@ -20,7 +20,7 @@ public class LoanController {
     /** Lists applications for one authorized branch. */
     @GetMapping("/applications")
     public ApiResponse<List<Application>> applications(@AuthenticationPrincipal UserPrincipal actor,
-        @RequestParam String branch,@RequestParam(required=false) String status,@RequestParam(defaultValue="25") int limit){
+        @RequestParam(required=false) String branch,@RequestParam(required=false) String status,@RequestParam(defaultValue="25") int limit){
         return ApiResponse.of(loans.applications(actor,branch,status,limit));
     }
 

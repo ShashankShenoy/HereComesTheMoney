@@ -43,7 +43,7 @@ public class DecisionClient {
   if("DELIVERY".equals(q.action())&&!"DOWNLOAD".equals(q.deliveryChannel()))allowed=false;
   if(q.purposeCode()!=null)allowed&=db.count("""
       SELECT COUNT(*) FROM M09_PRIVACY_PROCESSING_PURPOSE
-      WHERE PURPOSE_CODE=? AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSTIMESTAMP
+      WHERE PURPOSE_CODE=? AND OWNER_SERVICE='M10_STATEMENTS' AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=SYSTIMESTAMP
         AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>SYSTIMESTAMP)
       """,q.purposeCode())>0;
   return new Decision(allowed,UUID.randomUUID().toString(),allowed?null:"STATEMENT_POLICY_DENIED");

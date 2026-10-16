@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {createGateway, serviceFor, defaults} from './server.mjs';
+import {createGateway, serviceFor, defaults, mergeApiSpecs} from './server.mjs';
 
 async function listen(server) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -29,6 +29,18 @@ async function fixture(t, options = {}) {
   t.after(async () => { await close(gateway); for (const service of services) await close(service); });
   return {url, services};
 }
+test('service-local decision schemas and nested references survive documentation merge',()=>{
+  const loan={paths:{'/api/v1/loans/applications/{id}/decisions':{post:{requestBody:{content:{'application/json':{schema:{$ref:'#/components/schemas/Decision'}}}}}}},security:[{bearer:[]}],components:{securitySchemes:{bearer:{type:'http',scheme:'bearer'}},schemas:{Decision:{type:'object',required:['code','authorityCode'],properties:{code:{type:'string'},terms:{$ref:'#/components/schemas/Terms'}}},Terms:{type:'object',properties:{sanctionedAmount:{type:'number'},annualRatePct:{type:'number'}}}}}};
+  const banking={paths:{'/api/v1/credit-cards/products/{id}/decision':{post:{requestBody:{content:{'application/json':{schema:{$ref:'#/components/schemas/Decision'}}}},security:[{bearer:[]}]}}},components:{securitySchemes:{bearer:{type:'http',scheme:'bearer'}},schemas:{Decision:{type:'object',required:['decision','rowVersion'],properties:{decision:{type:'string'},rowVersion:{type:'integer'}}}}}};
+  const merged=mergeApiSpecs({loan,banking});
+  assert.equal(merged.paths['/api/v1/loans/applications/{id}/decisions'].post.requestBody.content['application/json'].schema.$ref,'#/components/schemas/loan__Decision');
+  assert.deepEqual(merged.components.schemas.loan__Decision.required,['code','authorityCode']);
+  assert.equal(merged.components.schemas.loan__Decision.properties.terms.$ref,'#/components/schemas/loan__Terms');
+  assert.deepEqual(merged.components.schemas.banking__Decision.required,['decision','rowVersion']);
+  assert.deepEqual(merged.paths['/api/v1/loans/applications/{id}/decisions'].post.security,[{loan__bearer:[]}]);
+  assert.deepEqual(merged.paths['/api/v1/credit-cards/products/{id}/decision'].post.security,[{banking__bearer:[]}]);
+  assert.equal(loan.components.schemas.Decision.properties.terms.$ref,'#/components/schemas/Terms');
+});
 test('routes use complete path segments', () => {
   for (const path of ['/api/v1/auth/login', '/api/v1/iam/users', '/api/v1/customer-access/rotate']) assert.equal(serviceFor(path), 'identity');
   for (const path of ['/api/v1/reporting/statements', '/api/v1/catalog/masking-profiles']) assert.equal(serviceFor(path), 'reporting');

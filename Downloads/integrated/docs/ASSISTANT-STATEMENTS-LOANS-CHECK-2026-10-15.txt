@@ -1,0 +1,182 @@
+AI ASSISTANT, STATEMENTS AND LOANS AUDIT
+15 October 2026 | Local tests and read-only Oracle inspection
+
+HISTORICAL AUDIT: The four findings below were subsequently repaired.
+See ASSISTANT-STATEMENTS-LOANS-FIXES-2026-10-15.txt for the changes, validation,
+approved staff configuration repair and remaining live-test limits.
+
+RESULT
+Four actionable findings remain. No application fixes or live business-data
+changes were made in this audit. Existing loans and issued statements reconcile.
+The real AI provider and fresh live statement generation were not exercised.
+
+1. HIGH: LOAN SANCTION TERMS CAN FALL BELOW PRODUCT MINIMUMS
+Confirmed through authenticated local controller tests, using a separate maker
+and checker with valid sanction authority and an assessed application.
+
+Reproduction A: product minimum INR 1,000; application INR 12,000 / 12 months;
+checker sanctions INR 0.01 / 12 months. API returns HTTP 200 and APPROVED.
+Reproduction B: product minimum tenure 12 months; application INR 12,000 /
+12 months; checker sanctions INR 12,000 / 1 month. API again returns APPROVED.
+Expected: reject sanction terms outside the product version's bounds.
+
+LoanService.create validates the requested amount/tenure against the product.
+LoanService.decide checks positive values, authority limits and that sanctioned
+terms do not exceed the application, but does not enforce product minimums.
+Relevant source: backend/loan-service/src/main/java/com/moneybags/loan/LoanService.java
+
+Read-only inspection found no existing database facilities outside their current
+product amount/tenure bounds. The reproductions used disposable H2 records only.
+
+2. MEDIUM: CHECKER ASSISTANT CHAT AND MCP DISCOVERY ARE BLOCKED
+Confirmed in two local controller tests. A BANK_CHECKER sees the assistant widget,
+but POST /api/v1/assistant/chat and POST /api/v1/assistant/mcp (tools/list)
+both return HTTP 403 / CHECKER_APPROVAL_ONLY before the assistant can respond.
+BankCheckerWriteBoundary rejects these POST routes, including read-only requests.
+The test model is stubbed; no provider call was required to reproduce the denial.
+Relevant source: backend/shared/src/main/java/com/moneybags/iam/security/BankCheckerWriteBoundary.java
+UI entry: frontend/app.js
+
+3. MEDIUM: STAFF STATEMENT CONFIGURATION IS INCOMPLETE
+Confirmed by Oracle SELECTs in an enforced READ ONLY transaction:
+- No M10_STATEMENTS processing purpose exists.
+- No approved WEB / STAFF masking profile exists.
+- No approved STAFF narration catalogue entries exist.
+Staff requests require a purpose; issuance selects an audience-specific approved
+masking policy and approved narrations. Staff-assisted issuance therefore lacks
+the configuration it needs. This audit did not attempt to approve or add policies.
+
+Customer configuration has an approved WEB / CUSTOMER masking profile and four
+effective en-IN narration types. Five existing customer statements are ISSUED;
+their line counts, closing balances and running balances are consistent. One
+additional request is AUTHORIZED, which is pending work rather than a failed issue.
+
+4. MEDIUM: PREPAYMENT SETTINGS EXCEED SERVICING CAPABILITIES
+All seven active loan products have PREPAYMENT_ALLOWED,
+PARTIAL_PREPAYMENT_ALLOWED and FORECLOSURE_ALLOWED set to Y.
+LoanServicingController only allocates payments to accrued due installments.
+An early payment is rejected with HTTP 409 / LOAN_SERVICING_RULE and a message
+that early prepayment requires a reschedule workflow. No loan reschedule or
+foreclosure command exists in the implemented loan controllers.
+This is a product-configuration/capability mismatch, not a balance discrepancy.
+The early-payment rejection was reproduced in the isolated lifecycle test.
+Relevant source: backend/loan-service/src/main/java/com/moneybags/integration/LoanServicingController.java
+
+VALIDATION COMPLETED
+Existing regression suites:
+- Backend: 170 passed, zero failures/errors. Another 60 Oracle opt-in cases were
+  skipped; they are not counted as passed in this audit.
+- Frontend: 83 passed.
+- Gateway: 24 passed.
+Existing automated total: 277 passed.
+
+Additional focused local suite: 11 tests, 7 passed and 4 failed.
+The four failed cases reproduce findings 1 and 2 above: two sanction-boundary
+cases and the two checker assistant routes. They remain failing evidence tests.
+
+Focused assistant checks passed:
+- Customer response delivery using a stubbed model.
+- Same-session conversation reuse and cross-customer conversation isolation.
+- Model tool loop for own-account listing.
+- Foreign-account tool denial returned safely to the model.
+- Blank/oversized messages and invalid conversation IDs rejected.
+- Provider rate-limit error mapping (simulated HTTP 429).
+- Repeated tool requests bounded to six rounds with a usable fallback reply.
+Existing integration tests also passed MCP scope checks, pending-action ownership,
+exact confirmation and transfer execution only after explicit confirmation.
+These results do not establish that the configured external AI model is reachable.
+
+Focused statement check passed using committed requests in disposable H2:
+- Request creation and issuance.
+- Opening + signed lines = closing; every running balance checked.
+- PDF, CSV and HTML downloads.
+- Another customer's downloads denied for all three formats.
+- One-page statement visually inspected after rendering to PNG.
+- An 80-line synthetic layout fixture rendered to two pages and visually checked;
+  both page numbers present, no text outside page boundaries. The duplicated
+  layout rows test pagination only, not financial arithmetic.
+Existing tests also passed future-period rejection, download auditing, effective
+staff-purpose checks and invalid policy/narration catalogue code rejection.
+PDF supports Latin narration text; non-Latin narration requires HTML or CSV.
+
+Focused loan lifecycle passed in H2:
+- Draft, submission and assessment.
+- Maker self-approval rejected; independent checker approval succeeds.
+- Offer issuance and customer account selection.
+- Conversion rejected without verified signed-offer evidence.
+- Independent document verification, conversion and disbursement.
+- Repeated disbursement approval credits the account only once.
+- Early repayment rejected; due installment interest accrues only once.
+- Full due repayment closes the facility with zero outstanding principal/interest.
+- Identical repayment replay does not debit again and creates one payment record.
+Existing regression tests additionally cover eligibility, closed product sales,
+fractional amounts, unsupported repayment frequencies, frozen/foreign accounts,
+stale signed-offer evidence after account changes, offer expiry, disbursement
+request replay, pending-state repayment rejection, collections and branch scope.
+
+ORACLE READ-ONLY RESULTS
+12 consistency checks passed, zero exceptions/errors:
+- Facility totals versus posted disbursements.
+- Independent disbursement checkers.
+- Balanced journals for posted disbursements.
+- One active schedule per active facility.
+- Installment counts and schedule principal/interest totals.
+- Principal versus schedule repayments.
+- Loan principal/interest projections versus receivable ledger.
+- Existing facility terms versus product bounds.
+- Allocations versus payment totals (no existing loan payments; this check is
+  vacuous for live data, with repayment behavior tested locally instead).
+- Issued statement line counts and signed totals.
+- Statement running balances.
+- Completed statement requests versus issued snapshots.
+
+Inspected: 9 applications, 8 facilities (7 ACTIVE, 1 PENDING_DISBURSEMENT),
+7 posted disbursements, 7 active loan products. All seven products have the three
+required loan GL roles and supported fixed-rate, monthly interest configurations.
+All three active deposit product versions have a loan liability GL mapping.
+The BANK_CHECKER role has LOAN_DECIDE, LOAN_DOCUMENT_VERIFY, LOAN_DISBURSE_APPROVE
+and LOAN_READ, plus current LOAN_SANCTION authority up to INR 5,000,000 / 20%.
+There are three active global checker accounts. No missing-loan-checker issue
+was found in current database configuration.
+
+LIMITS AND DATA SAFETY
+Automatic approval review rejected the combined live AI/statement action because
+it used privileged accounts, sent account/tool data to the configured external
+provider and created statement records. The user then selected local and
+read-only testing. That rejected action was not executed or bypassed.
+
+Oracle inspection used SET TRANSACTION READ ONLY followed by rollback. No login
+or statement/read-audit records were created through the live app. No live loan
+was approved, disbursed, repaid or otherwise changed. Only local audit tools,
+evidence and this report were added. The unused live-test script was removed.
+
+The app gateway at http://127.0.0.1:8091/actuator/health refused connections at
+the final live availability check, and none of the expected app ports appeared
+as listening. Existing app credentials and configuration were not changed.
+Consequently current browser flows, external provider connectivity and fresh
+Oracle statement generation remain unverified. Do not read this audit as a
+complete live end-to-end pass.
+
+EVIDENCE (paths relative to Downloads/integrated)
+.runtime/assistant-statements-loans-local-summary.json
+.runtime/assistant-statements-loans-local.log
+.runtime/assistant-statements-loans-frontend.log
+.runtime/assistant-statements-loans-gateway.log
+.runtime/assistant-statements-loans-db-readonly.json
+.runtime/local-assistant-audit/results.json
+.runtime/local-assistant-audit/test.log
+.runtime/local-assistant-audit/pdf-inspection.json
+.runtime/local-assistant-audit/statement.pdf
+.runtime/local-assistant-audit/statement.csv
+.runtime/local-assistant-audit/statement.html
+.runtime/local-assistant-audit/pagination.pdf
+
+Reproducible audit sources:
+tools/LocalAssistantStatementsAuditTest.java
+tools/LocalAuditLauncher.java
+tools/OracleAssistantStatementsLoansReadAudit.java
+tools/inspect-audit-statements.py
+
+Audit classes compile into .runtime/local-assistant-audit/classes using the cached
+acceptance-test classpath and JUnit Platform Launcher 1.12.2. They do not modify
+the app source, verified build or deployed services.

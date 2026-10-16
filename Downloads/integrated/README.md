@@ -1,130 +1,59 @@
-# Moneybags — setup and product demo guide
+# Moneybags Oracle ALPHA
 
-Moneybags runs six separate Spring Boot services for identity, banking, payments, loans, audit/compliance and reporting, a Node.js API gateway, and an Oracle JET / Knockout frontend. Banking has customer, product, account, ledger, treasury, card and deposit libraries. The services retain the existing shared relational schema and balanced transaction ledger. Run them with a fresh local H2 database, a local Oracle Free container, or an existing Oracle database. See [the service architecture and verification guide](docs/MICROSERVICES.md).
+Moneybags runs six Spring Boot services, a Node.js API gateway, and an Oracle JET / Knockout frontend against the existing shared ALPHA Oracle database. There are three user-facing PowerShell scripts in this directory:
 
-This guide covers setup, startup, logins, and demonstrations for each product and supporting banking tab. **Transfers between two users of this demo bank debit the sender and credit the recipient.** External payment rails, card purchases, and the RBI reserve mirror have separate simulation workflows.
-
-## Contents
-
-- [Choose your setup](#choose-your-setup)
-- [Prerequisites](#prerequisites)
-- [Start the local demo](#start-the-local-demo)
-- [Local users and data](#local-users-and-data)
-- [Use Oracle](#use-oracle)
-- [Oracle startup and VPN recovery](#oracle-startup-and-vpn-recovery)
-- [Optional configuration](#optional-configuration)
-- [Prepare a demonstration](#prepare-a-demonstration)
-- [Product demo walkthroughs](#product-demo-walkthroughs)
-- [Supporting banking and administration tabs](#supporting-banking-and-administration-tabs)
-- [Troubleshooting](#troubleshooting)
-- [Verification and handoff](#verification-and-handoff)
-- [Further documentation](#further-documentation)
-
-## Choose your setup
-
-| Setup | Database | Default web address | Restart behavior |
-| --- | --- | --- | --- |
-| Local demo | In-memory H2 with synthetic users/products | http://localhost:5173 | All demo changes reset to the seeded starting state |
-| Self-contained Oracle demo | Local Oracle Free container and its own persistent volume | http://localhost:5174 | Committed records remain in the Docker volume |
-| Shared ALPHA Oracle demo | Team ALPHA schema, unlocked from an encrypted repository bundle | http://localhost:5174 | Committed records remain in ALPHA |
-| Other Oracle schema | Your configured Oracle schema | http://localhost:5174 | Committed records remain |
-
-Choose local H2 for a first run or repeatable presentation. It needs no Oracle installation, VPN, database password, AI key, or Kafka broker. Choose the self-contained Oracle demo for a persistent local database. It needs Docker Desktop, but no private Oracle host or credentials. Use the existing-schema Oracle option to connect to an organization's database. The fully seeded H2 fixtures are **not automatically created in Oracle**.
-
-## Prerequisites
-
-| Tool | Requirement |
+| Script | Purpose |
 | --- | --- |
-| Java JDK | 17 or newer; latest verification used JDK 21 |
-| Maven | 3.9 or newer |
-| Node.js and npm | Node.js 20 or newer; latest verification used Node.js 22 |
-| PowerShell | Windows PowerShell 5.1 or PowerShell 7 for the supplied launchers |
-| PowerShell 7 | Required for the encrypted shared ALPHA launcher |
-| Browser | A current desktop browser; separate profiles help demonstrate several users |
-| SQL Developer / SQL*Plus | Oracle schema installation and diagnostics only |
-| Docker Desktop | Self-contained Oracle demo only; start its engine before launching |
+| `set-openrouter-key.ps1` | Save this Windows user's OpenRouter API key at a hidden prompt |
+| `start-alpha-team.ps1` | Unlock the team bundle, build, and start the Oracle application |
+| `stop-oracle-alpha.ps1` | Stop the application processes recorded by this checkout |
 
-Put Java, Maven, Node.js, and npm on PATH. Obtain the project, then open PowerShell in the **integrated directory** containing this README, backend, frontend, and the startup scripts:
+## Start the Oracle app
+
+Use PowerShell 7 on Windows with Java JDK 17+, Maven 3.9+, and Node.js 20+ on PATH. Connect the ALPHA network/VPN and have the current team bundle passphrase ready. Open PowerShell in `Downloads/integrated`:
 
 ~~~powershell
-Set-Location 'C:/path/to/integrated'
-java -version
-mvn -version
-node --version
-npm --version
+./set-openrouter-key.ps1  # Save or replace your own AI key when needed.
+./start-alpha-team.ps1
 ~~~
 
-**Every command below assumes this directory.** Replace example paths and configuration placeholders. The first build needs access to Maven and npm repositories to download dependencies.
-
-## Start the local demo
+Open [localhost:5174](http://localhost:5174) after the **Moneybags microservices ready** message. Enter the team passphrase at the hidden prompt. The launcher automatically displays all seven team logins with their roles, passwords, and any customer access keys, then starts six Java services, the API gateway, and frontend in hidden windows, checks readiness, and cleans up a partial failure. It uses Oracle with SQL initialization disabled. Database records persist after stopping.
 
 ~~~powershell
-& ./start-local.ps1
+./stop-oracle-alpha.ps1
 ~~~
 
-Wait for the **Moneybags microservices ready** message. The launcher verifies all backend modules, tests the gateway and architecture boundaries, installs frontend dependencies with npm ci, checks/tests the frontend, builds frontend/dist, and starts the database, six Java services, gateway and frontend in hidden windows. It waits for readiness and cleans up a failed start. `start-microservices.ps1` is the direct entry point; the existing local and Oracle launchers delegate to it.
+The start script also supports:
 
-| Page | Address |
+| Option | Purpose |
 | --- | --- |
-| Customer sign-in | [localhost:5173/login](http://localhost:5173/login) |
-| Bank-admin / employee sign-in | [localhost:5173/employee/login](http://localhost:5173/employee/login) |
-| API documentation | [localhost:5173/swagger](http://localhost:5173/swagger) |
-| Health | [localhost:5173/actuator/health](http://localhost:5173/actuator/health) |
-| API gateway directly | http://127.0.0.1:8090 |
-| Identity / reporting / banking | http://127.0.0.1:8092 / :8093 / :8094 |
+| `-BuildOnly` | Build and test before connecting a restrictive VPN; no passphrase or database needed |
+| `-Offline` | Build with cached Maven/npm dependencies |
+| `-SkipBuild` | Verify the previous build's fingerprints and start it |
+| `-ShowCredentials` | Display locally unlocked team logins in your own console |
+| `-CheckOnly` | Check the bundle passphrase and any existing ALPHA encryption keys |
+| `-UnlockOnly` | Unlock team logins and keys without starting services |
+| `-BackendPort` / `-FrontendPort` | Change the gateway/frontend ports; defaults are 8091/5174 |
 
-Health should return status **UP**. Stop with:
+Internal build, encryption, and process helpers are modules under `tools/`. The H2, Docker-demo, duplicate start/stop, and restart launchers have been removed. See [service architecture](docs/MICROSERVICES.md) for ports and service ownership.
 
-~~~powershell
-& ./stop-local.ps1
-~~~
+## Demo logins and data
 
-Restarting the local backend resets all synthetic data. Keep it running until a multi-step demonstration finishes.
+### Align customer roles and product types
 
-The local launcher builds each service JAR and the frontend bundle. On first startup, banking and identity create installation-specific `runtime/cif.key` and `runtime/mfa.key` files. Neither those keys nor `.runtime/` build outputs, logs, process records, and workstation-bound encrypted settings are needed from another person's machine. A fresh checkout generates its own files.
+Run `database/023-align-demo-roles.sql` in SQL Developer as the schema owner after migrations 010 and 015–022. It preserves every username, status, password, CIF, account and financial record. All existing customer identities receive `BANK_CUSTOMER` with SELF scope and the product/currency dimensions from the confirmed customer `adipil`. New customer signups inherit those dimensions too. Customer product offers still check each customer's own branch and KYC eligibility.
 
-For alternative ports, allow the new browser origin before startup:
+Use `admin` with `BANK_ADMIN` to prepare operations and `checker1` with `BANK_CHECKER` for independent approvals. Existing checker demo logins remain available with the same complete checker role. The checker covers loan decisions, signed documents and disbursements, teller cash counts, card applications/products, payments, KYC, account and other approvals. The script requires the existing reference customer, admin and checker1; it fails before writes if that setup is missing. Default demo authorities, when not already configured, are INR 5,000,000 at 20% for loan sanction and INR 200,000 at 24% for credit limits. Affected users sign in again after applying it.
 
-~~~powershell
-$env:FRONTEND_ORIGINS='http://localhost:5177,http://127.0.0.1:5177'
-& ./start-local.ps1 -BackendPort 8097 -FrontendPort 5177
-~~~
+Credit card purchases and repayments now require the customer's existing six-digit payment PIN. **Statements & documents** lets a customer choose an account and period, then generate and download PDF, CSV or HTML in one step. Pending authorized requests can be retried from the same page.
 
-Use http://localhost:5177 for that run. Stop an earlier recorded local run before starting another. When returning to default ports, update or remove the FRONTEND_ORIGINS override.
-
-## Local users and data
-
-All four **synthetic local users** use password **LocalBanking!2026**. These credentials apply only to the isolated local fixture.
-
-| Username | Sign-in page | Role / demonstration |
-| --- | --- | --- |
-| customer | /login | Own savings account, transfers, deposits, card/loan applications, statements |
-| customer2 | /login | Different customer; receive money, send it back, inspect own history |
-| admin | /employee/login | Global bank administrator / maker; products, servicing, ledger, teller, treasury, administration |
-| checker | /employee/login | Restricted independent checker; named approvals and verification |
-
-| Fixture | Fresh local value |
-| --- | --- |
-| Customer 1 account | MB000000001, internal account ID 1, INR 75,000 |
-| Customer 2 account | MB000000002, internal account ID 2, INR 25,000 |
-| CIFs | demo-cif-1 and demo-cif-2, with synthetic verified KYC |
-| Branch | MUM001 |
-| Savings | Everyday Savings, product/version 1, illustrative 3% annual rate |
-| Loan | Monthly Personal Loan, product/version 2, illustrative 12% fixed annual rate |
-| Fixed deposit | Fixed Deposit, product/version 3, illustrative 6.5% fixed annual rate |
-| Credit card | Moneybags Classic, approved version 1, illustrative 24% annual rate |
-| Example GL IDs | Customer deposits 1; teller cash 2; suspense 3; reserve 6; vault cash 8 |
-| Reserve account | ID 1, synthetic opening INR 1,000,000 |
-| Branch vault | Registered synthetic opening INR 100,000 |
-| Internal bank code | MCPB0000002, for verified-beneficiary routing in the assistant |
-
-Rates and amounts are software-demo fixtures. After transactions, use **current balances**, not these starting values. Customer UI account fields use account numbers; product, application, card, journal, GL, and payment references are separate IDs. Copy newly created IDs from the result shown on screen.
+Starting with `./start-alpha-team.ps1` automatically displays the ALPHA usernames, roles, passwords, and customer access keys after you enter the passphrase. Use `-ShowCredentials` to display them again without restarting. Customer login is `/login`; staff login is `/employee/login`. Use current Oracle balances and configuration when following the product workflows below; earlier H2 fixture balances and passwords are not ALPHA credentials.
 
 ## Use Oracle
 
 ### Shared ALPHA database for the team
 
-The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and team demo logins. The original `.env.ps1` and Windows DPAPI files are tied to one workstation and remain ignored. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
+The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and team demo logins. Private `.env.ps1` and Windows DPAPI files remain ignored; the launcher uses the encrypted team bundle and this Windows user's saved OpenRouter override. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
 
 On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** in this directory, and run:
 
@@ -132,7 +61,7 @@ On a new Windows checkout, connect the ALPHA network/VPN, open **PowerShell 7** 
 ./start-alpha-team.ps1
 ~~~
 
-Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, places ALPHA's CIF/MFA keys in the dedicated ignored `.runtime/alpha-keys/` directory, saves **all seven demo logins in one Windows-protected file** at `.runtime/alpha-team-credentials.dpapi`, builds the app, and starts it at [localhost:5174](http://localhost:5174). Existing `runtime/cif.key` and `runtime/mfa.key` files from another local demo are left alone. The database password is passed to the backend through its process environment. Run `./show-alpha-team-credentials.ps1` in your own console to display all seven usernames, roles, passwords, and any customer access keys together. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./build-before-start.ps1`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
+Enter the team passphrase at the hidden prompt. The launcher decrypts the bundle, places ALPHA's CIF/MFA keys in the dedicated ignored `.runtime/alpha-keys/` directory, saves **all seven demo logins in one Windows-protected file** at `.runtime/alpha-team-credentials.dpapi`, automatically displays their usernames, roles, passwords, and any customer access keys in your console, builds the app, and starts it at [localhost:5174](http://localhost:5174). Existing `runtime/cif.key` and `runtime/mfa.key` files from another local demo are left alone. The database password is passed to the backend through its process environment. Use `./start-alpha-team.ps1 -ShowCredentials` to display the saved logins again. Stop with `./stop-oracle-alpha.ps1`. For a second start, repeat the same unlock command. On a restrictive VPN, build first with `./start-alpha-team.ps1 -BuildOnly`, reconnect, and use `./start-alpha-team.ps1 -SkipBuild`.
 
 To use your own OpenRouter key with this team launcher, run `./set-openrouter-key.ps1` in PowerShell 7 and enter the key at its hidden prompt. It saves a Windows-protected override in `.runtime/openrouter-api-key.dpapi`; the next `./start-alpha-team.ps1` run uses that key instead of the bundle's key. The browser and tracked files never need the key.
 
@@ -149,20 +78,6 @@ The shared staff passwords were reset for the team bundle. Previously signed-in 
 The passphrase for the bundle created on the original workstation is stored only in ignored `.runtime/alpha-team-passphrase.txt`. Its owner must share it securely with authorized teammates. If the passphrase or encrypted bundle is lost, the original workstation can create a replacement with `./tools/export-alpha-team-bundle.ps1 -ReplaceBundle`; distribute the replacement passphrase separately. A replacement invalidates the previous passphrase. Existing local installation keys that differ from the bundle stop startup rather than overwriting them.
 
 The shared database is a **single persistent environment**: every teammate sees and can change the same accounts, payments, approvals, and balances. Coordinate demos and use current balances. Repository access alone does not unlock the bundle, but anyone who obtains both the bundle and passphrase can recover all included secrets. The old CIF/MFA keys were previously present in Git history; removing them from the current revision did not erase that history. Rotation of those keys against existing ALPHA records requires a data migration.
-
-### Self-contained Oracle demo from a fresh checkout
-
-With Docker Desktop running, start from this directory:
-
-~~~powershell
-& ./start-oracle-demo.ps1
-~~~
-
-The first run downloads Oracle Free, starts an isolated `MONEYBAGS` schema on loopback port **1529**, applies the schema scripts, and builds/starts the app at [localhost:5174](http://localhost:5174). It may take several minutes and needs enough disk space and memory for Oracle. Later starts reuse the database volume. No private `.env.ps1`, VPN, or previous workstation's `.runtime` files are required. See [the Oracle Free container source](https://github.com/gvenzl/oci-oracle-free) for image details.
-
-The first run generates random database and web-administrator passwords in ignored `.runtime/oracle-demo.env`. Sign in at `/employee/login` as **admin**, using `BOOTSTRAP_PASSWORD` from that file. The file and Docker volume belong together: keep the original file when reusing the volume. Stop the application with `./stop-oracle-alpha.ps1`; the Oracle container remains running and its data persists. To stop the container without deleting its data, run `docker compose --env-file .runtime/oracle-demo.env -f compose.oracle-demo.yaml stop`.
-
-This path installs the schema and first administrator. It does **not** copy the existing ALPHA database, its users, encryption keys, accounts, balances, or product setup. Create synthetic customer users with the signup form, then configure and approve products/accounts and fund demo balances through the application. For an immediate two-user transfer demonstration with pre-funded accounts and all local fixtures, use `./start-local.ps1`. Do not treat generated passwords or local Oracle data as production credentials or records.
 
 ### Existing Oracle schema
 
@@ -185,6 +100,8 @@ The application **does not run Oracle migrations at startup**.
 | 018-deposit-interest.sql | Monthly savings interest and fixed deposits |
 | 019-customer-account-requests.sql | Account service requests |
 | 020-cif-proposed-segment.sql | Segment proposals governed by KYC approval |
+| 021-payment-clearing-simulator.sql, 022-customer-payment-pin.sql | Payment simulation and customer payment PIN |
+| 023-align-demo-roles.sql | Preserve users and align customer scopes with adipil; complete checker approvals |
 
 **012-rbi-cash-delivery-readiness.sql is a diagnostic, not an additional migration.** Inspect scripts under database/acceptance before running them: the general readiness checks are read-only, but specifically named synthetic fixture scripts can change demo configuration.
 
@@ -192,37 +109,9 @@ If the former 011-credit-cards.sql from the card branch is already installed, **
 
 Run applicable read-only checks: [Oracle readiness](database/acceptance/oracle-readiness.sql), [integrated schema/balances](database/acceptance/integrated-main.sql), and [credit cards](database/acceptance/credit-cards.sql). Resolve missing/invalid objects and accounting exceptions before financial demos. [Operations](docs/OPERATIONS.md) contains the installation details.
 
-### 2. Create the private connection file
+### 2. Start, open, and stop
 
-The ignored .env.ps1 file is missing from a fresh clone. Preserve an existing file:
-
-~~~powershell
-if (-not (Test-Path -LiteralPath './.env.ps1')) {
-    Copy-Item -LiteralPath './.env.example.ps1' -Destination './.env.ps1'
-}
-notepad ./.env.ps1
-~~~
-
-Use your SQL Developer connection details:
-
-~~~powershell
-# Service-name connection:
-$env:DB_URL='jdbc:oracle:thin:@HOST:1521/SERVICE_NAME'
-$env:DB_USERNAME='YOUR_MONEYBAGS_SCHEMA'
-# For a SID connection, use HOST:1521:SID instead.
-~~~
-
-Keep the template's hidden password prompt. DB_USERNAME is the database identity, not a web login. Do not put real database passwords or provider/access keys into tracked files.
-
-For an **empty IAM installation only**, configure the one-time BOOTSTRAP_ADMIN, BOOTSTRAP_USERNAME, and private BOOTSTRAP_PASSWORD settings to create the first administrator, then disable bootstrap. Startup does not reset existing users, passwords, or roles. Set up a separate checker and customer/CIF links through the application, or use existing Oracle users.
-
-### 3. Start, open, and stop
-
-Connect the required database network/VPN:
-
-~~~powershell
-& ./start-oracle-alpha.ps1
-~~~
+Connect the ALPHA network/VPN and run `./start-alpha-team.ps1`. The encrypted bundle supplies the Oracle connection and original CIF/MFA keys. Startup connects to the existing database without installing a database or changing its schema.
 
 | Page | Address |
 | --- | --- |
@@ -245,7 +134,7 @@ The Oracle demo launcher enables demo signup and external payment simulation, an
 To disable external initiation while retaining direct same-bank transfers:
 
 ~~~powershell
-& ./start-oracle-alpha.ps1 -PaymentSimulationEnabled $false
+& ./start-alpha-team.ps1 -PaymentSimulationEnabled $false
 ~~~
 
 ## Oracle startup and VPN recovery
@@ -253,12 +142,12 @@ To disable external initiation while retaining direct same-bank transfers:
 If the database VPN blocks dependency downloads, build on a network that permits them first:
 
 ~~~powershell
-& ./build-before-start.ps1
+& ./start-alpha-team.ps1 -BuildOnly
 # Connect the database VPN after the build succeeds.
-& ./start-oracle-alpha.ps1 -SkipBuild
+& ./start-alpha-team.ps1 -SkipBuild
 ~~~
 
-With cached dependencies, build-before-start.ps1 -Offline can build without downloads. Missing cached packages require an online build. **-SkipBuild verifies the recorded source, JAR, and frontend fingerprints**; it does not bypass checks. Rebuild after source/output changes. Stop the backend before replacing its running JAR.
+With cached dependencies, start-alpha-team.ps1 -BuildOnly -Offline can build without downloads. Missing cached packages require an online build. **-SkipBuild verifies the recorded source, JAR, and frontend fingerprints**; it does not bypass checks. Rebuild after source/output changes. Stop the backend before replacing its running JAR.
 
 Check your configured host and listener port:
 
@@ -292,7 +181,7 @@ DNS and TCP reachability do not verify database credentials. Application health 
 | FX_PROVIDER_URL / FX_API_TOKEN | Optional HTTPS rate feed; manually approved rates need no feed |
 | BACKEND_URL / PORT | Frontend proxy target/web port; launchers set these |
 
-For local AI demos, set the provider/model/key in the PowerShell environment **before** starting. start-local.ps1 does not automatically load .env.ps1; the Oracle launcher does. Choose a provider-supported model with tool calling. Java launchers enable the system proxy. See [assistant setup](docs/ASSISTANT-README.md).
+The ALPHA launcher loads assistant provider/model settings from the encrypted bundle. Run `./set-openrouter-key.ps1` to save your own OpenRouter key, then restart with `./stop-oracle-alpha.ps1` and `./start-alpha-team.ps1`. Java services enable the system proxy. See [assistant setup](docs/ASSISTANT-README.md).
 
 Demo signup assumes verified KYC without checking real identity evidence. Use synthetic people only. This shortcut is disabled in the base application configuration.
 
@@ -505,9 +394,9 @@ If the model is unconfigured/unavailable, ordinary banking remains usable. Never
 | --- | --- |
 | Tool command not found | Check PATH and prerequisite versions |
 | Dependency downloads fail | Check repository/proxy access; build before restrictive VPN; offline builds need cached packages |
-| Run record/port already in use | Use the matching stop script; do not kill unrelated processes or delete records blindly |
+| Run record/port already in use | Run stop-oracle-alpha.ps1; do not kill unrelated processes or delete records blindly |
 | -SkipBuild fingerprint mismatch | Rebuild after source/output changes |
-| Missing Oracle settings | Create the private .env.ps1 and replace placeholders |
+| Missing Oracle settings | Check alpha-team.bundle.json and use the current team passphrase |
 | ORA-17868 / unknown host | Verify configured hostname, DNS, and required VPN |
 | Database timeout | Check VPN route, listener port, service, and database availability |
 | ORA-01017 | Check database credentials; these differ from web login |
@@ -525,15 +414,23 @@ If the model is unconfigured/unavailable, ordinary banking remains usable. Never
 | Maturity/interest/billing action too early | Use an eligible period/due date; the app does not advance time for a demo |
 | Assistant provider error | Check backend provider/model/key, system proxy, and restart after environment changes |
 
-Local logs: .runtime/backend.log, backend.err.log, frontend.log, frontend.err.log. Standard Oracle logs use .runtime/oracle-alpha-backend.log and corresponding frontend/error logs. This workstation's prepackaged runner may use product-verified-backend.log and product-verified-frontend.log instead. Keep private runtime files/logs out of published demo materials.
+Service logs are in `.runtime/<service>.log` and `.runtime/<service>.err.log`; gateway and frontend logs use the same names. Process ownership is recorded in `.runtime/microservices-processes.json`. Keep private runtime files/logs out of published demo materials.
 
 ## Verification and handoff
 
-Full build and verification:
+Build and regression verification without connecting to Oracle:
 
 ~~~powershell
-& ./build-before-start.ps1
+& ./start-alpha-team.ps1 -BuildOnly
 ~~~
+
+Launcher checks without a real database:
+
+~~~powershell
+& ./tools/test-oracle-startup.ps1
+~~~
+
+The opt-in Oracle environment suite is now `./tools/test-oracle-environment.ps1 -SkipBuild`; it requires the ALPHA network and team passphrase. Other developer diagnostics are under `tools/`.
 
 Targeted checks with dependencies installed:
 
@@ -544,9 +441,9 @@ npm --prefix frontend run check
 npm --prefix frontend run build
 ~~~
 
-The current six-service verification passed **318 automated local checks** and **seven browser checks**. Live Oracle verification recorded **41 passes, two failures and three skips**; the unresolved findings are an existing account-position reconciliation gap and a bundled demo-password mismatch. See the [current test report](docs/MICROSERVICES-TEST-REPORT.md) for the complete flow coverage, evidence, measured load and limits. The [11 October demo payment record](docs/DEMO-PAYMENTS-VERIFIED-2026-10-11.html) remains a historical verification record.
+The previous six-service verification recorded **318 automated local checks** and **seven browser checks**. Live Oracle verification recorded **41 passes, two failures and three skips**; the unresolved findings are an existing account-position reconciliation gap and a bundled demo-password mismatch. See the [current test report](docs/MICROSERVICES-TEST-REPORT.md) for the complete flow coverage, evidence, measured load and limits. The [11 October demo payment record](docs/DEMO-PAYMENTS-VERIFIED-2026-10-11.html) remains a historical verification record.
 
-These checks do not certify live rails, every Oracle product configuration, regulatory compliance, or all crash/concurrency cases. H2 demonstrations use generated synthetic fixtures; Oracle retains its own users/products. This documentation update does not change credentials, install schema, or reset balances.
+These checks do not certify live rails, every Oracle product configuration, regulatory compliance, or all crash/concurrency cases. The earlier H2 launchers and their dedicated environment runners have been removed. Java regression fixtures remain available to the build; the application launcher requires Oracle. These historical results do not replace testing the current checkout.
 
 ## Further documentation
 

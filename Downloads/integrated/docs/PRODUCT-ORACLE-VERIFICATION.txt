@@ -1,3 +1,5 @@
+Startup scripts were consolidated on 14 October 2026. Use start-alpha-team.ps1, stop-oracle-alpha.ps1, and set-openrouter-key.ps1 in Downloads/integrated. Build-only is start-alpha-team.ps1 -BuildOnly; Oracle diagnostic runners now live under tools/. Older script names below describe historical verification.
+
 MONEYBAGS PRODUCT VERIFICATION — 11 October 2026 (IST)
 Database: main Oracle ALPHA schema, PDB1. All product entries were committed.
 Scope: all 10 active M03 products and the approved Moneybags Classic credit card.

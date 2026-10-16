@@ -35,8 +35,8 @@ public class LocalDemoSeed implements ApplicationRunner {
    VALUES (?,'M09_PRIVACY','AUDIT_EVENT',1,'OCCURRED_AT',12,'DELETE','ACTIVE',?,?,?,?)
    """,UUID.randomUUID().toString(),OffsetDateTime.now().minusDays(1),checker,OffsetDateTime.now(),admin);
   String customerRole=UUID.randomUUID().toString();
-  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,'RETAIL_CUSTOMER','Retail customer','ACTIVE','N')",customerRole);
-  for(String code:List.of("ACCOUNT_READ","TXN_READ","TXN_POST","PAYMENT_READ","PAYMENT_CREATE","STATEMENT_READ","PRIVACY_CONSENT_SELF","PRIVACY_CONSENT_VIEW","FX_READ","LOAN_READ","LOAN_APPLY","LOAN_ACCEPT","CIF_READ","PRODUCT_READ","CC_READ","CC_APPLY","CC_MANAGE","CC_SPEND","CC_REPAY"))
+  db.update("INSERT INTO M01_IAM_ROLE(ROLE_ID,ROLE_CODE,DISPLAY_NAME,STATUS,SENSITIVE_FLAG) VALUES (?,?,'Customer','ACTIVE','N')",customerRole,com.moneybags.iam.service.BankRolePolicy.CUSTOMER);
+  for(String code:com.moneybags.iam.service.BankRolePolicy.CUSTOMER_PERMISSIONS)
    db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) SELECT ?,PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE=?",customerRole,code);
   String customer=user("customer","CUSTOMER",customerRole,"SELF");
   String other=user("customer2","CUSTOMER",customerRole,"SELF");
