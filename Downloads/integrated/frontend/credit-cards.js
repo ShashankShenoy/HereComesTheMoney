@@ -1,4 +1,5 @@
 import {api,getSession} from './api.js';
+import {paymentPinField,withPaymentPin} from './payment-pin.js';
 import {esc,field,select,table,badge,dialog,reason,toast,errorText} from './ui.js';
 import {formatAmount,formatDecimal,formatDate} from './presentation.js';
 
@@ -53,8 +54,10 @@ export async function creditCardsScreen(render) {
 
 function commandDialog(title,body,path,makeBody){
     const requestKey=crypto.randomUUID();
-    dialog(title,body,async data=>{
-        await api(path,{method:'POST',body:{requestKey,...makeBody(data)}});
+    const needsPin=/\/(purchases|repayments)$/.test(path);
+    dialog(title,body+(needsPin?paymentPinField():''),async data=>{
+        const body={requestKey,...makeBody(data)};
+        await (needsPin?withPaymentPin(data,headers=>api(path,{method:'POST',body,headers})):api(path,{method:'POST',body}));
         toast('Credit card operation completed.');await renderApp();
     });
 }

@@ -23,7 +23,7 @@ function accountResponse(accounts){
  return paths;
 }
 
-test('customers select a linked account number while staff retain account lookup',async()=>{
+test('customers and staff select from the accounts available to their identity',async()=>{
  session('picker-customer');
  const paths=accountResponse([
   {ACCOUNT_NUMBER:'MCPALPHA0001',PRODUCT_NAME:'Savings',ACCOUNT_STATUS:'ACTIVE'},
@@ -39,8 +39,8 @@ test('customers select a linked account number while staff retain account lookup
 
  session('picker-staff','EMPLOYEE');
  const staff=await bankingScreen('transactions');
- assert.match(staff,/<input name="accountNumber" list="bank-account-numbers"/);
- assert.doesNotMatch(staff,/<select name="accountNumber"/);
+ assert.doesNotMatch(staff,/<input name="accountNumber"/);
+ assert.match(staff,/<select name="accountNumber"/);
  assert.match(staff,/data-transaction-tab="operations"/);
 });
 

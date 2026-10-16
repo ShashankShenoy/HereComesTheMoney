@@ -69,3 +69,5 @@ function Unprotect-AlphaTeamPayload {
     [Array]::Clear($plain, 0, $plain.Length)
   }
 }
+
+Export-ModuleMember -Function Protect-AlphaTeamPayload, Unprotect-AlphaTeamPayload

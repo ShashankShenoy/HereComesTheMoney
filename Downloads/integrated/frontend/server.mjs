@@ -10,6 +10,8 @@ const files=new Map([['/operation-state.js','operation-state.js'],['/settlement-
 // Public vendor roots are explicit; node_modules itself and package/config files are never exposed.
 files.set('/iam-catalog.js','iam-catalog.js');
 files.set('/payment-pin.js','payment-pin.js');
+files.set('/customer-statements.js','customer-statements.js');
+files.set('/loan-prepayments.js','loan-prepayments.js');
 const vendors=new Map(Object.entries({jet:'@oracle/oraclejet/dist/js/libs/oj','jet-css':'@oracle/oraclejet/dist/css','jet-preact':'@oracle/oraclejet-preact/amd',require:'requirejs',knockout:'knockout/build/output',jquery:'jquery/dist','jquery-ui':'jquery-ui/ui',hammer:'hammerjs',signals:'signals/dist',preact:'preact/dist','preact-compat':'preact/compat/dist','preact-hooks':'preact/hooks/dist','preact-jsx':'preact/jsx-runtime/dist',text:'requirejs-text',css:'require-css'}));
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.png':'image/png','.gif':'image/gif'};
 export const server=http.createServer(async(req,res)=>{
@@ -23,7 +25,7 @@ export const server=http.createServer(async(req,res)=>{
       response.on('error',()=>res.destroy());
     });
     upstream.setTimeout(url.pathname==='/api/v1/assistant/chat'?95000:url.pathname.startsWith('/v3/api-docs')?60000:35000,()=>upstream.destroy(new Error('Gateway timeout')));
-    upstream.on('error',()=>{if(!res.headersSent){res.writeHead(502,{'Content-Type':'application/json'});res.end(JSON.stringify({status:502,code:'BACKEND_OFFLINE',message:'The API gateway is unavailable. Run start-microservices.ps1 and check BACKEND_URL.',fieldErrors:{}}));}else res.destroy();});
+    upstream.on('error',()=>{if(!res.headersSent){res.writeHead(502,{'Content-Type':'application/json'});res.end(JSON.stringify({status:502,code:'BACKEND_OFFLINE',message:'The API gateway is unavailable. Start the Oracle ALPHA workspace and check BACKEND_URL.',fieldErrors:{}}));}else res.destroy();});
     req.on('aborted',()=>upstream.destroy());req.on('error',()=>upstream.destroy());
     res.on('close',()=>{if(!res.writableFinished)upstream.destroy();});req.pipe(upstream);return;
   }

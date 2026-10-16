@@ -156,10 +156,79 @@ class IntegratedContextTest {
   assertEquals(1,page.path("postings").size());
   assertEquals(0,page.path("balance").decimalValue().compareTo(page.path("postings").get(0).path("RUNNING_BALANCE").decimalValue()));
   long journalId=page.path("postings").get(0).path("JOURNAL_ID").asLong();
+  var references=value(mvc.perform(get("/api/v1/banking/journals").header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertTrue(references.findValues("JOURNAL_ID").stream().anyMatch(id->id.asLong()==journalId));
+  for(String token:List.of(customer,viewer))
+   mvc.perform(get("/api/v1/banking/journals").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+  mvc.perform(get("/api/v1/banking/journals")).andExpect(status().isUnauthorized());
   var detail=value(mvc.perform(get("/api/v1/banking/journals/"+journalId).header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
   assertEquals("Y",detail.path("control").path("IS_BALANCED").asText());
   assertTrue(detail.path("lines").size()>=2);
   mvc.perform(get("/api/v1/banking/journals/"+journalId).header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
+  for(String token:List.of(admin,login("checker")))
+   mvc.perform(get("/api/v1/journals/"+journalId+"/control").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.IS_BALANCED").value("Y"))
+    .andExpect(jsonPath("$.DEBIT_TOTAL").isNumber()).andExpect(jsonPath("$.CREDIT_TOTAL").isNumber());
+  for(String token:List.of(customer,viewer))
+   mvc.perform(get("/api/v1/journals/"+journalId+"/control").header("Authorization","Bearer "+token))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.journalId").value(journalId))
+    .andExpect(jsonPath("$.DEBIT_TOTAL").doesNotExist()).andExpect(jsonPath("$.CREDIT_TOTAL").doesNotExist());
+  mvc.perform(get("/api/v1/journals/999999999/control").header("Authorization","Bearer "+admin))
+   .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("JOURNAL_NOT_FOUND"));
+ }
+ @Test @Transactional void treasuryWorkCreationUsesDefaultsAndIndependentApproval()throws Exception{
+  String admin=login("admin"),checker=login("checker");
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String reviewer=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
+  var created=value(send("/treasury/work-items",admin,Map.of("workType","RECONCILIATION",
+   "subjectType","RESERVE_ACCOUNT","reserveAccountId",1,"sourceReference",UUID.randomUUID().toString(),
+   "expectedAmount","1.00","observedAmount","1.00","detailText","Treasury approval regression","ownerId",maker))
+   .andExpect(status().isCreated()));
+  long id=created.path("id").asLong();assertTrue(id>0);assertEquals("OPEN",created.path("status").asText());
+  assertFalse(created.path("openedAt").asText().isBlank());assertEquals(0,created.path("version").asInt());
+  send("/treasury/work-items/"+id+"/submit?expectedVersion=0",admin,Map.of()).andExpect(status().isNoContent());
+  send("/treasury/work-items/"+id+"/decision",admin,Map.of("decision","WAIVED","expectedVersion",1))
+   .andExpect(status().isConflict());
+  send("/treasury/work-items/"+id+"/decision",checker,Map.of("decision","WAIVED","expectedVersion",0))
+   .andExpect(status().isConflict());
+  send("/treasury/work-items/"+id+"/decision",checker,Map.of("decision","WAIVED","expectedVersion",1,"checkerUserId",maker))
+   .andExpect(status().isNoContent());
+  mvc.perform(get("/api/v1/treasury/work-items/"+id).header("Authorization","Bearer "+admin))
+   .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("WAIVED"))
+   .andExpect(jsonPath("$.checkerUserId").value(reviewer)).andExpect(jsonPath("$.version").value(2));
+ }
+ @Test @Transactional void treasuryReferencesAndOwnersRespectCurrentAccess()throws Exception{
+  String admin=login("admin"),customer=login("customer"),viewer=nonAdminViewer();
+  String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
+  String reviewer=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='checker'",String.class);
+  String customerId=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='customer'",String.class);
+  String owners="/api/v1/treasury/work-owners",evidence="/api/v1/treasury/settlement-evidence";
+  var eligible=value(mvc.perform(get(owners).header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertTrue(eligible.findValues("userId").stream().anyMatch(id->id.asText().equals(maker)));
+  assertTrue(eligible.findValues("userId").stream().anyMatch(id->id.asText().equals(reviewer)));
+  assertFalse(eligible.findValues("userId").stream().anyMatch(id->id.asText().equals(customerId)));
+  var proofs=value(mvc.perform(get(evidence).header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertFalse(proofs.isEmpty());assertEquals("VERIFIED",proofs.get(0).path("status").asText());
+  for(String path:List.of(owners,evidence)){
+   for(String token:List.of(customer,viewer))mvc.perform(get(path).header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+   mvc.perform(get(path)).andExpect(status().isUnauthorized());
+  }
+  int before=db.queryForObject("SELECT COUNT(*) FROM M07_TREASURY_WORK_ITEM",Integer.class);
+  var body=new HashMap<String,Object>(Map.of("workType","RECONCILIATION","subjectType","RESERVE_ACCOUNT","reserveAccountId",1,"detailText","Owner validation regression"));
+  for(String invalid:List.of(customerId,UUID.randomUUID().toString())){
+   body.put("ownerId",invalid);send("/treasury/work-items",admin,body).andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("INVALID_WORK_OWNER"));
+  }
+  body.put("ownerId",reviewer);
+  db.update("UPDATE M01_IAM_USER SET STATUS='DISABLED' WHERE USER_ID=?",reviewer);
+  assertFalse(value(mvc.perform(get(owners).header("Authorization","Bearer "+admin)).andExpect(status().isOk())).findValues("userId").stream().anyMatch(id->id.asText().equals(reviewer)));
+  send("/treasury/work-items",admin,body).andExpect(status().isUnprocessableEntity());
+  db.update("UPDATE M01_IAM_USER SET STATUS='ACTIVE' WHERE USER_ID=?",reviewer);
+  var now=java.time.OffsetDateTime.now();
+  db.update("UPDATE M01_IAM_USER_ROLE SET VALID_FROM=?,VALID_TO=? WHERE USER_ID=?",now.minusDays(2),now.minusDays(1),reviewer);
+  send("/treasury/work-items",admin,body).andExpect(status().isUnprocessableEntity());
+  db.update("UPDATE M01_IAM_USER_ROLE SET VALID_FROM=?,VALID_TO=NULL WHERE USER_ID=?",now.plusDays(1),reviewer);
+  send("/treasury/work-items",admin,body).andExpect(status().isUnprocessableEntity());
+  assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM M07_TREASURY_WORK_ITEM",Integer.class));
  }
  @Test @Order(4) void newAccountsActivateThroughRealLedgerFence()throws Exception{
   String admin=login("admin");String request=UUID.randomUUID().toString();
@@ -334,6 +403,14 @@ class IntegratedContextTest {
   long id=value(send("/loans/applications",admin,Map.of("cifId","demo-cif-1","productId",2,"productVersionId",2,"branchCode","MUM001","channelCode","BRANCH","amount","12000","tenureMonths",12,"purposeCode","PERSONAL")).andExpect(status().isOk())).path("data").path("id").asLong();
   send("/loans/applications/"+id+"/submit",admin,Map.of()).andExpect(status().isOk());
   send("/loans/applications/"+id+"/assessments",admin,Map.of("monthlyIncome","50000","monthlyObligations","5000","recommendation","APPROVE","reasonCodes","AFFORDABLE")).andExpect(status().isOk());
+  mvc.perform(get("/api/v1/loans/applications").param("status","UNDER_REVIEW").header("Authorization","Bearer "+checker))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].id").value(id));
+  mvc.perform(get("/api/v1/loans/applications/"+id+"/assessments").header("Authorization","Bearer "+checker))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].RECOMMENDATION").value("APPROVE"));
+  mvc.perform(get("/api/v1/loans/applications/"+id+"/documents").header("Authorization","Bearer "+checker))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data").isEmpty());
+  mvc.perform(get("/api/v1/loans/applications").header("Authorization","Bearer "+login("customer2")))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data").isEmpty());
   var decision=Map.of("code","APPROVE","reasonCodes","APPROVED","sanctionedAmount","12000","sanctionedTenureMonths",12,"annualRatePct","12","authorityCode","LOAN_SANCTION","authorityEvidenceRef","DEMO-AUTHORITY");
   send("/loans/applications/"+id+"/decisions",admin,decision).andExpect(status().isConflict());
   send("/loans/applications/"+id+"/decisions",checker,decision).andExpect(status().isOk());
@@ -430,7 +507,7 @@ class IntegratedContextTest {
   assertEquals("VERIFIED",db.queryForObject("SELECT KYC_STATUS FROM M02_CIF_CUSTOMER WHERE CIF_ID=?",String.class,cif));
   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M02_KYC_CASE WHERE CIF_ID=? AND STATUS='APPROVED' AND DECIDED_AT IS NOT NULL",Integer.class,cif));
   assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_CUSTOMER_LINK L JOIN M01_IAM_USER U ON U.USER_ID=L.USER_ID WHERE U.USERNAME=? AND L.CIF_ID=? AND L.STATUS='ACTIVE'",Integer.class,username,cif));
-  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_USER_ROLE A JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID WHERE U.USERNAME=? AND A.SCOPE_TYPE='SELF' AND R.ROLE_CODE='RETAIL_CUSTOMER'",Integer.class,username));
+  assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_USER_ROLE A JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID JOIN M01_IAM_ROLE R ON R.ROLE_ID=A.ROLE_ID WHERE U.USERNAME=? AND A.SCOPE_TYPE='SELF' AND R.ROLE_CODE='BANK_CUSTOMER'",Integer.class,username));
   var signedIn=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",username,"password",password,"clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
   String token=json.readTree(signedIn.getResponse().getContentAsString()).path("data").path("accessToken").asText();
   var offers=mvc.perform(get("/api/v1/products/customer-offers").param("cifId",cif).param("channel","BRANCH").param("currency","INR").header("Authorization","Bearer "+token)).andExpect(status().isOk()).andReturn();
@@ -627,7 +704,10 @@ class IntegratedContextTest {
   send("/transactions/transfers",checker,transfer(1,2,"1.00",UUID.randomUUID().toString())).andExpect(status().isForbidden());
   send("/payments/1/simulate-outcome",checker,Map.of("outcome","SETTLED")).andExpect(status().isForbidden());
   mvc.perform(post("/api/v1/assistant/mcp").header("Authorization","Bearer "+checker).contentType(MediaType.APPLICATION_JSON).content("{}"))
-    .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("CHECKER_APPROVAL_ONLY"));
+    .andExpect(status().isOk()).andExpect(jsonPath("$.error.code").value(-32600));
+  assertTrue(mcp(checker,"tools/call","draft_beneficiary_verification",Map.of("beneficiaryId",UUID.randomUUID().toString()))
+    .path("result").path("isError").asBoolean());
+  send("/assistant/intents/"+UUID.randomUUID()+"/confirm",checker,Map.of()).andExpect(status().isForbidden());
   mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+admin)).andExpect(status().isOk());
  }
  @Test @Order(19) void syntheticReserveOpeningRequiresIndependentApprovalAndBalancesBothBooks()throws Exception{
@@ -840,30 +920,32 @@ class IntegratedContextTest {
     .andExpect(status().isForbidden());
  }
 
- @Test @Order(28) void publicSignupDoesNotInheritUnexpectedRetailRolePermissions() throws Exception {
+ @Test @Transactional void newCustomersInheritAdipillaiProductScopesWithoutSharingTheirCif() throws Exception {
+  mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username","adipillai","legalName","Reference customer","dateOfBirth","1990-01-01","password","NewCustomer!2026","paymentPin",PaymentPinTestSupport.PIN)))).andExpect(status().isOk());
+  String assignment=db.queryForObject("SELECT A.ASSIGNMENT_ID FROM M01_IAM_USER_ROLE A JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID WHERE U.USERNAME='adipillai'",String.class);
+  db.update("INSERT INTO M01_IAM_USER_ROLE_SCOPE(ASSIGNMENT_ID,DIMENSION_CODE,SCOPE_VALUE) VALUES (?,'PRODUCT_TYPE','SAVINGS')",assignment);
+  db.update("INSERT INTO M01_IAM_USER_ROLE_SCOPE(ASSIGNMENT_ID,DIMENSION_CODE,SCOPE_VALUE) VALUES (?,'CURRENCY','INR')",assignment);
+  String username="aligned_"+UUID.randomUUID().toString().substring(0,8);
+  mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",username,"legalName","Aligned customer","dateOfBirth","1990-01-01","password","NewCustomer!2026","paymentPin",PaymentPinTestSupport.PIN)))).andExpect(status().isOk());
+  var scopes=db.queryForList("SELECT S.DIMENSION_CODE,S.SCOPE_VALUE FROM M01_IAM_USER_ROLE_SCOPE S JOIN M01_IAM_USER_ROLE A ON A.ASSIGNMENT_ID=S.ASSIGNMENT_ID JOIN M01_IAM_USER U ON U.USER_ID=A.USER_ID WHERE U.USERNAME=? ORDER BY S.DIMENSION_CODE",username);
+  assertEquals(List.of(Map.of("DIMENSION_CODE","CURRENCY","SCOPE_VALUE","INR"),Map.of("DIMENSION_CODE","PRODUCT_TYPE","SCOPE_VALUE","SAVINGS")),scopes);
+  assertEquals(2,db.queryForObject("SELECT COUNT(DISTINCT L.CIF_ID) FROM M01_IAM_CUSTOMER_LINK L JOIN M01_IAM_USER U ON U.USER_ID=L.USER_ID WHERE U.USERNAME IN ('adipillai',?)",Integer.class,username));
+ }
+ @Test @Order(28) void publicSignupRejectsUnexpectedUnifiedCustomerRolePermissions() throws Exception {
   db.update("INSERT INTO M01_IAM_ROLE_PERMISSION(ROLE_ID,PERMISSION_ID) " +
     "SELECT R.ROLE_ID,P.PERMISSION_ID FROM M01_IAM_ROLE R CROSS JOIN M01_IAM_PERMISSION P " +
-    "WHERE R.ROLE_CODE='RETAIL_CUSTOMER' AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'");
+    "WHERE R.ROLE_CODE='BANK_CUSTOMER' AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'");
   String username="scoped_signup_"+UUID.randomUUID().toString().substring(0,8);
   var body=Map.of("username",username,"legalName","Scoped Customer","dateOfBirth","1995-04-12",
     "password","NewCustomer!2026","paymentPin",PaymentPinTestSupport.PIN);
-  mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
-    .content(json.writeValueAsString(body))).andExpect(status().isOk());
-  assertEquals("RETAIL_CUSTOMER_SIGNUP",db.queryForObject(
-    "SELECT R.ROLE_CODE FROM M01_IAM_USER U JOIN M01_IAM_USER_ROLE UR ON UR.USER_ID=U.USER_ID " +
-      "JOIN M01_IAM_ROLE R ON R.ROLE_ID=UR.ROLE_ID WHERE U.USERNAME=?",String.class,username));
-  assertEquals(0,db.queryForObject(
-    "SELECT COUNT(*) FROM M01_IAM_USER U JOIN M01_IAM_USER_ROLE UR ON UR.USER_ID=U.USER_ID " +
-      "JOIN M01_IAM_ROLE_PERMISSION RP ON RP.ROLE_ID=UR.ROLE_ID " +
-      "JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID " +
-      "WHERE U.USERNAME=? AND P.PERMISSION_CODE='IAM_ROLE_MANAGE'",Integer.class,username));
-  var loginResult=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-    .content(json.writeValueAsString(Map.of("username",username,"password","NewCustomer!2026",
-      "clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
-  String customer=json.readTree(loginResult.getResponse().getContentAsString())
-    .path("data").path("accessToken").asText();
-  mvc.perform(get("/api/v1/banking/my-dashboard").header("Authorization","Bearer "+customer))
-    .andExpect(status().isOk());
+  try{
+   mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
+    .content(json.writeValueAsString(body))).andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("SETUP_REQUIRED"));
+   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_USER WHERE USERNAME=?",Integer.class,username));
+   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE WHERE ROLE_CODE='RETAIL_CUSTOMER_SIGNUP'",Integer.class));
+  }finally{
+   db.update("DELETE FROM M01_IAM_ROLE_PERMISSION WHERE ROLE_ID=(SELECT ROLE_ID FROM M01_IAM_ROLE WHERE ROLE_CODE='BANK_CUSTOMER') AND PERMISSION_ID=(SELECT PERMISSION_ID FROM M01_IAM_PERMISSION WHERE PERMISSION_CODE='IAM_ROLE_MANAGE')");
+  }
  }
 
  @Test @Order(29) void accountPartiesShowNamesOnlyToAuthorizedCustomers() throws Exception {
@@ -1367,7 +1449,7 @@ class IntegratedContextTest {
   } finally {pool.shutdownNow();}
  }
 
- @Test @Order(52) void concurrentPaymentHoldDeliveryCreatesOnlyOneReservation() throws Exception {
+ @RepeatedTest(5) @Order(52) void concurrentPaymentHoldDeliveryCreatesOnlyOneReservation() throws Exception {
   String key=UUID.randomUUID().toString();
   String maker=db.queryForObject("SELECT USER_ID FROM M01_IAM_USER WHERE USERNAME='admin'",String.class);
   db.update("INSERT INTO M06_PAYMENT_INSTRUCTION(ORIGINATOR_ID,CHANNEL_CODE,REQUEST_KEY,REQUEST_HASH,CORRELATION_ID,END_TO_END_ID,PAYMENT_DIRECTION,PAYMENT_KIND,SOURCE_ACCOUNT_ID,SOURCE_CIF_ID,BENEFICIARY_TOKEN_REF,BENEFICIARY_BANK_CODE,RAIL_CODE,AMOUNT,REQUESTED_EXECUTION_DATE,STATUS) VALUES (?,'WEB',?,?,?,?,?,'PAYMENT',1,'demo-cif-1','TEST_BENEFICIARY','TEST_BANK','NEFT',1.50,?,'AUTHORIZED')",
@@ -2253,6 +2335,16 @@ class IntegratedContextTest {
   token=login(name);
   mvc.perform(get("/api/v1/payments/"+payment).header("Authorization","Bearer "+token)).andExpect(status().isOk());
   mvc.perform(get("/api/v1/payments").header("Authorization","Bearer "+token)).andExpect(status().isForbidden());
+ }
+ @Test @Order(110) @Transactional void statementCatalogRejectsInvalidCodesAndRules()throws Exception{
+  String admin=login("admin");
+  send("/catalog/masking-profiles",admin,Map.of("code","QA_INVALID","version",1,"channel","WEB","audience","Customer","rulesJson","{}"))
+    .andExpect(status().isBadRequest());
+  for(String rules:List.of("[]","null","{\"showBalances\":\"true\"}"))
+    send("/catalog/masking-profiles",admin,Map.of("code","QA_INVALID","version",1,"channel","WEB","audience","CUSTOMER","rulesJson",rules))
+      .andExpect(status().isBadRequest());
+  send("/catalog/narrations",admin,Map.of("code","Payment","locale","en-IN","audience","STAFF","version",1,"text","Transaction","effectiveFrom",java.time.OffsetDateTime.now().toString()))
+    .andExpect(status().isBadRequest());
  }
  BigDecimal reserveBalance(String column){return db.queryForObject("SELECT "+column+" FROM M07_RESERVE_POSITION WHERE RESERVE_ACCOUNT_ID=1",BigDecimal.class);}
 }

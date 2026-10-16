@@ -37,8 +37,21 @@ public class LoanService {
 
     /** Returns a bounded, branch-scoped operations queue. */
     public List<Application> applications(UserPrincipal actor,String branch,String status,int limit) {
-        require(actor,"LOAN_READ",branch,null,null,null,null,null);
         if(limit<1||limit>100)throw bad("limit must be between 1 and 100");
+        if(branch==null||branch.isBlank()){
+            if("CUSTOMER".equals(actor.userType()))return myApplications(actor).stream().filter(a->status==null||status.isBlank()||status.equals(a.status())).limit(limit).toList();
+            // Read-only queue includes only branches allowed by this actor's current grants.
+            if(!actor.permissions().contains("LOAN_READ"))throw new BusinessException(HttpStatus.FORBIDDEN,"PERMISSION_REQUIRED","Loan read permission required");
+            List<Application> result=new ArrayList<>();long afterId=Long.MAX_VALUE;
+            while(result.size()<limit){
+                var page=db.query("SELECT * FROM M08_LOAN_APPLICATION WHERE APPLICATION_ID<? AND (? IS NULL OR STATUS=?) ORDER BY APPLICATION_ID DESC FETCH FIRST 100 ROWS ONLY",(rs,n)->application(rs),afterId,status==null||status.isBlank()?null:status,status==null||status.isBlank()?null:status);
+                if(page.isEmpty())break;
+                for(var a:page){afterId=a.id();if(access.allowed(actor,new AuthorizationInput("LOAN_READ",a.branchCode(),null,a.cifId(),"LOAN","INR",null,null,null,null)))result.add(a);if(result.size()==limit)break;}
+                if(page.size()<100)break;
+            }
+            return result;
+        }
+        require(actor,"LOAN_READ",branch,null,null,null,null,null);
         return db.query("""
             SELECT * FROM M08_LOAN_APPLICATION WHERE BRANCH_CODE=?
             AND (? IS NULL OR STATUS=?) ORDER BY CREATED_AT DESC FETCH FIRST ? ROWS ONLY
@@ -67,7 +80,7 @@ public class LoanService {
     /** Returns a compact underwriting trail to authorized loan officers. */
     public List<Map<String,Object>> assessments(UserPrincipal actor,long id) {
         Application a=load(id,false);
-        require(actor,"LOAN_ASSESS",a.branchCode(),a.cifId(),null,null,null,null);
+        require(actor,actor.permissions().contains("LOAN_DECIDE")?"LOAN_DECIDE":"LOAN_ASSESS",a.branchCode(),a.cifId(),null,null,null,null);
         return db.queryForList("""
             SELECT ASSESSMENT_ID,APPLICATION_REVISION_ID,ASSESSMENT_TYPE,MONTHLY_INCOME,
               MONTHLY_OBLIGATIONS,DEBT_TO_INCOME_PCT,CREDIT_SCORE,RECOMMENDATION,REASON_CODES,
@@ -103,7 +116,7 @@ public class LoanService {
     /** Lists document metadata needed to complete acceptance and verification. */
     public List<Map<String,Object>> documents(UserPrincipal actor,long id) {
         Application a=load(id,false);
-        require(actor,"LOAN_ASSESS",a.branchCode(),a.cifId(),null,null,null,null);
+        require(actor,actor.permissions().contains("LOAN_DOCUMENT_VERIFY")?"LOAN_DOCUMENT_VERIFY":"LOAN_ASSESS",a.branchCode(),a.cifId(),null,null,null,null);
         return db.queryForList("""
             SELECT DOCUMENT_REF_ID,DOCUMENT_TYPE,CONTENT_HASH,STATUS,VERIFIED_BY_USER_ID,VERIFIED_AT,CREATED_AT
             FROM M08_LOAN_DOCUMENT_REF WHERE APPLICATION_ID=? ORDER BY CREATED_AT DESC FETCH FIRST 100 ROWS ONLY
@@ -293,6 +306,7 @@ public class LoanService {
                 throw bad("Approved decisions require amount, tenure and annual rate");
             if(input.sanctionedAmount().compareTo(a.amount())>0||input.sanctionedTenureMonths()>a.tenureMonths())
                 throw bad("Sanction cannot exceed the submitted application");
+            requireSanctionBounds(a.productVersionId(),input.sanctionedAmount(),input.sanctionedTenureMonths());
         } else if(input.sanctionedAmount()!=null||input.sanctionedTenureMonths()!=null||input.annualRatePct()!=null)
             throw bad("Reject and refer decisions must omit sanction terms");
         List<Map<String,Object>> assessed=db.queryForList("""
@@ -475,6 +489,8 @@ public class LoanService {
             SELECT SANCTIONED_AMOUNT,SANCTIONED_TENURE_MONTHS,ANNUAL_RATE_PCT,FIXED_RATE_PCT,INTEREST_TYPE
             FROM M08_LOAN_DECISION WHERE DECISION_ID=? AND DECISION_CODE='APPROVE'
             """,offer.get("DECISION_ID"));
+        requireSanctionBounds(a.productVersionId(),(BigDecimal)decision.get("SANCTIONED_AMOUNT"),
+            ((Number)decision.get("SANCTIONED_TENURE_MONTHS")).intValue());
         Map<String,Object> rule=one("""
             SELECT L.DISBURSEMENT_MODE,L.REPAYMENT_FREQUENCY,L.AMORTIZATION_METHOD,I.DAY_COUNT_BASIS
             FROM M03_PM_LOAN_RULE L JOIN M03_PM_INTEREST_RULE I ON I.PRODUCT_VERSION_ID=L.PRODUCT_VERSION_ID
@@ -553,6 +569,18 @@ public class LoanService {
         List<Map<String,Object>> rows=db.queryForList(sql,args);
         if(rows.isEmpty())throw new BusinessException(HttpStatus.NOT_FOUND,"LOAN_NOT_FOUND","Loan resource not found");
         return rows.get(0);
+    }
+
+    private void requireSanctionBounds(long productVersion,BigDecimal amount,int tenure) {
+        var bounds=one("""
+            SELECT MIN_LOAN_AMOUNT,MAX_LOAN_AMOUNT,MIN_TENURE_MONTHS,MAX_TENURE_MONTHS
+            FROM M03_PM_LOAN_RULE WHERE PRODUCT_VERSION_ID=?
+            """,productVersion);
+        if(amount.compareTo((BigDecimal)bounds.get("MIN_LOAN_AMOUNT"))<0
+            ||amount.compareTo((BigDecimal)bounds.get("MAX_LOAN_AMOUNT"))>0
+            ||tenure<((Number)bounds.get("MIN_TENURE_MONTHS")).intValue()
+            ||tenure>((Number)bounds.get("MAX_TENURE_MONTHS")).intValue())
+            throw bad("Sanctioned amount or tenure is outside the product rule");
     }
 
     /** Accounts chosen for a personal loan must remain directly usable by its borrower. */

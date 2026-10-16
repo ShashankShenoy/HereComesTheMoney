@@ -65,6 +65,9 @@ public class BankCheckerWriteBoundary implements HandlerInterceptor, WebMvcConfi
         if(path.equals("/api/v1/auth/logout") || path.equals("/api/v1/auth/refresh")
             || path.startsWith("/api/v1/auth/sessions/") || path.equals("/api/v1/iam/password")
             || path.equals("/api/v1/iam/step-up") || path.startsWith("/api/v1/iam/factors/")) return true;
+        // Chat and MCP use POST for inquiries. Their dispatcher restricts checker tools to reads.
+        if(method.equals("POST") && (path.equals("/api/v1/assistant/chat")
+            || path.equals("/api/v1/assistant/mcp"))) return true;
         String businessPath=path.startsWith("/api/v1")?path.substring(7):path;
         if(method.equals("POST") && DECISIONS.stream().anyMatch(p->p.matcher(businessPath).matches())) return true;
         throw new BusinessException(HttpStatus.FORBIDDEN,"CHECKER_APPROVAL_ONLY",

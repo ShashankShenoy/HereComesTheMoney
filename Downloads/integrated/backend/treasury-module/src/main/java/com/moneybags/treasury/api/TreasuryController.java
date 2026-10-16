@@ -146,6 +146,11 @@ public class TreasuryController {
         return ResponseEntity.created(location("/api/v1/treasury/settlement-evidence/{id}", created.id())).body(created);
     }
 
+    @GetMapping("/settlement-evidence")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
+    @Operation(summary = "List settlement evidence")
+    public List<SettlementEvidence> evidence() { return service.evidence(); }
+
     @GetMapping("/settlement-evidence/{id}")
     @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE')")
     public SettlementEvidence evidence(@PathVariable long id) { return service.evidence(id); }
@@ -187,6 +192,11 @@ public class TreasuryController {
         service.resolveException(id, body, actor(principal));
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/work-owners")
+    @PreAuthorize("@treasuryAccess.allowed(authentication, 'TREASURY_READ') or @treasuryAccess.allowed(authentication, 'TREASURY_RECONCILE') or @treasuryAccess.allowed(authentication, 'TREASURY_WORK_APPROVE')")
+    @Operation(summary = "List eligible treasury work owners")
+    public List<com.moneybags.iam.service.TreasuryWorkOwnerDirectory.Owner> workOwners() { return service.workOwners(); }
 
     /** Opens maker/checker work. */
     @PostMapping("/work-items")

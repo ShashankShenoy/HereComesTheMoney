@@ -6,27 +6,16 @@ This is part of the local banking demonstrator. An internal transfer, after sepa
 
 The internal route calls Module 5's `BankingService.transfer` and `LedgerService.transfer`, writing a posted transaction, balanced GL journal, and both authoritative account positions in one transaction. Module 6's payment instruction state machine is for UPI/IMPS/NEFT/RTGS rail flows; it is not used to claim that a same-bank transfer settled over a rail. Customers see internal transfers in their transaction history, while `list_my_payments` covers outbound Module 6 instructions.
 
-Set `INTERNAL_BANK_CODES` to the comma-separated IFSC codes owned by this Moneybags deployment. Internal routing requires both one of those codes and an exact local account number; leaving it empty keeps all beneficiaries on the external rail path. The local synthetic profile and `start-oracle-alpha.ps1` set `MCPB0000002` for Demo B. A matching account number at a different bank remains external.
+Set `INTERNAL_BANK_CODES` to the comma-separated IFSC codes owned by this Moneybags deployment. Internal routing requires both one of those codes and an exact local account number; leaving it empty keeps all beneficiaries on the external rail path. The ALPHA launcher sets `MCPB0000002` for Demo B. A matching account number at a different bank remains external.
 
 ## Start it
 
-1. Apply `database/007-assistant-intents.sql` after scripts `002` through `006`, then apply `database/008-assistant-internal-transfer.sql`. The local H2 profile includes the updated action constraint in `backend/src/main/resources/local-schema.sql`.
-2. If the local app is running, stop it with `& ./stop-local.ps1`. Start it again with `& ./start-local.ps1`; the launcher calls `build-before-start.ps1` to run Maven clean verify, npm ci, the frontend check, and the frontend build before launching the app.
-3. Set the model provider, model, and key in the **backend process environment**. Choose a Responses API model that supports function calling. The key is never placed in the frontend or database. For the free OpenRouter Gemma model:
+1. Check that Oracle migrations `007-assistant-intents.sql` and `008-assistant-internal-transfer.sql` are already installed, together with the preceding additive migrations. Startup does not apply migrations.
+2. In PowerShell 7, run `./set-openrouter-key.ps1` and enter your key at the hidden prompt. It saves a Windows-protected override for this user at `.runtime/openrouter-api-key.dpapi`.
+3. Run `./start-alpha-team.ps1` with the ALPHA VPN connected. The launcher loads provider/model settings from the encrypted team bundle and uses your saved key in preference to the bundle's key. If already running, stop with `./stop-oracle-alpha.ps1` and start again to load a replaced key.
+4. Open [localhost:5174](http://localhost:5174) and sign in. Select **Ask Moneybags** at the bottom right. If the model is unavailable, ordinary banking and the authenticated MCP endpoint remain usable.
 
-   ```powershell
-   $env:AI_PROVIDER='openrouter'
-   $env:OPENROUTER_API_KEY='<your-private-api-key>'
-   $env:AI_MODEL='google/gemma-4-26b-a4b-it:free'
-   $env:AI_FALLBACK_MODEL='openrouter/free'
-   & ./start-local.ps1
-   ```
-
-   For the shared Oracle ALPHA setup, `start-alpha-team.ps1` loads the provider/model and key from the encrypted team bundle. Run `& ./set-openrouter-key.ps1` at its hidden prompt to save a Windows-protected local key override for that launcher. A direct `start-oracle-alpha.ps1` setup instead reads its ignored `.env.ps1`. OpenAI remains available with `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `AI_MODEL` (or the older `OPENAI_MODEL`). The provider selects a fixed HTTPS host, so an OpenRouter key is never sent to OpenAI or an arbitrary URL.
-
-   The Oracle demo asks for Gemma first and uses OpenRouter's `openrouter/free` router if Gemma is rate limited or unavailable. This fallback also selects only free models and filters for tool-capable models. Free capacity and model behavior can vary; the backend still validates every tool call.
-
-4. Open the workspace and sign in. The **Ask Moneybags** button stays at the bottom right on every banking and administration tab; select it to open the chat panel. The conversation remains open while you navigate. If the model configuration is absent, the panel says so and chat remains disabled. The REST and MCP tool authorization still requires a valid IAM bearer session.
+The configured model and fallback come from the team bundle. The backend validates every tool call. Provider keys stay in the service environment and out of the frontend, database, and tracked files.
 
 For production, provide secrets through your secret manager, review model data handling with your privacy team, and complete the Oracle and payment integration gates in `OPERATIONS.md`. The backend calls the selected provider's `/responses` endpoint over HTTPS with a 60-second request timeout. The development frontend proxy allows 75 seconds for chat. Conversations are bounded in backend memory and expire after 30 minutes of inactivity; a restart begins a fresh conversation. The Responses requests use `store: false` and replay only the last four user/assistant exchanges. Tool outputs needed for the current answer are sent to the selected model provider; customer access keys and bearer tokens are not.
 

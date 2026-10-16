@@ -1,5 +1,8 @@
 # Moneybags microservices test report
 
+> Startup scripts were consolidated on 14 October 2026. Use start-alpha-team.ps1, stop-oracle-alpha.ps1, and set-openrouter-key.ps1 in Downloads/integrated. Build-only is start-alpha-team.ps1 -BuildOnly; Oracle diagnostic runners now live under tools/. Older script names below describe historical verification.
+
+
 13 October 2026
 
 The six-service application builds and all **318 automated local checks pass**. The live Oracle verification has **two unresolved failures**: an existing account-position reconciliation gap and a demo password that no longer matches the encrypted team bundle. Oracle startup, the rollback-only financial audit suite, authorization checks and the authorized banking load test passed. The environment cannot be marked fully clean until those two failures are resolved. After reviewing these findings, the user explicitly authorized publishing the changes to the main GitHub repository; that authorization does not change the test results.

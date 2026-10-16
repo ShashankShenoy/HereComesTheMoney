@@ -21,6 +21,35 @@ function sendJson(res, status, value) {
   res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
   res.end(JSON.stringify(value));
 }
+// Component names are local to a service (for example, loan and card Decision).
+// Rewrite every local reference before merging so generated forms keep their fields.
+export function mergeApiSpecs(specs) {
+  const result = {openapi: '3.0.1', info: {title: 'Moneybags microservices API', version: '1.0.0'}, servers: [{url: '/'}], paths: {}, components: {}, tags: []};
+  for (const [service, spec] of Object.entries(specs)) {
+    const pointer = value => value.replace(/^#\/components\/([^/]+)\/([^/]+)/, (_, kind, name) => `#/components/${kind}/${service}__${name}`);
+    const rewrite = (value, key = '') => {
+      if (Array.isArray(value)) return value.map(item => rewrite(item, key));
+      if (!value || typeof value !== 'object') return typeof value === 'string' ? pointer(value) : value;
+      return Object.fromEntries(Object.entries(value).map(([name, item]) => [key === 'security' ? `${service}__${name}` : name, rewrite(item, name)]));
+    };
+    for (const [route, methods] of Object.entries(spec.paths || {})) {
+      // Only the service that handles this route supplies its API contract.
+      const owner = serviceFor(route);
+      if (specs[owner]?.paths?.[route] && owner !== service) continue;
+      const rewritten = rewrite(methods);
+      if (spec.security) for (const method of ['get','post','put','patch','delete','head','options','trace']) {
+        if (rewritten[method] && rewritten[method].security === undefined) rewritten[method].security = rewrite(spec.security, 'security');
+      }
+      result.paths[route] = {...result.paths[route], ...rewritten};
+    }
+    for (const [kind, values] of Object.entries(spec.components || {})) {
+      result.components[kind] ||= {};
+      for (const [name, value] of Object.entries(values)) result.components[kind][`${service}__${name}`] = rewrite(value);
+    }
+    for (const tag of spec.tags || []) if (!result.tags.some(t => t.name === tag.name)) result.tags.push(tag);
+  }
+  return result;
+}
 export function createGateway({upstreams = defaults, timeoutMs = 30000} = {}) {
   const targets = Object.fromEntries(Object.entries(upstreams).map(([name, value]) => {
     const url = new URL(value);
@@ -56,14 +85,8 @@ export function createGateway({upstreams = defaults, timeoutMs = 30000} = {}) {
     }
     if (path === '/v3/api-docs') {
       try {
-        const specs = await Promise.all(Object.keys(defaults).map(name => fetchJson(name, '/v3/api-docs', 30000)));
-        const result = {openapi: '3.0.1', info: {title: 'Moneybags microservices API', version: '1.0.0'}, servers: [{url: '/'}], paths: {}, components: {}, tags: []};
-        for (const spec of specs) {
-          for (const [route, methods] of Object.entries(spec.paths || {})) result.paths[route] = {...result.paths[route], ...methods};
-          for (const [kind, values] of Object.entries(spec.components || {})) result.components[kind] = {...result.components[kind], ...values};
-          for (const tag of spec.tags || []) if (!result.tags.some(t => t.name === tag.name)) result.tags.push(tag);
-        }
-        sendJson(res, 200, result);
+        const specs = await Promise.all(Object.keys(defaults).map(async name => [name, await fetchJson(name, '/v3/api-docs', 30000)]));
+        sendJson(res, 200, mergeApiSpecs(Object.fromEntries(specs)));
       } catch { sendJson(res, 503, {code: 'DOCUMENTATION_UNAVAILABLE', message: 'A service is unavailable'}); }
       return;
     }

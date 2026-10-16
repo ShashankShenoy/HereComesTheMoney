@@ -25,7 +25,7 @@ public class BearerSessionFilter extends OncePerRequestFilter {
                 authorities.addAll(com.moneybags.integration.PermissionBridge.authorities(user));
                 var context=SecurityContextHolder.createEmptyContext();context.setAuthentication(new UsernamePasswordAuthenticationToken(user,null,authorities));SecurityContextHolder.setContext(context);
             } catch(BusinessException e) { errors.write(request,response,e.status().value(),e.code(),e.getMessage());return; }
-              catch(DataAccessException | org.springframework.transaction.CannotCreateTransactionException e) { errors.write(request,response,503,"DATABASE_UNAVAILABLE","Authentication database is unavailable");return; }
+              catch(DataAccessException | org.springframework.transaction.TransactionException e) { errors.write(request,response,503,"DATABASE_UNAVAILABLE","Authentication database is unavailable");return; }
         }
         chain.doFilter(request,response);
     }

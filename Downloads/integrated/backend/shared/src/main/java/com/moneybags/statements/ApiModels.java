@@ -33,9 +33,11 @@ public final class ApiModels {
     public record ConsumerEvent(@NotBlank String sourceService, @NotBlank String eventId,
         @NotBlank String eventType, @NotBlank String payloadSha256) {}
     public record OutboxEvent(String eventId, String eventType, String payloadJson, String correlationId) {}
-    public record PolicyDraft(@NotBlank String code, @Min(1) int version,
-        @NotBlank String channel, @NotBlank String audience, @NotBlank String rulesJson) {}
-    public record NarrationDraft(@NotBlank String code, @NotBlank String locale,
-        @NotBlank String audience, @Min(1) int version, @NotBlank String text,
+    public record PolicyDraft(@NotBlank @Size(max=80) String code, @Min(1) int version,
+        @NotBlank @Pattern(regexp="WEB|BRANCH|API|EMAIL|POST|DOWNLOAD") String channel,
+        @NotBlank @Pattern(regexp="CUSTOMER|STAFF|REGULATOR") String audience, @NotBlank String rulesJson) {}
+    public record NarrationDraft(@NotBlank @Pattern(regexp="NORMAL|ADJUSTMENT|RETURN|REVERSAL") String code,
+        @NotBlank @Pattern(regexp="[a-z]{2,3}-[A-Z]{2}") @Size(max=20) String locale,
+        @NotBlank @Pattern(regexp="CUSTOMER|STAFF|REGULATOR") String audience, @Min(1) int version, @NotBlank @Size(max=1000) String text,
         @NotNull OffsetDateTime effectiveFrom, OffsetDateTime effectiveTo) {}
 }

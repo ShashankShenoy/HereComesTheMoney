@@ -4,12 +4,13 @@ param(
     [string]$DependencyDirectory
 )
 $ErrorActionPreference = 'Stop'
-$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$taskRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $taskRoot '..\..'))
 if (-not $OracleEnvFile) { $OracleEnvFile = Join-Path $repoRoot '.env' }
 if (-not $DependencyDirectory) {
     $DependencyDirectory = Join-Path $repoRoot '.offline-compile\BOOT-INF\lib'
     if (-not (Test-Path -LiteralPath $DependencyDirectory)) {
-        $DependencyDirectory = Join-Path $PSScriptRoot 'backend/shared/target/dependency'
+        $DependencyDirectory = Join-Path $taskRoot 'backend/shared/target/dependency'
     }
 }
 if (-not (Test-Path -LiteralPath $DependencyDirectory)) {
@@ -34,15 +35,15 @@ try {
     if ($env:DB_URL -notlike 'jdbc:oracle:*' -or -not $env:DB_USERNAME -or -not $env:DB_PASSWORD) {
         throw 'Configure DB_URL, DB_USERNAME and DB_PASSWORD for Oracle. Credentials are never printed.'
     }
-    $runtime = Join-Path $PSScriptRoot '.runtime\financial-audit-test'
+    $runtime = Join-Path $taskRoot '.runtime\financial-audit-test'
     $classes = Join-Path $runtime 'classes'
     New-Item -ItemType Directory -Force -Path $classes | Out-Null
     $sourceList = Join-Path $runtime 'sources.txt'
-    $production = foreach ($module in ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'backend/pom.xml') -Raw)).project.modules.module) {
+    $production = foreach ($module in ([xml](Get-Content -LiteralPath (Join-Path $taskRoot 'backend/pom.xml') -Raw)).project.modules.module) {
         if($module -in @('local-database','acceptance-tests')){continue}
-        Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "backend/$module/src/main/java") -Recurse -Filter '*.java'
+        Get-ChildItem -LiteralPath (Join-Path $taskRoot "backend/$module/src/main/java") -Recurse -Filter '*.java'
     }
-    $test = Join-Path $PSScriptRoot 'backend/acceptance-tests/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java'
+    $test = Join-Path $taskRoot 'backend/acceptance-tests/src/test/java/com/moneybags/privacy/audit/FinancialAuditOracleSmoke.java'
     $sources = @($production.FullName) + @($test)
     $sources | ForEach-Object { '"'+($_ -replace '\\','/')+'"' } | Set-Content -LiteralPath $sourceList -Encoding utf8
     $jars = Join-Path ([IO.Path]::GetFullPath($DependencyDirectory)) '*'

@@ -23,7 +23,12 @@ public class CatalogService {
     /** Creates a draft masking policy with immutable content digest. */
     @Transactional public String maskDraft(Actor actor,PolicyDraft body) {
         authorize(actor,"MASKING_ADMIN");
-        try { mapper.readTree(body.rulesJson()); }
+        try {
+            var rules=mapper.readTree(body.rulesJson());
+            if(rules==null||!rules.isObject())throw new IllegalArgumentException();
+            for(String flag:List.of("showBalances","showSourceReferences"))
+                if(rules.has(flag)&&!rules.get(flag).isBoolean())throw new IllegalArgumentException();
+        }
         catch(Exception e) { throw new ApiException(HttpStatus.BAD_REQUEST,"INVALID_RULES_JSON","Rules must be valid JSON"); }
         String id=UUID.randomUUID().toString();
         jdbc.update("""
@@ -95,7 +100,8 @@ public class CatalogService {
     public List<Map<String,Object>> narrations(Actor actor) {
         authorize(actor,"NARRATION_READ");
         return jdbc.queryForList("""
-            SELECT NARRATION_CATALOG_ID,NARRATION_CODE,LOCALE_CODE,AUDIENCE_CODE,VERSION_NO,APPROVAL_STATUS
+            SELECT NARRATION_CATALOG_ID,NARRATION_CODE,LOCALE_CODE,AUDIENCE_CODE,VERSION_NO,APPROVAL_STATUS,
+                   EFFECTIVE_FROM,EFFECTIVE_TO
             FROM M10_NARRATION_CATALOG ORDER BY NARRATION_CODE,VERSION_NO DESC
             """);
     }

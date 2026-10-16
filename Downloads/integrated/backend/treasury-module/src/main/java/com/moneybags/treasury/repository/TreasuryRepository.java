@@ -27,6 +27,9 @@ public class TreasuryRepository {
     public TreasuryRepository(JdbcClient jdbc, DataSource dataSource) {
         this.jdbc = jdbc;
         this.workItemInsert = new SimpleJdbcInsert(dataSource).withTableName("M07_TREASURY_WORK_ITEM")
+            .usingColumns("WORK_TYPE", "SUBJECT_TYPE", "RESERVE_ACCOUNT_ID", "PAYMENT_ID",
+                "SETTLEMENT_CYCLE_ID", "SOURCE_REFERENCE", "EXPECTED_AMOUNT", "OBSERVED_AMOUNT",
+                "DETAIL_TEXT", "OWNER_ID")
             .usingGeneratedKeyColumns("WORK_ITEM_ID");
     }
 
@@ -450,6 +453,10 @@ public class TreasuryRepository {
     }
 
     /** Resolves evidence needed to authorize a local reserve mirror entry. */
+    public List<SettlementEvidence> findEvidence() {
+        return jdbc.sql("SELECT * FROM M07_SETTLEMENT_EVIDENCE ORDER BY EVIDENCE_ID DESC").query(this::evidence).list();
+    }
+
     public Optional<SettlementEvidence> findEvidence(long id) {
         return jdbc.sql("SELECT * FROM M07_SETTLEMENT_EVIDENCE WHERE EVIDENCE_ID=:id")
             .param("id", id).query(this::evidence).optional();

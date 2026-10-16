@@ -1,17 +1,17 @@
-# Moneybags microservices
+# Moneybags Oracle ALPHA
 
-Start the complete local demo from this directory in PowerShell:
+Use PowerShell 7 in `Downloads/integrated`. Connect the ALPHA database network/VPN and have the team bundle passphrase ready.
+
+Only three user-facing scripts remain:
 
 ```powershell
-./start.ps1
+./set-openrouter-key.ps1  # Save or replace your OpenRouter API key.
+./start-alpha-team.ps1    # Build and start against the ALPHA Oracle database.
+./stop-oracle-alpha.ps1   # Stop the application services.
 ```
 
-Requires Java JDK 17+, Maven 3.9+, Node.js 20+ and PowerShell 5.1 or 7 on Windows. The first build downloads Maven/npm dependencies. The script verifies the build and tests, then launches the local database, six services (identity, banking, payments, loans, audit/compliance and reporting), API gateway and frontend. It waits for every service to become ready and cleans up a failed start.
+Open [the application](http://localhost:5174). Requires Java JDK 17+, Maven 3.9+, Node.js 20+, and PowerShell 7. The start script prompts privately for the encrypted ALPHA bundle passphrase, automatically displays all seven team logins with roles, passwords, and any customer access keys, then launches six services, the gateway, and frontend. Oracle data persists after stopping.
 
-Open [the application](http://localhost:5173). Synthetic local users `customer`, `customer2`, `admin` and `checker` use `LocalBanking!2026`. Local data resets when the stack stops. Stop all recorded processes with `./stop.ps1`.
+Use `./start-alpha-team.ps1 -BuildOnly` to build before connecting a restrictive VPN, `-Offline` for cached dependencies, or `-SkipBuild` to start a verified build. Use `-ShowCredentials` to view locally unlocked team logins privately. Internal helpers and developer checks live under `Downloads/integrated/tools`.
 
-Use `./start.ps1 -Offline` with cached dependencies, or `./start.ps1 -SkipBuild` after a successful verified build. The latter rejects stale sources or changed artifacts. Service logs and process records are in `Downloads/integrated/.runtime`.
-
-See [architecture and verification](Downloads/integrated/docs/MICROSERVICES.md) for service ownership, ports, testing and the remaining shared database coupling. See [the product guide](Downloads/integrated/README.md) for the existing workflows and Oracle setup.
-
-Banking is organized into customer, product, account, ledger, treasury, card and deposit libraries. Payments and loan servicing reuse the ledger library inside their own database transactions. See the [test report](Downloads/integrated/docs/MICROSERVICES-TEST-REPORT.md) for the full workflow and outage results.
+See [the product guide](Downloads/integrated/README.md) and [service architecture](Downloads/integrated/docs/MICROSERVICES.md). H2 and alternate startup launchers have been removed.

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moneybags.treasury.api.TreasuryRequests.*;
 import com.moneybags.treasury.domain.DomainException;
 import com.moneybags.treasury.repository.TreasuryRepository;
+import com.moneybags.iam.service.TreasuryWorkOwnerDirectory;
 import java.nio.charset.StandardCharsets;
 import java.math.BigDecimal;
 import java.security.MessageDigest;
@@ -26,10 +27,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 public class TreasuryService {
     private final TreasuryRepository repository;
     private final ObjectMapper objectMapper;
+    private final TreasuryWorkOwnerDirectory workOwners;
 
-    public TreasuryService(TreasuryRepository repository, ObjectMapper objectMapper) {
+    public TreasuryService(TreasuryRepository repository, ObjectMapper objectMapper, TreasuryWorkOwnerDirectory workOwners) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        this.workOwners = workOwners;
     }
 
     /** Creates reserve master data together with a zero position and an outbox event. */
@@ -273,6 +276,9 @@ public class TreasuryService {
     }
 
     @Transactional(readOnly = true)
+    public List<SettlementEvidence> evidence() { return repository.findEvidence(); }
+
+    @Transactional(readOnly = true)
     public SettlementEvidence evidence(long id) {
         return repository.findEvidence(id).orElseThrow(() -> DomainException.notFound("Settlement evidence", id));
     }
@@ -405,6 +411,8 @@ public class TreasuryService {
     @Transactional
     public WorkItem createWork(CreateWorkItem command, String actor) {
         validateSubject(command.subjectType(), command.paymentId(), command.settlementCycleId());
+        if (!workOwners.eligible(command.ownerId()))
+            throw new DomainException("INVALID_WORK_OWNER", "Choose an active employee with current treasury work access", 422);
         WorkItem item = repository.insertWorkItem(command);
         audit(actor, "WORK_CREATE", "WORK_ITEM", item.id(), "SUCCESS", null);
         return item;
@@ -413,6 +421,9 @@ public class TreasuryService {
     /** Lists operations work. */
     @Transactional(readOnly = true)
     public List<WorkItem> workItems(String status, String owner) { return repository.findWorkItems(status, owner); }
+
+    @Transactional(readOnly = true)
+    public List<TreasuryWorkOwnerDirectory.Owner> workOwners() { return workOwners.owners(); }
 
     @Transactional(readOnly = true)
     public WorkItem workItem(long id) {

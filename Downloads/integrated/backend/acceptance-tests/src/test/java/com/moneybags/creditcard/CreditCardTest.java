@@ -24,6 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:creditcards;MODE=Oracle;DB_CLOSE_DELAY=-1;DEFAULT_NULL_ORDERING=HIGH","moneybags.auth.allowed-origins=http://localhost:5173"})
 @AutoConfigureMockMvc @ActiveProfiles("local")
+@org.springframework.context.annotation.Import(com.moneybags.PaymentPinTestSupport.class)
 class CreditCardTest {
     @TestConfiguration static class TimeConfig {
         @Bean @Primary MutableClock creditTestClock(){return new MutableClock();}
@@ -48,7 +49,11 @@ class CreditCardTest {
     String key(){return UUID.randomUUID().toString().toUpperCase(Locale.ROOT);}
     String login(String name)throws Exception{
         var r=mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("username",name,"password","LocalBanking!2026","clientId","MONEYBAGS_WEB")))).andExpect(status().isOk()).andReturn();
-        return json.readTree(r.getResponse().getContentAsString()).path("data").path("accessToken").asText();
+        var session=json.readTree(r.getResponse().getContentAsString()).path("data");
+        String token=session.path("accessToken").asText();
+        if(session.path("user").path("userType").asText().equals("CUSTOMER")&&db.queryForObject("SELECT COUNT(*) FROM MBX_PAYMENT_PIN WHERE USER_ID=?",Integer.class,session.path("user").path("userId").asText())==0)
+            mvc.perform(post("/api/v1/auth/payment-pin/setup").header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("pin",com.moneybags.PaymentPinTestSupport.PIN)))).andExpect(status().isOk());
+        return token;
     }
     ResultActions send(String path,String token,Object body)throws Exception{return mvc.perform(post("/api/v1/credit-cards"+path).header("Authorization","Bearer "+token).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)));}
     JsonNode value(ResultActions r)throws Exception{return json.readTree(r.andReturn().getResponse().getContentAsString());}
@@ -111,6 +116,8 @@ class CreditCardTest {
     @Test void purchaseReplayIsolationControlsAndRepayment()throws Exception{
         String id=activeCard("0","10000");String requestKey=key();
         var request=purchase("125.50",requestKey);
+        mvc.perform(post("/api/v1/credit-cards/"+id+"/purchases").header("Authorization","Bearer "+customer).header("X-Payment-Pin","").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request))).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("PIN_REQUIRED"));
+        mvc.perform(post("/api/v1/credit-cards/"+id+"/purchases").header("Authorization","Bearer "+customer).header("X-Payment-Pin","999999").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request))).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("PIN_INVALID"));
         long entry=value(send("/"+id+"/purchases",customer,request).andExpect(status().isOk())).path("ENTRY_ID").asLong();
         assertEquals(entry,value(send("/"+id+"/purchases",customer,purchase("125.5",requestKey)).andExpect(status().isOk())).path("ENTRY_ID").asLong());
         send("/"+id+"/purchases",customer,purchase("126",requestKey)).andExpect(status().isConflict());
@@ -122,6 +129,8 @@ class CreditCardTest {
         send("/"+id+"/purchases",customer,purchase("1",key())).andExpect(status().isConflict());
         control(id,"CLOSE",customer).andExpect(status().isConflict());
         BigDecimal before=balance();var repay=Map.of("requestKey",key(),"amount","125.50");
+        mvc.perform(post("/api/v1/credit-cards/"+id+"/repayments").header("Authorization","Bearer "+customer).header("X-Payment-Pin","").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(repay))).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("PIN_REQUIRED"));
+        assertEquals(0,before.compareTo(balance()));
         send("/"+id+"/repayments",customer,repay).andExpect(status().isOk());send("/"+id+"/repayments",customer,repay).andExpect(status().isOk());
         equalMoney("125.50",before.subtract(balance()));equalMoney("0",getCard(id,customer).path("OUTSTANDING_BALANCE").decimalValue());
         reconciled(id);control(id,"CLOSE",customer).andExpect(status().isOk());control(id,"ACTIVATE",customer).andExpect(status().isConflict());

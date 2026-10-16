@@ -2,7 +2,7 @@ param([switch]$ReplaceBundle, [switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
 $taskRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $PSScriptRoot 'alpha-team-crypto.ps1')
+Import-Module (Join-Path $PSScriptRoot 'alpha-team-crypto.psm1') -Force
 $bundlePath = Join-Path $taskRoot 'alpha-team.bundle.json'
 $passphrasePath = Join-Path $taskRoot '.runtime\alpha-team-passphrase.txt'
 if ((Test-Path -LiteralPath $bundlePath) -and -not $ReplaceBundle -and -not $CheckOnly) {

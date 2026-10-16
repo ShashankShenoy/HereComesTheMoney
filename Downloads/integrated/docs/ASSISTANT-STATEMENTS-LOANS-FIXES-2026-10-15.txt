@@ -1,0 +1,117 @@
+AI ASSISTANT, STATEMENTS AND LOANS FIXES
+15 October 2026
+
+SCOPE AND RESULT
+This repair addresses the four findings in
+ASSISTANT-STATEMENTS-LOANS-CHECK-2026-10-15.txt.
+
+1. CHECKER ASSISTANT ACCESS
+Checker chat and MCP inquiry requests are permitted. Checker tools are restricted
+to scoped account, position, transaction, customer-search and pending-beneficiary
+inquiries. Draft/write tools and action confirmation remain denied. Local tests
+use a stub model; they do not send data to the external AI provider.
+
+2. LOAN SANCTION BOUNDS
+Approval validates sanctioned amount and tenure against the selected product
+version's minimum and maximum values, in addition to existing application and
+checker-authority limits. Conversion repeats that validation so an old invalid
+approval cannot create a facility. Existing Oracle facilities meet these bounds.
+
+3. STAFF STATEMENTS
+The approved repair created these six configuration records using administrator
+drafts and a separate checker approval:
+- One active M10_STATEMENTS purpose, STAFF_ACCOUNT_STATEMENT.
+- One approved WEB / STAFF masking profile, STAFF_WEB_STATEMENTS.
+- Four effective en-IN / STAFF narrations: NORMAL, REVERSAL, RETURN, ADJUSTMENT.
+The staff form only offers active, currently effective statement-service purposes.
+Authorization also checks the owning service. Narration discovery includes its
+effective dates. The setup tool reuses suitable approved configuration on replay.
+No new live statement was requested or issued.
+
+4. PARTIAL AND FULL LOAN PREPAYMENT
+Implemented a read-only prepayment quote and a separate servicing command for
+PARTIAL and FORECLOSURE. Existing scheduled repayments retain their behavior.
+The amount is the total debit, including interest through the payment date.
+
+Partial payment covers scheduled dues, elapsed interest and additional principal.
+It reduces future principal installments while preserving contractual due dates
+and maturity. Full foreclosure requires the exact current payoff and closes the
+facility. Product prepayment flags, borrower/account ownership, account status,
+scope and servicing permissions are enforced. Fee/penalty balances that need a
+separate allocation workflow are explicitly rejected. Current products use the
+supported fixed-rate, monthly, single-disbursement reducing-balance configuration.
+
+Posting, interest accrual, allocations, projections and schedule replacement are
+atomic. Insufficient funds roll everything back. Concurrent identical requests
+debit once; replay with changed payment terms is rejected. Historical journals
+remain immutable. No schema migration or live loan transaction was required.
+
+The browser form loads a quote, validates amounts and refreshes the quote before
+submission. A changed payoff requires review and resubmission. Foreclosure
+autofills and locks the visible Oracle JET amount field. Facility changes clear
+the displayed amount; switching to PARTIAL restores editability.
+
+AUTOMATED VALIDATION
+The final clean offline build executed:
+- Backend: 195 passed; zero failures/errors. Sixty opt-in Oracle tests skipped.
+- Frontend: 90 passed; zero failures.
+- Gateway and architecture: 24 passed; zero failures.
+- Narrow staff configuration tool: 2 passed; zero failures.
+Total: 311 passed. Skipped tests are not counted as passed.
+
+Included focused coverage:
+- Nineteen assistant/statement/loan integration tests.
+- Six prepayment calculation tests, including month-end and leap-year dates.
+- Customer and staff statement issuance and PDF/CSV/HTML downloads in disposable
+  H2, financial arithmetic, running balances and foreign-customer denial.
+- Checker inquiry access with draft/write denial, conversation isolation,
+  provider-error simulation and bounded tool loops.
+- Product sanction minima; full loan origination/disbursement/repayment lifecycle.
+- Partial/full prepayment, overdue allocations, disabled modes, foreign scope,
+  insufficient-funds rollback, same-day repeat payments and concurrent replay.
+- Visible-field synchronization and changed-payoff review before submission.
+
+LIVE VERIFICATION
+Eighteen authenticated local read-only API checks passed:
+- Administrator and checker assistant configuration and tool discovery.
+- Both roles can read current quotes for all seven active loan facilities.
+- Active statement purpose and approved effective staff rendering configuration.
+No AI model invocation, live statement issuance or financial command was sent.
+
+The final verified build is running at http://localhost:5174; gateway and service
+readiness are UP. Browser checks confirmed the exact payoff is visible with
+aria-readonly=true, PARTIAL restores an editable input, and the approved staff
+purpose is selectable. No browser console errors or warnings were observed.
+The temporary administrator verification session was signed out.
+
+Oracle inspection used SET TRANSACTION READ ONLY and rollback:
+- Twenty RBI/treasury/ledger consistency checks passed, zero exceptions.
+- Twelve loan/statement consistency checks passed, zero exceptions.
+- All twelve before/after financial-table row counts and SHA-256 fingerprints
+  match: customer positions, journals, postings, transaction log, reserves,
+  treasury ledger/holds, payments, settlement cycles and simulator balances,
+  settlements and movements. No financial changes were detected.
+
+AUTHORIZATION AND LIMITS
+The user selected local/read-only testing, then explicitly approved app startup
+(including normal background jobs) and the six staff configuration records.
+The initial startup was blocked by automatic approval review under the earlier
+read-only scope and did not execute; startup proceeded after that explicit grant.
+No payments or live loan actions were submitted. No live statements were created.
+Actual external AI provider response delivery and fresh Oracle statement issuance
+remain untested by the user's choice; local behavior and live readiness passed.
+
+EVIDENCE (relative to Downloads/integrated)
+.runtime/assistant-statements-loans-verified-build-final.log
+.runtime/verified-build.json
+.runtime/staff-statement-repair-plan.json
+.runtime/staff-statement-repair-applied.log
+.runtime/assistant-fixes-live-readonly.json
+.runtime/assistant-fixes-financial-before.json
+.runtime/assistant-fixes-financial-after.json
+.runtime/assistant-fixes-readiness-after.json
+.runtime/assistant-fixes-final-db-summary.json
+.runtime/assistant-fixes-final-health.json
+.runtime/assistant-fixes-ui-verification.json
+.runtime/assistant-fixes-prepayment-ui.png
+.runtime/assistant-fixes-staff-statements-ui.png

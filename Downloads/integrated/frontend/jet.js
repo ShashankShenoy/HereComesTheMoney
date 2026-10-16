@@ -1,6 +1,25 @@
 /** Oracle JET AMD runtime with Knockout owning form values. */
 import {locale} from './i18n.js';
 let koRuntime;
+/** Preserve native constraints when the submitted source is replaced by a JET control. */
+export function constraintValidator({type,pattern,min,max,step,minLength,maxLength},label='Value') {
+  return {validate(value) {
+    if(value===null||value===undefined||value==='')return;
+    const text=String(value);
+    const fail=message=>{throw new Error(label+' '+message);};
+    if(minLength!==null&&minLength!==undefined&&text.length<Number(minLength))fail('is too short.');
+    if(maxLength!==null&&maxLength!==undefined&&text.length>Number(maxLength))fail('is too long.');
+    if(pattern&&!new RegExp('^(?:'+pattern+')$','u').test(text))fail('has an invalid format.');
+    if(type==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text))fail('must be a valid email address.');
+    if(type==='number') {
+      const number=Number(text);if(!Number.isFinite(number))fail('must be a number.');
+      if(min!==null&&min!==undefined&&number<Number(min))fail('must be at least '+min+'.');
+      if(max!==null&&max!==undefined&&number>Number(max))fail('must be at most '+max+'.');
+      const increment=step==='any'?null:Number(step||1),base=Number(min??0);
+      if(increment>0&&Math.abs((number-base)/increment-Math.round((number-base)/increment))>1e-8)fail('must use increments of '+increment+'.');
+    }
+  }};
+}
 export const jetReady = new Promise((resolve, reject) => {
   window.require.config({
     baseUrl: "/",
@@ -86,7 +105,11 @@ export async function enhanceForms(root) {
     component.value = value();
     component.required = input.required;
     component.disabled = input.matches(":disabled");
+    if (input.tagName !== "SELECT") component.readonly = input.readOnly;
     if (input.placeholder) component.placeholder = input.placeholder;
+    if(input.tagName!=="SELECT")component.validators=[constraintValidator({type,
+      pattern:input.getAttribute('pattern'),min:input.getAttribute('min'),max:input.getAttribute('max'),
+      step:input.getAttribute('step'),minLength:input.getAttribute('minlength'),maxLength:input.getAttribute('maxlength')},text)];
     if (input.tagName === "SELECT") {
       const items = Array.from(input.options).map((o) => ({
         value: o.value,
@@ -100,6 +123,8 @@ export async function enhanceForms(root) {
     input.dataset.jetSource = "true";
     input.hidden = true;
     input.required = false;
+    for(const attribute of ['pattern','min','max','step','minlength','maxlength'])input.removeAttribute(attribute);
+    if(input.tagName==='INPUT')input.type='hidden';
     label.append(shell);
     shell.append(component);
     ko.applyBindings({ value }, shell);
@@ -146,6 +171,8 @@ export async function validateJet(root) {
     "oj-input-text,oj-input-password,oj-input-date,oj-text-area,oj-select-single",
   ))
     if (!input.disabled && (await input.validate()) !== "valid") valid = false;
+  for(const input of root.querySelectorAll('input:not([data-jet-source]),select:not([data-jet-source]),textarea:not([data-jet-source])'))
+    if(!input.closest('.jet-field')&&!input.disabled&&!input.reportValidity())valid=false;
   return valid;
 }
 /** Disposes Knockout subscriptions before replacing a rendered view. */

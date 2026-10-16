@@ -121,17 +121,19 @@ public class LedgerService {
         PositionView position = lockedPosition(request.bankAccountId());
         // A concurrent attempt may have committed while this request waited for the
         // position lock. The payment can own only one hold, even with a new key.
-        List<HoldView> committed = db.query("SELECT HOLD_ID,STATUS,BANK_ACCOUNT_ID,PAYMENT_ID,AMOUNT FROM M05_FUNDS_HOLD WHERE HOLD_KEY=?",
-                (rs, n) -> new HoldView(rs.getLong(1), rs.getString(2), rs.getLong(3), rs.getLong(4), rs.getBigDecimal(5)), request.holdKey());
+        // Read the reservation and its key together. Separate key/count inquiries
+        // can observe a commit between them and incorrectly reject an exact replay.
+        var committed = db.queryForList("SELECT HOLD_ID,STATUS,BANK_ACCOUNT_ID,PAYMENT_ID,AMOUNT,HOLD_KEY FROM M05_FUNDS_HOLD WHERE PAYMENT_ID=?",request.paymentId());
         if (!committed.isEmpty()) {
-            HoldView value = committed.get(0);
+            var row=committed.get(0);
+            if(!request.holdKey().equals(row.get("HOLD_KEY")))
+                throw new ApiException(HttpStatus.CONFLICT, "PAYMENT_HOLD_EXISTS", "Payment already has a hold");
+            HoldView value=new HoldView(((Number)row.get("HOLD_ID")).longValue(),(String)row.get("STATUS"),
+                ((Number)row.get("BANK_ACCOUNT_ID")).longValue(),((Number)row.get("PAYMENT_ID")).longValue(),(BigDecimal)row.get("AMOUNT"));
             if (value.bankAccountId() != request.bankAccountId() || value.paymentId() != request.paymentId() || value.amount().compareTo(request.amount()) != 0)
                 throw new ApiException(HttpStatus.CONFLICT, "HOLD_KEY_CONFLICT", "Hold key was used for another request");
             return value;
         }
-        Integer paymentHolds = db.queryForObject("SELECT COUNT(*) FROM M05_FUNDS_HOLD WHERE PAYMENT_ID=?", Integer.class, request.paymentId());
-        if (paymentHolds != null && paymentHolds > 0)
-            throw new ApiException(HttpStatus.CONFLICT, "PAYMENT_HOLD_EXISTS", "Payment already has a hold");
         payments.requireAuthorizedHold(request.paymentId(), request.bankAccountId(), request.amount());
         requireFence(request.bankAccountId(), "DR");
         if (position.spendable().compareTo(request.amount()) < 0)

@@ -1,9 +1,47 @@
-param([int]$BackendPort = 8091, [int]$FrontendPort = 5174, [switch]$SkipBuild,
-      [switch]$CheckOnly, [switch]$UnlockOnly, [string]$PassphraseFile)
+#requires -Version 7.0
+param(
+  [ValidateRange(1,65535)][int]$BackendPort = 8091,
+  [ValidateRange(1,65535)][int]$FrontendPort = 5174,
+  [switch]$SkipBuild, [switch]$Offline, [switch]$BuildOnly,
+  [switch]$CheckOnly, [switch]$UnlockOnly, [switch]$ShowCredentials,
+  [bool]$PaymentSimulationEnabled = $true,
+  [string]$PassphraseFile
+)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required for the encrypted ALPHA team bundle.' }
 $taskRoot = $PSScriptRoot
-. (Join-Path $taskRoot 'tools\alpha-team-crypto.ps1')
+function Write-AlphaTeamLogins {
+  param([string[]]$Rows)
+  Write-Output 'All ALPHA demo logins (keep these passwords and access keys private):'
+  foreach ($line in $Rows) {
+    $parts = $line.TrimEnd("`r") -split "`t"
+    if ($parts.Count -ne 4) { continue }
+    Write-Output "Login: $($parts[0])"
+    Write-Output "Role: $($parts[1])"
+    Write-Output "Password: $($parts[2])"
+    if ($parts[3]) { Write-Output "Customer access key: $($parts[3])" }
+    Write-Output ''
+  }
+}
+Import-Module (Join-Path $taskRoot 'tools/oracle-runtime.psm1') -Force
+if ($BuildOnly) {
+  if ($SkipBuild) { throw '-BuildOnly and -SkipBuild cannot be combined.' }
+  Start-OracleServices -ProjectRoot $taskRoot -BuildOnly -Offline:$Offline
+  return
+}
+if ($ShowCredentials) {
+  $path = Join-Path $PSScriptRoot '.runtime\alpha-team-credentials.dpapi'
+  if (-not (Test-Path -LiteralPath $path)) {
+    throw 'Team credentials are not unlocked here. Run start-alpha-team.ps1 first.'
+  }
+  $secure = Get-Content -LiteralPath $path -Raw | ConvertTo-SecureString
+  try { $plain = [System.Net.NetworkCredential]::new('', $secure).Password }
+  finally { $secure.Dispose() }
+  Write-AlphaTeamLogins -Rows ($plain -split "`n")
+  $plain = $null
+  return
+}
+Import-Module (Join-Path $taskRoot 'tools/alpha-team-crypto.psm1') -Force
 $bundlePath = Join-Path $taskRoot 'alpha-team.bundle.json'
 if (-not (Test-Path -LiteralPath $bundlePath)) { throw 'The encrypted ALPHA team bundle is missing.' }
 
@@ -80,12 +118,13 @@ $allSecure = ConvertTo-SecureString -String ($rows -join "`n") -AsPlainText -For
 try {
   $allSecure | ConvertFrom-SecureString | Set-Content -LiteralPath (Join-Path $privateRuntime 'alpha-team-credentials.dpapi') -NoNewline
 } finally { $allSecure.Dispose() }
+Write-AlphaTeamLogins -Rows $rows.ToArray()
 if ($UnlockOnly) {
   Write-Host 'All seven demo logins are unlocked in .runtime/alpha-team-credentials.dpapi.'
   return
 }
 
-$names = @('DB_URL','DB_USERNAME','DB_PASSWORD','OPENROUTER_API_KEY','AI_PROVIDER','AI_MODEL','AI_FALLBACK_MODEL','DEPOSIT_INTEREST_ENABLED')
+$names = @('DB_URL','DB_USERNAME','DB_PASSWORD','OPENROUTER_API_KEY','AI_PROVIDER','AI_MODEL','AI_FALLBACK_MODEL','DEPOSIT_INTEREST_ENABLED','INTERNAL_BANK_CODES','CUSTOMER_SIGNUP_ENABLED','PAYMENT_SIMULATION_ENABLED')
 $previous = @{}
 foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -97,8 +136,11 @@ try {
   $env:AI_MODEL = $payload.aiModel
   $env:AI_FALLBACK_MODEL = $payload.aiFallbackModel
   $env:DEPOSIT_INTEREST_ENABLED = $payload.depositInterestEnabled
-  & (Join-Path $taskRoot 'start-oracle-alpha.ps1') -BackendPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -UseInheritedSettings -CifKeyFile (Join-Path $alphaKeys 'cif.key') -MfaKeyFile (Join-Path $alphaKeys 'mfa.key')
-  Write-Host 'ALPHA team workspace is ready. Use ./show-alpha-team-credentials.ps1 to display the team demo logins privately.'
+  $env:INTERNAL_BANK_CODES = 'MCPB0000002'
+  $env:CUSTOMER_SIGNUP_ENABLED = 'true'
+  $env:PAYMENT_SIMULATION_ENABLED = $PaymentSimulationEnabled.ToString().ToLowerInvariant()
+  Start-OracleServices -ProjectRoot $taskRoot -GatewayPort $BackendPort -FrontendPort $FrontendPort -SkipBuild:$SkipBuild -Offline:$Offline -CifKeyFile (Join-Path $alphaKeys 'cif.key') -MfaKeyFile (Join-Path $alphaKeys 'mfa.key')
+  Write-Host 'ALPHA team workspace is ready.'
 } finally {
   foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
   $openRouterKey = $null
