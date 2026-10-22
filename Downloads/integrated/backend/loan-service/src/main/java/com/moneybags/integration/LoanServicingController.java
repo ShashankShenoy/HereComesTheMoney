@@ -63,7 +63,7 @@ public class LoanServicingController {
   if(!today().equals(BusinessRepository.localDate(d.get("VALUE_DATE"))))throw fail("Request a current-business-date disbursement");
   var rows=LoanScheduleMath.calculate(money(f,"PRINCIPAL_AMOUNT"),money(f,"ANNUAL_RATE_PCT"),((Number)f.get("TENURE_MONTHS")).intValue(),today(),(String)f.get("DAY_COUNT_BASIS"));
   long txn=txn("loan-disburse:"+id,"LOAN_DISBURSEMENT",money(d,"AMOUNT"),null,account,num(f,"PRODUCT_VERSION_ID"));
-  long journal=ledger.postJournal(new JournalRequest("loan-disburse:"+id,"LOAN_DISBURSEMENT",txn,null,null,facilityId,null,null,today(),"Loan disbursement",List.of(new JournalLine(gl(num(f,"PRODUCT_VERSION_ID"),"LOAN_PRINCIPAL"),null,facilityId,"PRINCIPAL","DR",money(d,"AMOUNT"),"Principal advance"),new JournalLine(gl(num(a,"PRODUCT_VERSION_ID"),"CUSTOMER_LIABILITY"),account,null,null,"CR",money(d,"AMOUNT"),"Loan proceeds"))),actor()).journalId();
+  long journal=ledger.postJournal(new JournalRequest("loan-disburse:"+id,"LOAN_DISBURSEMENT",txn,null,null,facilityId,null,null,today(),"Loan disbursement",List.of(new JournalLine(gl(num(f,"PRODUCT_VERSION_ID"),"LOAN_PRINCIPAL"),null,facilityId,"PRINCIPAL","DR",money(d,"AMOUNT"),"Principal advance"),new JournalLine(LoanAccountLiabilityGl.resolve(db,num(a,"PRODUCT_VERSION_ID")),account,null,null,"CR",money(d,"AMOUNT"),"Loan proceeds"))),actor()).journalId();
   posted(txn);
   db.jdbc().update("UPDATE M08_LOAN_DISBURSEMENT SET STATUS='POSTED',APPROVED_BY_USER_ID=?,APPROVED_AT=SYSTIMESTAMP,APPROVAL_AUTHORITY_CODE=?,TXN_ID=?,GL_JOURNAL_ID=?,POSTED_AT=SYSTIMESTAMP WHERE DISBURSEMENT_ID=?",actor(),r.authorityCode(),txn,journal,id);
   BigDecimal interest=rows.stream().map(LoanScheduleMath.Installment::interest).reduce(BigDecimal.ZERO,BigDecimal::add);
@@ -102,7 +102,7 @@ public class LoanServicingController {
    }
   }
   if(remaining.signum()>0)throw fail("Amount exceeds accrued due installments; early prepayment requires a reschedule workflow");
-  long txn=txn("repay:"+r.requestKey(),"LOAN_REPAYMENT",r.amount(),account,null,num(f,"PRODUCT_VERSION_ID"));List<JournalLine> lines=new ArrayList<>();lines.add(new JournalLine(gl(num(a,"PRODUCT_VERSION_ID"),"CUSTOMER_LIABILITY"),account,null,null,"DR",r.amount(),"Loan repayment"));
+  long txn=txn("repay:"+r.requestKey(),"LOAN_REPAYMENT",r.amount(),account,null,num(f,"PRODUCT_VERSION_ID"));List<JournalLine> lines=new ArrayList<>();lines.add(new JournalLine(LoanAccountLiabilityGl.resolve(db,num(a,"PRODUCT_VERSION_ID")),account,null,null,"DR",r.amount(),"Loan repayment"));
   for(String component:List.of("INTEREST","PRINCIPAL")){BigDecimal amount=allocations.stream().filter(x->x.type().equals(component)).map(Allocation::amount).reduce(BigDecimal.ZERO,BigDecimal::add);if(amount.signum()>0)lines.add(new JournalLine(gl(num(f,"PRODUCT_VERSION_ID"),"LOAN_"+component),null,id,component,"CR",amount,"Loan repayment"));}
   long journal=ledger.postJournal(new JournalRequest("loan-repay:"+txn,"LOAN_REPAYMENT",txn,null,null,id,null,null,today(),"Loan repayment",lines),actor()).journalId();posted(txn);
   long payment=insert("LOAN_PAYMENT_ID","INSERT INTO M08_LOAN_PAYMENT(FACILITY_ID,PAYMENT_SOURCE_CODE,SOURCE_ACCOUNT_ID,TXN_ID,GL_JOURNAL_ID,REQUEST_KEY,AMOUNT,VALUE_DATE,BOOKED_AT,STATUS) VALUES (?,'ACCOUNT',?,?,?,?,?,?,SYSTIMESTAMP,'ALLOCATED')",id,account,txn,journal,HexFormat.of().formatHex(CustomerHashService.digest(actor()+":"+r.requestKey())),r.amount(),today());

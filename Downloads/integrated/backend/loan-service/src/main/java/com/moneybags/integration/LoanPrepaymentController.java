@@ -90,7 +90,7 @@ public class LoanPrepaymentController {
         if(money(db.one("SELECT INTEREST_OUTSTANDING FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",id),"INTEREST_OUTSTANDING").compareTo(q.interestDue())!=0)
             throw fail("Loan interest must be reconciled before early repayment");
         long txn=transaction("prepay:"+input.requestKey(),"LOAN_REPAYMENT",input.amount(),account,number(f,"PRODUCT_VERSION_ID"));
-        List<JournalLine> lines=new ArrayList<>();lines.add(new JournalLine(gl(number(a,"PRODUCT_VERSION_ID"),"CUSTOMER_LIABILITY"),account,null,null,"DR",input.amount(),"Early loan repayment"));
+        List<JournalLine> lines=new ArrayList<>();lines.add(new JournalLine(LoanAccountLiabilityGl.resolve(db,number(a,"PRODUCT_VERSION_ID")),account,null,null,"DR",input.amount(),"Early loan repayment"));
         for(String component:List.of("INTEREST","PRINCIPAL")) {
             BigDecimal amount=allocations.stream().filter(x->x.component().equals(component)).map(Allocation::amount).reduce(BigDecimal.ZERO,BigDecimal::add);
             if(amount.signum()>0)lines.add(new JournalLine(gl(number(f,"PRODUCT_VERSION_ID"),"LOAN_"+component),null,id,component,"CR",amount,"Early loan repayment"));
