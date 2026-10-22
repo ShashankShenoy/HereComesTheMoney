@@ -759,6 +759,15 @@ class IntegratedContextTest {
   var request=Map.of("productId",3,"productVersionId",3,"fundingAccountId",1,"amount","1000.00","tenureMonths",1,"requestKey",key);
   long id=value(send("/term-deposits",customer,request).andExpect(status().isOk())).path("TERM_DEPOSIT_ID").asLong();
   assertTrue(id>0);
+  String fundingAccountNumber=db.queryForObject("SELECT ACCOUNT_NUMBER FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=1",String.class);
+  var linked=value(mvc.perform(get("/api/v1/term-deposits/by-account-number/"+fundingAccountNumber)
+    .header("Authorization","Bearer "+admin)).andExpect(status().isOk()));
+  assertTrue(linked.isArray());
+  assertTrue(java.util.stream.StreamSupport.stream(linked.spliterator(),false)
+    .anyMatch(deposit->deposit.path("TERM_DEPOSIT_ID").asLong()==id
+      && fundingAccountNumber.equals(deposit.path("ACCOUNT_NUMBER").asText())));
+  mvc.perform(get("/api/v1/term-deposits/by-account-number/"+fundingAccountNumber)
+    .header("Authorization","Bearer "+customer)).andExpect(status().isForbidden());
   assertEquals(0,before.subtract(new BigDecimal("1000.00")).compareTo(balance(1)));
   assertEquals(id,value(send("/term-deposits",customer,request).andExpect(status().isOk())).path("TERM_DEPOSIT_ID").asLong());
   assertEquals(0,before.subtract(new BigDecimal("1000.00")).compareTo(balance(1)));
@@ -1945,6 +1954,17 @@ class IntegratedContextTest {
     .andExpect(status().isConflict());
   send("/loans/facilities/"+facility+"/repayments",admin,Map.of("requestKey",UUID.randomUUID().toString(),"amount","1"))
     .andExpect(status().isConflict());
+  // A request left pending overnight must be reconfirmed by its maker before a checker posts funds.
+  var previousBusinessDate=java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1);
+  db.update("UPDATE M08_LOAN_DISBURSEMENT SET VALUE_DATE=? WHERE DISBURSEMENT_ID=?",previousBusinessDate,disbursement);
+  send("/loans/disbursements/"+disbursement+"/approve",checker,Map.of("authorityCode","LOAN_SANCTION"))
+    .andExpect(status().isConflict());
+  send("/loans/disbursements/"+disbursement+"/renew",checker,Map.of())
+    .andExpect(status().isForbidden());
+  send("/loans/disbursements/"+disbursement+"/renew",admin,Map.of())
+    .andExpect(status().isOk()).andExpect(jsonPath("$.valueDate").exists());
+  assertEquals(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")),
+    db.queryForObject("SELECT VALUE_DATE FROM M08_LOAN_DISBURSEMENT WHERE DISBURSEMENT_ID=?",java.time.LocalDate.class,disbursement));
   send("/loans/disbursements/"+disbursement+"/approve",checker,Map.of("authorityCode","LOAN_SANCTION"))
     .andExpect(status().isOk());
   db.update("UPDATE M08_LOAN_SCHEDULE_ITEM SET DUE_DATE=? WHERE FACILITY_ID=? AND INSTALLMENT_NO=1",
