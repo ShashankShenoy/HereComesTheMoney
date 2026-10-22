@@ -130,7 +130,8 @@ function workflowAllowed(operation,customer){
  if(/^\/(?:accounts\/self|loans\/my|term-deposits\/my)(?:\/|$)/.test(operation.path))return false;
  if(operation.path==='/privacy/purposes/available'||operation.path==='/transactions/transfers/by-number')return false;
  if(operation.path==='/term-deposits'&&operation.method==='POST')return false;
- if(operation.path==='/term-deposits/{id}'&&operation.method==='GET')return allow('GL_POST');
+ if(operation.path==='/term-deposits/{id}'&&operation.method==='GET')return false;
+ if(operation.path==='/term-deposits/by-account-number/{accountNumber}'&&operation.method==='GET')return allow('GL_POST');
  if(operation.path==='/loans/collections')return allow('LOAN_SERVICE');
  return true;
 }
@@ -140,7 +141,7 @@ const workflowTitles={
  'post /accounts/{id}/activate':'Activate account','post /accounts/{id}/cancel-opening':'Cancel pending opening','post /accounts/{id}/parties':'Add account party','delete /accounts/{id}/parties/{partyId}':'End account party role','put /accounts/{id}/nominees':'Update nominees',
  'post /accounts/{id}/restrictions':'Add account restriction','post /accounts/{id}/restrictions/{restrictionId}/release':'Release account restriction','post /accounts/{id}/limits':'Set account limit','post /accounts/{id}/interest-overrides':'Set interest override','post /accounts/{id}/product-version-adoptions':'Adopt product version',
  'post /accounts/{id}/closures':'Request account closure','post /accounts/{id}/closures/{requestId}/approve':'Approve account closure','post /accounts/{id}/closures/{requestId}/reject':'Reject account closure','post /accounts/{id}/majority-reviews':'Start majority review','post /accounts/{id}/majority-reviews/decisions':'Decide majority review',
- 'get /deposit-interest/accounts/{id}':'Savings interest credits','post /deposit-interest/runs':'Post monthly savings interest','get /term-deposits/my':'My fixed deposits','get /term-deposits/{id}':'Fixed deposit details','post /term-deposits':'Open fixed deposit','post /term-deposits/{id}/mature':'Pay matured fixed deposit',
+ 'get /deposit-interest/accounts/{id}':'Savings interest credits','post /deposit-interest/runs':'Post monthly savings interest','get /term-deposits/my':'My fixed deposits','get /term-deposits/{id}':'Fixed deposit details','get /term-deposits/by-account-number/{accountNumber}':'Find fixed deposits by account number','post /term-deposits':'Open fixed deposit','post /term-deposits/{id}/mature':'Pay matured fixed deposit',
  'get /banking/accounts':'Account directory','get /banking/transactions':'Transactions','get /banking/facilities':'Loan facilities','get /banking/gl-accounts':'General ledger accounts',
  'get /teller/tills':'List teller tills','post /teller/tills':'Open a teller till','post /teller/tills/{id}/close':'Independently close a teller till','post /teller/tills/{id}/replenish':'Replenish an open teller till','get /teller/replenishments':'List teller replenishments','post /teller/cash':'Post a cash deposit or withdrawal',
  'get /teller/vaults':'List branch vault cash','post /teller/vaults':'Register branch vault cash',
@@ -158,7 +159,7 @@ const workflowTitles={
  'get /treasury/reconciliation-exceptions':'List reserve reconciliation exceptions','post /treasury/reconciliation-exceptions':'Open reserve reconciliation exception','post /treasury/reconciliation-exceptions/{id}/resolution':'Resolve reserve reconciliation exception',
  'get /treasury/work-items':'List treasury work items','post /treasury/work-items':'Create treasury work item','post /treasury/work-items/{id}/submit':'Submit treasury work item','post /treasury/work-items/{id}/decision':'Decide treasury work item',
  'get /currencies':'List supported currencies','post /currencies':'Add a supported currency','get /fx/rates':'Review exchange rates','post /fx/rates':'Propose an exchange rate','post /fx/rates/{id}/decision':'Decide an exchange rate','get /fx/quote':'Calculate an indicative quote','get /fx/provider/status':'Check rate provider status','post /fx/provider/refresh':'Request a provider rate',
- 'get /loans/facilities/{id}/disbursements':'List facility disbursements','post /loans/facilities/{id}/disbursements':'Request loan disbursement','post /loans/disbursements/{id}/approve':'Approve loan disbursement','post /loans/facilities/{id}/accruals':'Accrue due loan interest','post /loans/facilities/{id}/repayments':'Apply a due loan repayment','get /loans/facilities/{id}/prepayment-quote':'Quote early loan repayment','post /loans/facilities/{id}/prepayments':'Make an early loan repayment','get /loans/collections':'Review overdue installments',
+ 'get /loans/facilities/{id}/disbursements':'List facility disbursements','post /loans/facilities/{id}/disbursements':'Request loan disbursement','post /loans/disbursements/{id}/renew':'Renew a pending loan disbursement','post /loans/disbursements/{id}/approve':'Approve loan disbursement','post /loans/facilities/{id}/accruals':'Accrue due loan interest','post /loans/facilities/{id}/repayments':'Apply a due loan repayment','get /loans/facilities/{id}/prepayment-quote':'Quote early loan repayment','post /loans/facilities/{id}/prepayments':'Make an early loan repayment','get /loans/collections':'Review overdue installments',
  'post /loans/offers/{id}/expire':'Close an expired loan offer'
 };
 async function loadContract(){
@@ -386,13 +387,15 @@ async function loadOperationReferences(op){
  const visit=schema=>{for(const [name,raw]of Object.entries(resolve(schema).properties||{})){names.add(name);const s=resolve(raw);if(s.properties)visit(s);if(s.items)visit(s.items);}};
  visit(schemaFor(op));
  if(active==='loans'&&names.has('purposeCode'))operationReferences.purposeCode={path:'/loan-purposes',rows:['PERSONAL','HOME','VEHICLE','EDUCATION','BUSINESS','OTHER'].map(purposeCode=>({purposeCode,displayName:purposeCode}))};
- if([...names].some(name=>depositAccountFields.has(name)||name==='accountNumber')){
+ if(op.path!=='/term-deposits/by-account-number/{accountNumber}'&&[...names].some(name=>depositAccountFields.has(name)||name==='accountNumber')){
   await loadAccountOptions();
   if(accountOptionsError)throw new Error('Could not load the available accounts. Refresh to retry.');
   if(names.has('accountNumber'))operationReferences.accountNumber={rows:accountOptions,path:'/banking/accounts'};
   for(const name of names)if(depositAccountFields.has(name))operationReferences[name]={rows:accountOptions,path:'/banking/accounts'};
  }
  for(const parameter of (op.parameters||[]).filter(p=>p.in==='path')){
+  // This path segment is a fixed collection name, not an ID to look up.
+  if(op.path==='/accounts/{id}/{collection}'&&parameter.name==='collection')continue;
   let prefix=op.path.slice(0,op.path.indexOf('{'+parameter.name+'}')).replace(/\/$/,'');
   if(op.path==='/beneficiaries/{id}/verify')prefix='/beneficiaries/pending';
   const listPath=prefix==='/accounts'?'/banking/accounts':prefix==='/loans/facilities'?'/banking/facilities':prefix==='/journals'?'/banking/journals':prefix;
@@ -605,6 +608,12 @@ function privacyNoticeLink(purpose){
  try{const url=new URL(purpose.noticeUri);if(!['http:','https:'].includes(url.protocol))return '';return '<a href="'+esc(url.href)+'" target="_blank" rel="noopener noreferrer">'+esc(t('Read privacy notice'))+'</a>';}catch{return '';}
 }
 function renderOperationResult(op,value){
+ if(op.path==='/term-deposits/by-account-number/{accountNumber}'&&Array.isArray(value))
+  return table(['Deposit ID','Account number','Product','Principal','Rate','Term','Maturity','Status','Action'],value.map(d=>[
+   esc(d.TERM_DEPOSIT_ID),esc(d.ACCOUNT_NUMBER),esc(d.PRODUCT_NAME),esc(formatAmount(d.PRINCIPAL,'INR')),
+   esc(formatDecimal(d.ANNUAL_RATE_PCT))+'%',esc(d.TENURE_MONTHS)+' months',esc(formatDate(d.MATURITY_DATE)),badge(d.STATUS),
+   '<button class="btn small" type="button" data-bank-term-details="'+esc(d.TERM_DEPOSIT_ID)+'">Details</button>'
+  ]),'No fixed deposits are linked to this account number.');
  if(op.path==='/beneficiaries/pending'&&Array.isArray(value))return decisionQueue(value,'beneficiaries');
  if(getSession()?.user?.userType==='CUSTOMER'&&op.method==='GET'&&op.path==='/reporting/statement-requests')return table(['Period','Format','Status','Download'],value.map(r=>[esc(formatDate(r.periodStart))+' – '+esc(formatDate(r.periodEnd)),esc(r.format),badge(r.status),r.status==='COMPLETED'&&r.statementId?['PDF','CSV','HTML'].map(format=>'<button type="button" class="btn small" data-customer-statement-download="'+esc(r.statementId)+'" data-format="'+format+'">'+format+'</button>').join(' '):'<span class="muted">'+esc(t('Not available'))+'</span>']),'No statement requests yet.',{mobileCards:true});
  if(getSession()?.user?.userType==='CUSTOMER'&&op.path==='/privacy/purposes/available')return table(['Privacy choice','Notice version','Privacy notice'],value.map(p=>[esc(p.name),esc(p.version),privacyNoticeLink(p)||esc(t('Notice unavailable'))]),'No approved privacy notices are available yet.');
@@ -923,6 +932,11 @@ export function bindBankingForms(){
  holderform?.querySelector('input[name="accountNumber"]')?.addEventListener('focus',loadAccountOptions,{once:true});
 }
 document.addEventListener('click',async e=>{
+ const bankTermDetails=e.target.closest('[data-bank-term-details]');if(bankTermDetails){
+  bankTermDetails.disabled=true;try{const deposit=await api('/term-deposits/'+encodeURIComponent(bankTermDetails.dataset.bankTermDetails));
+   dialog('Fixed deposit '+bankTermDetails.dataset.bankTermDetails,renderRows(deposit));}
+  catch(error){toast(errorText(error),true);}finally{bankTermDetails.disabled=false;}return;
+ }
  const statementDownload=e.target.closest('[data-customer-statement-download]');if(statementDownload){
   statementDownload.disabled=true;try{await api('/reporting/statements/'+encodeURIComponent(statementDownload.dataset.customerStatementDownload)+'/download?format='+encodeURIComponent(statementDownload.dataset.format));}
   catch(error){toast(errorText(error),true);}finally{statementDownload.disabled=false;}return;

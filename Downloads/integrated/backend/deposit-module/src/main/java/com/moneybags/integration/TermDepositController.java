@@ -73,6 +73,18 @@ public class TermDepositController {
                 "ORDER BY T.TERM_DEPOSIT_ID DESC FETCH FIRST 100 ROWS ONLY",actor.userId());
     }
 
+    @GetMapping("/by-account-number/{accountNumber}")
+    @Operation(summary="Find fixed deposits by funding account number")
+    public List<Map<String,Object>> byAccountNumber(@PathVariable String accountNumber) {
+        access.global("GL_POST");
+        if(accountNumber==null || accountNumber.isBlank()) throw fail("Enter an account number");
+        return db.rows("SELECT T.*,A.ACCOUNT_NUMBER,P.PRODUCT_NAME FROM MBX_TERM_DEPOSIT T " +
+                "JOIN M04_BANK_ACCOUNT A ON A.ACCOUNT_ID=T.FUNDING_ACCOUNT_ID " +
+                "JOIN M03_PM_PRODUCT P ON P.PRODUCT_ID=T.PRODUCT_ID " +
+                "WHERE A.ACCOUNT_NUMBER=? ORDER BY T.TERM_DEPOSIT_ID DESC",
+                accountNumber.trim());
+    }
+
     @GetMapping("/{id}")
     @Operation(summary="View a fixed deposit and its maturity posting references")
     public Map<String,Object> get(@PathVariable long id) {

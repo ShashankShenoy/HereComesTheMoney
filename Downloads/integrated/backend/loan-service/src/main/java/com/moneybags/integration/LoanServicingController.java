@@ -24,7 +24,7 @@ public class LoanServicingController {
  public record Disburse(@NotBlank @Size(max=100)String requestKey){}
  public record Approve(@NotBlank String authorityCode){}
  public record Repay(@NotBlank @Size(max=100)String requestKey,@NotNull @DecimalMin("0.01") @Digits(integer=16,fraction=2)BigDecimal amount){}
- @GetMapping("/facilities/{id}/disbursements") public List<Map<String,Object>> disbursements(@PathVariable long id){facility(id,"LOAN_READ");return db.rows("SELECT DISBURSEMENT_ID,STATUS,REQUESTED_AT,APPROVED_AT,TXN_ID FROM M08_LOAN_DISBURSEMENT WHERE FACILITY_ID=?",id);}
+ @GetMapping("/facilities/{id}/disbursements") public List<Map<String,Object>> disbursements(@PathVariable long id){facility(id,"LOAN_READ");return db.rows("SELECT DISBURSEMENT_ID,STATUS,VALUE_DATE,REQUESTED_AT,APPROVED_AT,TXN_ID FROM M08_LOAN_DISBURSEMENT WHERE FACILITY_ID=?",id);}
  @PostMapping("/facilities/{id}/disbursements") @Transactional public Map<String,Object> request(@PathVariable long id,@Valid @RequestBody Disburse r){
   var f=facility(id,"LOAN_SERVICE");var old=db.rows("SELECT DISBURSEMENT_ID,FACILITY_ID,REQUESTED_BY_USER_ID FROM M08_LOAN_DISBURSEMENT WHERE REQUEST_KEY=?",r.requestKey());
   if(!old.isEmpty()){if(((Number)old.get(0).get("FACILITY_ID")).longValue()!=id||!actor().equals(old.get(0).get("REQUESTED_BY_USER_ID")))throw fail("Idempotency key belongs to another disbursement");return Map.of("disbursementId",old.get(0).get("DISBURSEMENT_ID"));}
@@ -33,6 +33,25 @@ public class LoanServicingController {
    throw fail("A disbursement has already been requested for this facility");
   long d=insert("DISBURSEMENT_ID","INSERT INTO M08_LOAN_DISBURSEMENT(FACILITY_ID,DISBURSEMENT_SEQ_NO,TARGET_ACCOUNT_ID,AMOUNT,VALUE_DATE,REQUEST_KEY,REQUESTED_BY_USER_ID) VALUES (?,1,?,?,?,?,?)",id,f.get("DISBURSEMENT_ACCOUNT_ID"),f.get("PRINCIPAL_AMOUNT"),today(),r.requestKey(),actor());
   audit.audit("LOAN_DISBURSEMENT_REQUESTED","FACILITY",Long.toString(id),"MAKER_SUBMISSION");return Map.of("disbursementId",d,"status","REQUESTED");
+ }
+ /** Reconfirms an unposted request for today's business date, preserving its ID and original request timestamp. */
+ @PostMapping("/disbursements/{id}/renew") @Transactional public Map<String,Object> renew(@PathVariable long id){
+  var d=db.one("SELECT * FROM M08_LOAN_DISBURSEMENT WHERE DISBURSEMENT_ID=? FOR UPDATE",id);
+  var f=facility(num(d,"FACILITY_ID"),"LOAN_SERVICE");
+  if(!actor().equals(d.get("REQUESTED_BY_USER_ID")))throw fail("Only the original requester can renew a disbursement");
+  if(!"REQUESTED".equals(d.get("STATUS"))||!"PENDING_DISBURSEMENT".equals(f.get("STATUS")))throw fail("Disbursement is no longer pending");
+  supported(f);
+  if(num(d,"TARGET_ACCOUNT_ID")!=num(f,"DISBURSEMENT_ACCOUNT_ID")
+      ||money(d,"AMOUNT").compareTo(money(f,"PRINCIPAL_AMOUNT"))!=0)
+   throw fail("Disbursement terms no longer match the facility");
+  LocalDate prior=BusinessRepository.localDate(d.get("VALUE_DATE"));
+  LocalDate current=today();
+  if(prior.isAfter(current))throw fail("Future-dated disbursements cannot be renewed");
+  if(prior.isBefore(current)){
+   db.jdbc().update("UPDATE M08_LOAN_DISBURSEMENT SET VALUE_DATE=? WHERE DISBURSEMENT_ID=?",current,id);
+   audit.audit("LOAN_DISBURSEMENT_RENEWED","DISBURSEMENT",Long.toString(id),"VALUE_DATE_"+prior+"_TO_"+current);
+  }
+  return Map.of("disbursementId",id,"facilityId",num(d,"FACILITY_ID"),"status","REQUESTED","valueDate",current);
  }
  @PostMapping("/disbursements/{id}/approve") @Transactional public TransactionView approve(@PathVariable long id,@Valid @RequestBody Approve r){
   var d=db.one("SELECT * FROM M08_LOAN_DISBURSEMENT WHERE DISBURSEMENT_ID=? FOR UPDATE",id);long facilityId=num(d,"FACILITY_ID");var f=facility(facilityId,"LOAN_DISBURSE_APPROVE");
