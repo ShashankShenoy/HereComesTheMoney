@@ -427,6 +427,8 @@ class IntegratedContextTest {
   send("/loans/applications/"+id+"/documents/"+doc+"/verify",checker,Map.of()).andExpect(status().isOk());
   long facility=value(send("/loans/applications/"+id+"/convert",admin,Map.of()).andExpect(status().isOk())).path("data").path("facilityId").asLong();
   long disbursement=value(send("/loans/facilities/"+facility+"/disbursements",admin,Map.of("requestKey",UUID.randomUUID().toString())).andExpect(status().isOk())).path("disbursementId").asLong();
+  // Newly configured deposit account versions can have no LOAN-specific liability mapping.
+  db.update("UPDATE M05_GL_PRODUCT_MAPPING SET STATUS='RETIRED' WHERE PRODUCT_VERSION_ID=1 AND POSTING_TYPE='LOAN' AND GL_ROLE_CODE='CUSTOMER_LIABILITY'");
   BigDecimal before=balance(1);
   send("/loans/disbursements/"+disbursement+"/approve",admin,Map.of("authorityCode","LOAN_SANCTION")).andExpect(status().isForbidden());
   send("/loans/disbursements/"+disbursement+"/approve",checker,Map.of("authorityCode","LOAN_SANCTION")).andExpect(status().isOk());
@@ -449,6 +451,7 @@ class IntegratedContextTest {
   assertEquals("PAID",db.queryForObject("SELECT STATUS FROM M08_LOAN_SCHEDULE_ITEM WHERE FACILITY_ID=? AND INSTALLMENT_NO=1",String.class,facility));
   assertEquals(0,new BigDecimal("11000").compareTo(db.queryForObject("SELECT PRINCIPAL_OUTSTANDING FROM M08_LOAN_FACILITY WHERE FACILITY_ID=?",BigDecimal.class,facility)));
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+  db.update("UPDATE M05_GL_PRODUCT_MAPPING SET STATUS='ACTIVE' WHERE PRODUCT_VERSION_ID=1 AND POSTING_TYPE='LOAN' AND GL_ROLE_CODE='CUSTOMER_LIABILITY'");
  }
  @Test @Order(11) void overrideApprovalIsBoundToExactCommand()throws Exception{
   String admin=login("admin"),checker=login("checker");
