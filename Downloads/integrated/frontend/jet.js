@@ -73,7 +73,8 @@ export async function enhanceForms(root) {
     // JET renders select options outside a native modal's top layer.
     // Native selects remain usable inside dialogs and submit their value directly.
     if (input.tagName === "SELECT" && input.closest("dialog")) continue;
-    if (["hidden", "checkbox", "radio", "file"].includes(input.type)) continue;
+    // Live search listeners consume native input events on every keystroke.
+    if (["hidden", "checkbox", "radio", "file", "search"].includes(input.type)) continue;
     // A JET select popup cannot rise above a native modal dialog. Keep modal
     // selects and date inputs native so their option lists and pickers open.
     if (input.closest("dialog") &&

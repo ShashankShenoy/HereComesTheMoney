@@ -69,7 +69,13 @@ public class BankCheckerWriteBoundary implements HandlerInterceptor, WebMvcConfi
         if(method.equals("POST") && (path.equals("/api/v1/assistant/chat")
             || path.equals("/api/v1/assistant/mcp"))) return true;
         String businessPath=path.startsWith("/api/v1")?path.substring(7):path;
-        if(method.equals("POST") && DECISIONS.stream().anyMatch(p->p.matcher(businessPath).matches())) return true;
+        // Checkers also perform teller duties; controller permissions and independent-close checks still apply.
+        if(method.equals("POST") && user.permissions().contains("TELLER_OPERATE")
+            && (businessPath.equals("/teller/tills") || businessPath.equals("/teller/cash"))) return true;
+        // Activation is an independent product decision: ProductService still checks
+        // PRODUCT_APPROVE, a different maker, approved state and the signed rule hash.
+        if(method.equals("POST") && (businessPath.matches("/products/versions/[^/]+/activate")
+            || DECISIONS.stream().anyMatch(p->p.matcher(businessPath).matches()))) return true;
         throw new BusinessException(HttpStatus.FORBIDDEN,"CHECKER_APPROVAL_ONLY",
             "Bank Checker may read records and submit independent decisions only");
     }

@@ -75,10 +75,14 @@ public class AssistantCustomerTools {
         return paymentView(row);
     }
 
-    public List<StatementView> statements(long accountId,int limit) {
+    public List<Map<String,Object>> statements(long accountId,int limit) {
         customer();
         access.account("STATEMENT_READ",accountId);
-        return statements.statements(CurrentActor.get(),accountId,limit);
+        return statements.statements(CurrentActor.get(),accountId,limit).stream().map(view->Map.<String,Object>of(
+                "statementId",view.statementId(),"statementNumber",view.statementNumber(),
+                "accountId",view.accountId(),"state",view.state(),"periodStart",view.periodStart(),
+                "periodEnd",view.periodEnd(),"openingBalance",view.openingBalance(),
+                "closingBalance",view.closingBalance(),"currency",view.currency())).toList();
     }
 
     public List<RequestView> statementRequests(long accountId,int limit) {
@@ -128,31 +132,32 @@ public class AssistantCustomerTools {
                 "ORDER BY s.ISSUED_AT DESC FETCH FIRST 1 ROW ONLY",accountId,from,through)) {
             String id=(String)row.get("STATEMENT_ID");
             statements.statement(principal,id);
-            return Map.of("status","EXISTING","statementId",id,
-                    "downloadPath","/api/v1/reporting/statements/"+id+"/download");
+            return Map.of("status","EXISTING","statementId",id,"format",format,
+                    "downloadPath","/api/v1/reporting/statements/"+id+"/download?format="+format);
         }
         for(var row:db.rows("SELECT REQUEST_ID FROM M10_STATEMENT_REQUEST WHERE ACCOUNT_ID=? AND REQUESTER_ID=? " +
                 "AND REQUESTER_TYPE='CUSTOMER' AND STATEMENT_TYPE='AD_HOC' AND PERIOD_START_DATE=? " +
-                "AND PERIOD_END_DATE=? AND STATUS<>'CANCELLED' ORDER BY REQUESTED_AT DESC FETCH FIRST 1 ROW ONLY",
+                "AND PERIOD_END_DATE=? AND STATUS IN ('RECEIVED','AUTHORIZED','PROCESSING','COMPLETED','QUARANTINED') ORDER BY REQUESTED_AT DESC FETCH FIRST 1 ROW ONLY",
                 accountId,principal.userId(),from,through)) {
             RequestView current=statements.request(principal,(String)row.get("REQUEST_ID"));
             if("AUTHORIZED".equals(current.status()))current=statements.issue(principal,current.requestId());
-            return statementResult(current,"COMPLETED".equals(current.status())?"EXISTING":current.status());
+            return statementResult(current,"COMPLETED".equals(current.status())?"EXISTING":current.status(),format);
         }
         RequestView request=statements.create(principal,UUID.randomUUID().toString(),
                 new CreateRequest(accountId,null,"AD_HOC",from,through,"en-IN",format,"WEB",null,null,null,null,null)).getBody();
         RequestView issued=statements.issue(principal,request.requestId());
-        return statementResult(issued,issued.status());
+        return statementResult(issued,issued.status(),format);
     }
 
-    private Map<String,Object> statementResult(RequestView issued,String status) {
+    private Map<String,Object> statementResult(RequestView issued,String status,String format) {
         var result=new LinkedHashMap<String,Object>();
         result.put("requestId",issued.requestId());
         result.put("status",status);
         result.put("statementId",issued.statementId());
+        result.put("format",format);
         if(issued.failureCode()!=null)result.put("failureCode",issued.failureCode());
         if(issued.statementId()!=null)
-            result.put("downloadPath","/api/v1/reporting/statements/"+issued.statementId()+"/download");
+            result.put("downloadPath","/api/v1/reporting/statements/"+issued.statementId()+"/download?format="+format);
         return result;
     }
 

@@ -87,7 +87,7 @@ class IntegratedContextTest {
    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
  }
  @Test @Order(2) void customerSessionRevealsOnlyOwnedFinancialDetails()throws Exception{
-  String customer=login("customer"),other=login("customer2"),officer=login("admin");
+  String customer=login("customer"),other=login("customer2"),officer=nonAdminViewer();
   mvc.perform(get("/api/v1/accounts/1/position").header("Authorization","Bearer "+customer)).andExpect(status().isOk()).andExpect(jsonPath("$.posted").isNumber());
   mvc.perform(get("/api/v1/accounts/1/position").header("Authorization","Bearer "+other).header("X-Customer-Hash",HASH)).andExpect(status().isForbidden());
   mvc.perform(get("/api/v1/accounts/1/position").header("Authorization","Bearer "+officer)).andExpect(status().isForbidden());
@@ -109,6 +109,16 @@ class IntegratedContextTest {
   send("/transactions/transfers",customer,transfer(2,1,"1.00",UUID.randomUUID().toString())).andExpect(status().isForbidden());
   send("/transactions/transfers",customer,transfer(1,2,"90000.00",UUID.randomUUID().toString())).andExpect(status().isConflict());
   assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
+ }
+ @Test @Order(2) void adminFinancialViewsDoNotRequireHolderKey()throws Exception{
+  String admin=login("admin"),viewer=nonAdminViewer(),customer=login("customer"),other=login("customer2");
+  for(String path:List.of("/fees?accountId=1","/accounts/1/position")){
+   mvc.perform(get("/api/v1"+path).header("Authorization","Bearer "+admin)).andExpect(status().isOk());
+   mvc.perform(get("/api/v1"+path).header("Authorization","Bearer "+customer)).andExpect(status().isOk());
+   mvc.perform(get("/api/v1"+path).header("Authorization","Bearer "+viewer)).andExpect(status().isForbidden());
+   mvc.perform(get("/api/v1"+path).header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+   mvc.perform(get("/api/v1"+path)).andExpect(status().isUnauthorized());
+  }
  }
  @Test @Order(2) void accountScopedDetailsAndInternalReserveReadsStaySeparated()throws Exception{
   String customer=login("customer"),other=login("customer2"),admin=login("admin"),viewer=nonAdminViewer();
@@ -236,6 +246,35 @@ class IntegratedContextTest {
   send("/accounts/"+id+"/activate",admin,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isAccepted());
   assertEquals("ACTIVE",db.queryForObject("SELECT LIFECYCLE_STATUS FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",String.class,id));
   assertEquals("OPEN",db.queryForObject("SELECT DEBIT_STATUS FROM M05_POSTING_FENCE WHERE BANK_ACCOUNT_ID=?",String.class,id));
+ }
+ @Test @Transactional @Order(4) void tellerCollectsOpeningCashBeforeMinimumBalanceActivation()throws Exception{
+  String admin=login("admin"),teller=login("checker");
+  db.update("UPDATE M03_PM_ACCOUNT_RULE SET MIN_OPENING_BALANCE=1000 WHERE PRODUCT_VERSION_ID=1");
+  long id=value(send("/accounts",admin,Map.of("requestId",UUID.randomUUID().toString(),"primaryCifId","demo-cif-1","productId",1,"productVersionId",1,"branchCode","MUM001","operationMode","SELF_OPERATED","additionalParties",List.of())).andExpect(status().isCreated())).path("id").asLong();
+  send("/accounts/"+id+"/activate",admin,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isConflict());
+  String till=value(send("/teller/tills",teller,Map.of("branchCode","MUM001","cashGlId",2)).andExpect(status().isOk())).path("tillId").asText();
+  BigDecimal tillBefore=db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till);
+  BigDecimal vaultBefore=db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class);
+  var first=Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",id,"direction","DEPOSIT","amount","400.00","reason","Opening cash collected");
+  var posted=value(send("/teller/cash",teller,first).andExpect(status().isOk()));
+  assertEquals("OPENING_FUNDING",db.queryForObject("SELECT TXN_TYPE FROM M05_TXN_TRANSACTION_LOG WHERE TXN_ID=?",String.class,posted.path("transactionId").asLong()));
+  send("/teller/cash",teller,first).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("400").compareTo(balance(id)));
+  send("/accounts/"+id+"/activate",admin,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isConflict());
+  send("/teller/cash",teller,Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",id,"direction","WITHDRAWAL","amount","1.00","reason","Must wait for activation")).andExpect(status().isConflict());
+  send("/teller/cash",teller,Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",id,"direction","DEPOSIT","amount","600.00","reason","Remaining opening cash collected")).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("1000").compareTo(balance(id)));
+  assertEquals(0,tillBefore.add(new BigDecimal("1000")).compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_TELLER_TILL WHERE TILL_ID=?",BigDecimal.class,till)));
+  assertEquals(0,vaultBefore.compareTo(db.queryForObject("SELECT CASH_BALANCE FROM MBX_BRANCH_VAULT WHERE BRANCH_CODE='MUM001'",BigDecimal.class)));
+  assertEquals(0,db.queryForObject("SELECT DEBIT_TOTAL-CREDIT_TOTAL FROM M05_V_GL_JOURNAL_CONTROL WHERE JOURNAL_ID=(SELECT JOURNAL_ID FROM M05_GL_JOURNAL WHERE TXN_ID=?)",BigDecimal.class,posted.path("transactionId").asLong()).compareTo(BigDecimal.ZERO));
+  send("/accounts/"+id+"/activate",admin,Map.of("requestId",UUID.randomUUID().toString())).andExpect(status().isAccepted());
+  assertEquals("ACTIVE",db.queryForObject("SELECT LIFECYCLE_STATUS FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=?",String.class,id));
+  assertEquals(0,new BigDecimal("1000").compareTo(balance(id)));
+  // Retrying the original receipt after activation still credits the cash only once.
+  send("/teller/cash",teller,first).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("1000").compareTo(balance(id)));
+  send("/teller/cash",teller,Map.of("requestKey",UUID.randomUUID().toString(),"tillId",till,"accountId",id,"direction","WITHDRAWAL","amount","100.00","reason","Withdrawal after activation")).andExpect(status().isOk());
+  assertEquals(0,new BigDecimal("900").compareTo(balance(id)));
  }
  @Test @Order(5) void tellerPostingIsBalancedAndIdempotent()throws Exception{
   String admin=login("admin"),checker=login("checker");
@@ -697,11 +736,11 @@ class IntegratedContextTest {
   assertEquals("PAYMENT_INITIATE",toolValue(mcp(customer,"tools/call","draft_payment",Map.of("accountId",1,"beneficiaryId",externalSameNumber,"rail","UPI","amount","1.00")))
     .path("action").asText());
  }
- @Test @Order(18) void administratorInheritsAllPermissionsAndCheckerCannotInitiateWrites()throws Exception{
+ @Test @Order(18) void administratorInheritsAllPermissionsAndCheckerOnlyInitiatesTellerWrites()throws Exception{
   String admin=login("admin"),checker=login("checker");
   assertEquals(db.queryForObject("SELECT COUNT(*) FROM M01_IAM_PERMISSION",Integer.class),
     db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_ROLE R ON R.ROLE_ID=RP.ROLE_ID WHERE R.ROLE_CODE='BANK_ADMIN'",Integer.class));
-  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_ROLE R ON R.ROLE_ID=RP.ROLE_ID JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE R.ROLE_CODE='BANK_CHECKER' AND P.PERMISSION_CODE IN ('TXN_POST','PAYMENT_OPERATE','TREASURY_RECONCILE','IAM_ROLE_MANAGE','STATEMENT_ADMIN')",Integer.class));
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M01_IAM_ROLE_PERMISSION RP JOIN M01_IAM_ROLE R ON R.ROLE_ID=RP.ROLE_ID JOIN M01_IAM_PERMISSION P ON P.PERMISSION_ID=RP.PERMISSION_ID WHERE R.ROLE_CODE='BANK_CHECKER' AND P.PERMISSION_CODE IN ('PAYMENT_OPERATE','TREASURY_RECONCILE','IAM_ROLE_MANAGE','STATEMENT_ADMIN')",Integer.class));
   mvc.perform(get("/api/v1/treasury/reserve-accounts/1/ledger").header("Authorization","Bearer "+checker)).andExpect(status().isOk());
   mvc.perform(get("/api/v1/banking/gl-accounts").header("Authorization","Bearer "+checker)).andExpect(status().isOk());
   send("/transactions/transfers",checker,transfer(1,2,"1.00",UUID.randomUUID().toString())).andExpect(status().isForbidden());

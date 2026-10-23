@@ -36,3 +36,10 @@ test('banking calls payment initiation through the wire contract',()=>{
   assert.ok(assistant.includes('PaymentInitiationPort'));assert.ok(!assistant.includes('PaymentWorkflowController'));
   const application=readFileSync(path.join(backend,'banking-service/src/main/java/com/moneybags/launch/banking/BankingApplication.java'),'utf8');assert.ok(application.includes('HttpPaymentClient.class'));
 });
+
+test('assistant loan reads preserve the service boundary and the configured loan port',()=>{
+  const tools=readFileSync(path.join(backend,'banking-service/src/main/java/com/moneybags/assistant/AssistantProductTools.java'),'utf8');
+  assert.ok(tools.includes('AssistantLoanPort'));assert.ok(!tools.includes('LoanController'));
+  const application=readFileSync(path.join(backend,'banking-service/src/main/java/com/moneybags/launch/banking/BankingApplication.java'),'utf8');assert.ok(application.includes('HttpAssistantLoanClient.class'));
+  const runtime=readFileSync(path.join(backend,'../tools/oracle-runtime.psm1'),'utf8');assert.ok(runtime.includes('--moneybags.services.loans-url=http://127.0.0.1:$LoanPort'));
+});

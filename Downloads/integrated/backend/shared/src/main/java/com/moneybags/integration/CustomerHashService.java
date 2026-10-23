@@ -8,8 +8,8 @@ import java.security.*;
 import java.util.*;
 @Service
 public class CustomerHashService {
- private final JdbcTemplate db;private final SecureRandom random=new SecureRandom();
- public CustomerHashService(JdbcTemplate db){this.db=db;}
+ private final JdbcTemplate db;private final BankingAccess access;private final SecureRandom random=new SecureRandom();
+ public CustomerHashService(JdbcTemplate db,BankingAccess access){this.db=db;this.access=access;}
  public static byte[] digest(String value){
   try{return MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
   catch(NoSuchAlgorithmException e){throw new IllegalStateException(e);}
@@ -23,6 +23,7 @@ public class CustomerHashService {
  }
  public boolean permits(long accountId,String token){
   var u=CurrentActor.get();
+  if(access.bankAdminFinancialAccess())return true;
   if("CUSTOMER".equals(u.userType())){
    Integer matches=db.queryForObject("SELECT COUNT(*) FROM M01_IAM_CUSTOMER_LINK L JOIN M04_ACCOUNT_PARTY P ON P.CIF_ID=L.CIF_ID WHERE L.USER_ID=? AND L.STATUS='ACTIVE' AND L.VALID_FROM<=SYSTIMESTAMP AND (L.VALID_TO IS NULL OR L.VALID_TO>SYSTIMESTAMP) AND P.ACCOUNT_ID=? AND P.IS_ACTIVE='Y' AND P.PARTY_ROLE IN ('PRIMARY_HOLDER','JOINT_HOLDER','AUTHORIZED_SIGNATORY') AND P.EFFECTIVE_FROM<=SYSDATE AND (P.EFFECTIVE_TO IS NULL OR P.EFFECTIVE_TO>SYSDATE)",Integer.class,u.userId(),accountId);
    return matches!=null&&matches>0;
@@ -34,7 +35,7 @@ public class CustomerHashService {
  public void require(long accountId,String token){
   if(!permits(accountId,token))throw new BusinessException(HttpStatus.FORBIDDEN,"FINANCIAL_ACCESS_REQUIRED","An authorized customer session or account-holder access key is required to view financial details");
  }
- public String proofLabel(){return "CUSTOMER".equals(CurrentActor.get().userType())?"AUTHENTICATED_CUSTOMER":"CUSTOMER_HASH";}
+ public String proofLabel(){return access.bankAdminFinancialAccess()?"BANK_ADMIN":"CUSTOMER".equals(CurrentActor.get().userType())?"AUTHENTICATED_CUSTOMER":"CUSTOMER_HASH";}
  public void audit(String action,String type,String id,String reason){
   db.update("INSERT INTO MBX_AUDIT(EVENT_ID,ACTOR_ID,ACTION_CODE,RESOURCE_TYPE,RESOURCE_ID,REASON_CODE) VALUES (?,?,?,?,?,?)",UUID.randomUUID().toString(),CurrentActor.get().userId(),action,type,id,reason);
  }

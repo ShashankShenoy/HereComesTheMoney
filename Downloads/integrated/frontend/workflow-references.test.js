@@ -49,8 +49,8 @@ const rows={
  '/api/v1/treasury/settlement-evidence':[{id:56,reserveAccountId:1,railCode:'IMPS',status:'VERIFIED',amount:5000,externalSettlementRef:'SIM-C-25'}],
  '/api/v1/treasury/work-owners':[{userId:'treasury-maker',username:'admin'},{userId:'treasury-reviewer',username:'checker'}],
  '/api/v1/banking/gl-accounts':[{GL_ACCOUNT_ID:4,GL_CODE:'VAULT_CASH',GL_NAME:'Vault cash',ACCOUNT_CLASS:'ASSET',ACTIVE_FLAG:'Y',CURRENCY_CODE:'INR'},{GL_ACCOUNT_ID:5,GL_CODE:'OLD_CASH',GL_NAME:'Retired cash',ACCOUNT_CLASS:'ASSET',ACTIVE_FLAG:'N',CURRENCY_CODE:'INR'}],
- '/api/v1/banking/accounts':[{ACCOUNT_ID:21,ACCOUNT_NUMBER:'OWN00021',PRODUCT_NAME:'Savings',ACCOUNT_STATUS:'ACTIVE'}],
- '/api/v1/teller/tills':[{TILL_ID:'till-open',STATUS:'OPEN',BRANCH_CODE:'BR01'},{TILL_ID:'till-closed',STATUS:'CLOSED'}],
+ '/api/v1/banking/accounts':[{ACCOUNT_ID:21,ACCOUNT_NUMBER:'OWN00021',PRODUCT_NAME:'Savings',ACCOUNT_STATUS:'ACTIVE'},{ACCOUNT_ID:22,ACCOUNT_NUMBER:'NEW00022',PRODUCT_NAME:'Savings',ACCOUNT_STATUS:'PENDING_OPEN'}],
+ '/api/v1/teller/tills':[{TILL_ID:'till-open',STATUS:'OPEN',BRANCH_CODE:'BR01',CAN_POST_CASH:true},{TILL_ID:'till-closed',STATUS:'CLOSED',CAN_POST_CASH:false},{TILL_ID:'till-yesterday',STATUS:'OPEN',CAN_POST_CASH:false},{TILL_ID:'till-other-teller',STATUS:'OPEN',CAN_POST_CASH:false}],
  '/api/v1/banking/branches':[{BRANCH_CODE:'BR01'}],
  '/api/v1/cif/customers':[{CIF_ID:'customer-cif',LEGAL_NAME:'Customer reference',STATUS:'ACTIVE'}],
  '/api/v1/products':[{PRODUCT_ID:1,PRODUCT_NAME:'Savings',PRODUCT_TYPE:'SAVINGS'},{PRODUCT_ID:2,PRODUCT_NAME:'Personal loan',PRODUCT_TYPE:'LOAN'}],
@@ -71,7 +71,35 @@ test('teller cash uses account and open-till dropdowns rather than raw IDs',asyn
  assert.match(html,/<select name="accountId" required>/);assert.match(html,/<option value="21"[^>]*>OWN00021/);
  assert.match(html,/<select name="tillId" required>/);assert.match(html,/<option value="till-open"/);assert.doesNotMatch(html,/<option value="till-closed"/);
  assert.doesNotMatch(html,/<input name="accountId"|<input name="tillId"/);
+ assert.doesNotMatch(html,/<option value="till-yesterday"|<option value="till-other-teller"/);
+ assert.match(html,/<option value="22"[^>]*>NEW00022/);
+ assert.match(html,/For a pending account, this records opening funding/);
 });
+test('checker with teller permissions can open a till and collect cash',async()=>{
+ actor('cash-checker',true);
+ const {getSession}=await import('./api.js');
+ const session=getSession();session.user.permissions.push('TELLER_OPERATE','TXN_POST');saveSession(session);
+ const html=await choose('teller','/teller/cash');
+ assert.match(html,/data-bank-operation="post\/api\/v1\/teller\/tills"/);
+ assert.match(html,/<select name="accountId" required>/);
+ assert.match(html,/For a pending account, this records opening funding/);
+});
+
+test('older teller services still offer only the current actor and business date',async()=>{
+ actor('legacy-teller');
+ const original=rows['/api/v1/teller/tills'];
+ const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ try{
+  rows['/api/v1/teller/tills']=[
+   {TILL_ID:'legacy-own',STATUS:'OPEN',TELLER_USER_ID:'legacy-teller',BUSINESS_DATE:today+'T00:00:00'},
+   {TILL_ID:'legacy-other',STATUS:'OPEN',TELLER_USER_ID:'another-teller',BUSINESS_DATE:today},
+   {TILL_ID:'legacy-expired',STATUS:'OPEN',TELLER_USER_ID:'legacy-teller',BUSINESS_DATE:'2000-01-01'}];
+  const html=await choose('teller','/teller/cash');
+  assert.match(html,/<option value="legacy-own"/);
+  assert.doesNotMatch(html,/<option value="legacy-other"|<option value="legacy-expired"/);
+ }finally{rows['/api/v1/teller/tills']=original;}
+});
+
 test('loan creation shows customer, branch and loan-product dropdowns',async()=>{
  actor('loan-maker');const html=await choose('loans','/loans/applications');
  for(const name of ['cifId','productId','productVersionId','branchCode','purposeCode'])assert.match(html,new RegExp('<select name="'+name+'"'));
@@ -95,6 +123,7 @@ test('vault setup offers the active cash ledger instead of an empty or invalid s
  assert.match(html,/<select name="vaultGlId" required>/);assert.match(html,/<option value="4"[^>]*>Vault cash/);
  assert.doesNotMatch(html,/Retired cash/);
 });
+
 test('checker opens loan and teller review queues with actionable records',async()=>{
  actor('loan-checker',true);const loans=await bankingScreen('loans');
  assert.match(loans,/Records awaiting review/);assert.match(loans,/LOAN-007/);assert.doesNotMatch(loans,/LOAN-008|LOAN-009/);

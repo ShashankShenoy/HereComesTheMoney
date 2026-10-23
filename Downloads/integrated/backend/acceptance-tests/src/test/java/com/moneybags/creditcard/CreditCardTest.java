@@ -82,6 +82,25 @@ class CreditCardTest {
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M05_V_GL_JOURNAL_CONTROL WHERE IS_BALANCED='N'",Integer.class));
     }
 
+    @Test void customerCardNumberIsStableAndSeparateFromInternalReference()throws Exception{
+        String id=activeCard("24","10000");
+        JsonNode card=getCard(id,customer);
+        String number=card.path("CARD_NUMBER").asText();
+        assertTrue(number.matches("[0-9]{16}"));
+        assertTrue(number.endsWith(card.path("DISPLAY_ENDING").asText()));
+        assertFalse(card.has("CARD_REFERENCE"));
+        assertEquals(number,getCard(id,customer).path("CARD_NUMBER").asText());
+        JsonNode listed=value(mvc.perform(get("/api/v1/credit-cards").header("Authorization","Bearer "+customer)).andExpect(status().isOk()));
+        boolean found=false;
+        for(JsonNode row:listed)if(id.equals(row.path("CARD_ID").asText())){
+            assertEquals(number,row.path("CARD_NUMBER").asText());
+            assertFalse(row.has("CARD_REFERENCE"));found=true;
+        }
+        assertTrue(found);
+        assertFalse(getCard(id,checker).has("CARD_NUMBER"));
+        mvc.perform(get("/api/v1/credit-cards/"+id).header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+    }
+
     @Test void customerDirectoriesRespectCurrentCifAndExecutePagedQueries()throws Exception{
         for(String token:List.of(customer,other)){
             var applications=value(mvc.perform(get("/api/v1/credit-cards/applications").header("Authorization","Bearer "+token)).andExpect(status().isOk()));

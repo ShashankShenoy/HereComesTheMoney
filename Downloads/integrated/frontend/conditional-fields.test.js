@@ -4,7 +4,15 @@ const requireJet=(modules,ready)=>ready({}, {whenDocumentReady:()=>Promise.resol
 requireJet.config=()=>{};
 globalThis.window={require:requireJet};
 globalThis.document={documentElement:{lang:''},addEventListener:()=>{}};
-const {syncConditionalField,constraintValidator}=await import('./jet.js');
+const {syncConditionalField,constraintValidator,enhanceForms}=await import('./jet.js');
+
+test('live operation search retains its native input and keystroke events',async()=>{
+ const search={type:'search',closest:()=>null};
+ // Accessing DOM conversion methods would fail if search were enhanced.
+ await enhanceForms({querySelectorAll:()=>[search]});
+ assert.equal(search.type,'search');
+ assert.equal(search.hidden,undefined);
+});
 
 test('branch scope enables and requires the visible JET field without invalidating its hidden source',()=>{
   const component={disabled:true,required:false};

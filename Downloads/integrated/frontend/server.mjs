@@ -8,6 +8,8 @@ const target=new URL(process.env.BACKEND_URL||'http://127.0.0.1:8090');
 if(target.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(target.hostname)||target.username||target.password||target.pathname!=='/'||target.search||target.hash)throw new Error('BACKEND_URL must be a loopback HTTP origin');
 const files=new Map([['/operation-state.js','operation-state.js'],['/settlement-simulator.js','settlement-simulator.js'],['/employee/rbi-simulator','index.html'],['/assets/InterVariable.woff2','assets/InterVariable.woff2'],['/oracle-red.css','oracle-red.css'],['/design.js','design.js'],['/customer-payments.js','customer-payments.js'],['/customer-fx.js','customer-fx.js'],['/login','index.html'],['/login/','index.html'],['/employee','index.html'],['/employee/','index.html'],['/employee/login','index.html'],['/employee/login/','index.html'],['/','index.html'],['/index.html','index.html'],['/banking.js','banking.js'],['/credit-cards.js','credit-cards.js'],['/credit-cards.css','credit-cards.css'],['/comparisons.js','comparisons.js'],['/app.js','app.js'],['/assistant.js','assistant.js'],['/assistant-markdown.js','assistant-markdown.js'],['/presentation.js','presentation.js'],['/api.js','api.js'],['/ui.js','ui.js'],['/jet.js','jet.js'],['/domains.js','domains.js'],['/i18n.js','i18n.js'],['/style.css','style.css'],['/professional.css','professional.css'],['/favicon.svg','favicon.svg']]);
 // Public vendor roots are explicit; node_modules itself and package/config files are never exposed.
+files.set('/demo-funding.js','demo-funding.js');
+files.set('/assistant-products.js','assistant-products.js');
 files.set('/iam-catalog.js','iam-catalog.js');
 files.set('/payment-pin.js','payment-pin.js');
 files.set('/customer-statements.js','customer-statements.js');

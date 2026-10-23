@@ -61,6 +61,52 @@ class AssistantStatementsLoansTest {
   when(model.create(anyMap())).thenReturn(toolReply("list_my_accounts",Map.of()),textReply("Your synthetic account is available."));
   var r=postJson("/assistant/chat",login("customer"),Map.of("message","List my accounts"));assertEquals(200,r.getResponse().getStatus());assertTrue(tree(r).path("pendingActions").isEmpty());verify(model,times(2)).create(anyMap());
  }
+ @Test void beneficiaryLookupSurvivesFollowUpWithoutLeakingToAnotherCustomer()throws Exception{
+  String customer=login("customer"),other=login("customer2");
+  var created=postJson("/beneficiaries",customer,Map.of("displayName","Followup recipient","accountToken","private-recipient-token","bankCode","TEST0123456"));
+  assertEquals(200,created.getResponse().getStatus());String beneficiary=tree(created).path("beneficiaryId").asText();
+  when(model.create(anyMap())).thenReturn(toolReply("list_my_beneficiaries",Map.of()),textReply("Your recipient is pending verification."));
+  var first=postJson("/assistant/chat",customer,Map.of("message","List beneficiaries"));assertEquals(200,first.getResponse().getStatus());
+  String conversation=tree(first).path("conversationId").asText();
+  var inputs=new ArrayList<String>();when(model.create(anyMap())).thenAnswer(inv->{inputs.add(json.writeValueAsString(((Map<?,?>)inv.getArgument(0)).get("input")));return textReply("Please wait for independent verification.");});
+  assertEquals(200,postJson("/assistant/chat",customer,Map.of("message","Can I pay that recipient?","conversationId",conversation)).getResponse().getStatus());
+  assertTrue(inputs.get(0).contains(beneficiary));assertTrue(inputs.get(0).contains("PENDING"));
+  assertFalse(inputs.get(0).contains("private-recipient-token"));
+  assertEquals(200,postJson("/assistant/chat",other,Map.of("message","Show history","conversationId",conversation)).getResponse().getStatus());
+  assertFalse(inputs.get(1).contains(beneficiary));
+  for(int i=0;i<4;i++)assertEquals(200,postJson("/assistant/chat",customer,Map.of("message","Followup "+i,"conversationId",conversation)).getResponse().getStatus());
+  assertFalse(inputs.get(inputs.size()-1).contains(beneficiary),"Old tool results must expire with their complete turn");
+ }
+ @Test void chatOpensBeneficiaryFormThenUsesIndependentVerification()throws Exception{
+  String customer=login("customer"),checker=login("checker");
+  int before=db.queryForObject("SELECT COUNT(*) FROM MBX_BENEFICIARY",Integer.class);
+  when(model.create(anyMap())).thenReturn(toolReply("open_add_beneficiary_form",Map.of("displayName","Ravi")),textReply("Complete the secure form."));
+  var chat=postJson("/assistant/chat",customer,Map.of("message","Add Ravi as a beneficiary"));assertEquals(200,chat.getResponse().getStatus());
+  assertEquals("ADD_BENEFICIARY",tree(chat).path("pendingActions").get(0).path("uiAction").asText());
+  assertEquals(before,db.queryForObject("SELECT COUNT(*) FROM MBX_BENEFICIARY",Integer.class));
+  var created=postJson("/beneficiaries",customer,Map.of("displayName","Ravi","accountToken","synthetic-ravi","bankCode","TEST0123456"));
+  assertEquals(200,created.getResponse().getStatus());assertEquals("PENDING",tree(created).path("status").asText());
+  String id=tree(created).path("beneficiaryId").asText();
+  when(model.create(anyMap())).thenReturn(toolReply("draft_payment",Map.of("accountId",1,"beneficiaryId",id,"rail","UPI","amount","1.00")),textReply("Independent verification is required."));
+  var pending=postJson("/assistant/chat",customer,Map.of("message","Pay Ravi"));assertEquals(200,pending.getResponse().getStatus());assertTrue(tree(pending).path("pendingActions").isEmpty());
+  assertEquals(403,postJson("/beneficiaries/"+id+"/verify",customer,Map.of()).getResponse().getStatus());
+  assertEquals(200,postJson("/beneficiaries/"+id+"/verify",checker,Map.of()).getResponse().getStatus());
+  when(model.create(anyMap())).thenReturn(toolReply("draft_payment",Map.of("accountId",1,"beneficiaryId",id,"rail","IMPS","amount","100001.00")),textReply("Review the payment draft."));
+  var draft=postJson("/assistant/chat",customer,Map.of("message","Pay Ravi INR 100001 by IMPS"));assertEquals(200,draft.getResponse().getStatus());
+  assertEquals("PAYMENT_INITIATE",tree(draft).path("pendingActions").get(0).path("action").asText());
+  assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM M06_PAYMENT_INSTRUCTION WHERE REQUEST_KEY=?",Integer.class,tree(draft).path("pendingActions").get(0).path("intentId").asText()));
+ }
+ @Test void chatPaymentDraftUsesCurrentRailBoundaries()throws Exception{
+  String customer=login("customer"),checker=login("checker");
+  var created=postJson("/beneficiaries",customer,Map.of("displayName","Boundary recipient","accountToken","synthetic-boundary","bankCode","TEST0123456"));
+  assertEquals(200,created.getResponse().getStatus());String id=tree(created).path("beneficiaryId").asText();
+  assertEquals(200,postJson("/beneficiaries/"+id+"/verify",checker,Map.of()).getResponse().getStatus());
+  for(String[] example:List.of(new String[]{"IMPS","500000.00","true"},new String[]{"IMPS","500000.01","false"},new String[]{"UPI","100000.00","true"},new String[]{"UPI","100000.01","false"},new String[]{"RTGS","199999.99","false"},new String[]{"RTGS","200000.00","true"})){
+   when(model.create(anyMap())).thenReturn(toolReply("draft_payment",Map.of("accountId",1,"beneficiaryId",id,"rail",example[0],"amount",example[1])),textReply("Synthetic boundary response"));
+   var reply=postJson("/assistant/chat",customer,Map.of("message","Draft payment "+example[1]+" by "+example[0]));assertEquals(200,reply.getResponse().getStatus());
+   assertEquals(Boolean.parseBoolean(example[2]),!tree(reply).path("pendingActions").isEmpty(),Arrays.toString(example));
+  }
+ }
  @Test void forbiddenToolReadIsReturnedAsAnErrorToModel()throws Exception{
   var inputs=new ArrayList<String>();var count=new int[]{0};when(model.create(anyMap())).thenAnswer(inv->{inputs.add(json.writeValueAsString(((Map<?,?>)inv.getArgument(0)).get("input")));return count[0]++==0?toolReply("get_account_position",Map.of("accountId",2)):textReply("Access denied");});
   var r=postJson("/assistant/chat",login("customer"),Map.of("message","Read account 2"));assertEquals(200,r.getResponse().getStatus());assertTrue(inputs.get(1).contains("error"));assertFalse(inputs.get(1).contains("postedBalance"));
@@ -180,6 +226,8 @@ class AssistantStatementsLoansTest {
  void postPrepay(Loan l,Map<String,Object> body)throws Exception{var r=postJson(path(l)+"/prepayments",l.admin(),body);assertEquals(200,r.getResponse().getStatus(),r.getResponse().getContentAsString()+" cause="+r.getResolvedException());}
  @Test void partialPrepaymentKeepsDatesAndReplaysWithoutAnotherDebit()throws Exception{
   Loan l=activeLoan(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")));String root=path(l);var oldDates=db.queryForList("SELECT DUE_DATE FROM M08_LOAN_SCHEDULE_ITEM WHERE FACILITY_ID=? ORDER BY INSTALLMENT_NO",l.facility());BigDecimal before=balance();
+  // Exercise early repayment with only the deposit liability mapping; the test transaction restores it.
+  db.update("UPDATE M05_GL_PRODUCT_MAPPING SET STATUS='RETIRED' WHERE PRODUCT_VERSION_ID=1 AND POSTING_TYPE='LOAN' AND GL_ROLE_CODE='CUSTOMER_LIABILITY'");
   var body=Map.<String,Object>of("requestKey",UUID.randomUUID().toString(),"amount","1000","mode","PARTIAL");postPrepay(l,body);money(before.subtract(new BigDecimal("1000")).toPlainString(),balance());postPrepay(l,body);money(before.subtract(new BigDecimal("1000")).toPlainString(),balance());
   money("11000",quote(l).path("principalOutstanding").decimalValue());money("0",quote(l).path("interestDue").decimalValue());
   var newDates=db.queryForList("SELECT I.DUE_DATE FROM M08_LOAN_SCHEDULE_ITEM I JOIN M08_LOAN_SCHEDULE S ON S.SCHEDULE_ID=I.SCHEDULE_ID WHERE I.FACILITY_ID=? AND S.STATUS='ACTIVE' ORDER BY I.INSTALLMENT_NO",l.facility());assertEquals(oldDates,newDates);

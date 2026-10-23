@@ -60,6 +60,9 @@ public class TermDepositController {
                               @NotNull Long fundingAccountId,@NotNull @DecimalMin("0.01") BigDecimal amount,
                               @NotNull Integer tenureMonths,@NotBlank @Size(max=80) String requestKey) { }
 
+    @GetMapping("/availability")
+    public Map<String,Object> availability(){CurrentActor.require("ACCOUNT_READ");return Map.of("openingEnabled",enabled,"earlyWithdrawalEnabled",false);}
+
     @GetMapping("/my")
     @Operation(summary="List the signed-in customer's fixed deposits")
     public List<Map<String,Object>> mine() {

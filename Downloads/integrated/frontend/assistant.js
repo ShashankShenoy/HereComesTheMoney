@@ -3,6 +3,7 @@ import {paymentPinField,withPaymentPin} from './payment-pin.js';
 import {esc,errorText,dialog,toast} from './ui.js';
 import {renderAssistantMarkdown} from './assistant-markdown.js';
 import {locale,t} from './i18n.js';
+import {openProductWorkflow,productWorkflowNames} from './assistant-products.js';
 
 let identity='';
 let conversationId=null;
@@ -18,10 +19,11 @@ function syncIdentity(){
   if(next!==identity){identity=next;conversationId=null;messages=[];actions=[];busy=false;open=false;configured=null;}
 }
 export function resetAssistant(){identity='';conversationId=null;messages=[];actions=[];busy=false;open=false;configured=null;}
+function ownsSession(owner){syncIdentity();return !!getSession()&&identity===owner;}
 
 const welcome=()=>{
   const customer=getSession()?.user?.userType==='CUSTOMER';
-  const suggestions=(customer?['What is my balance?','Show my recent transactions','List my beneficiaries']
+  const suggestions=(customer?['What is my balance?','Show my recent transactions','List my beneficiaries','Show my loans','Show my credit cards','Show my fixed deposits']
     :['Show accounts in my scope','Find a customer','List pending beneficiaries']).map(t);
   return `<div class="assistant-welcome"><span class="assistant-spark" aria-hidden="true">✦</span><h3>Banking assistant</h3><p>Ask about information and operations available to your account and permissions.</p><div class="assistant-suggestions">${suggestions.map(s=>`<button type="button" data-assistant-suggestion="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>`;
 };
@@ -34,10 +36,10 @@ const beneficiaryCard=a=>{
     `<label>Account number or UPI ID<input name="accountToken" value="${esc(values.accountToken)}" minlength="4" maxlength="120" pattern="[A-Za-z0-9._@-]{4,120}" required autocomplete="off"></label>`+
     `<label>Confirm account number or UPI ID<input name="confirmToken" value="${esc(values.confirmToken)}" minlength="4" maxlength="120" pattern="[A-Za-z0-9._@-]{4,120}" required autocomplete="off"></label>`+
     `<label>Bank IFSC<input name="bankCode" value="${esc(values.bankCode)}" maxlength="11" pattern="[A-Za-z]{4}0[A-Za-z0-9]{6}" required autocomplete="off" placeholder="ABCD0123456"></label>`+
-    `<p class="form-error" role="alert"></p><div class="assistant-form-actions"><button type="submit" class="btn primary">Register beneficiary</button><button type="button" class="btn" data-assistant-cancel="${esc(a.formId)}">Cancel</button></div>`+
+    `<p class="form-error" role="alert">${esc(a.error||'')}</p><div class="assistant-form-actions"><button type="submit" class="btn primary" ${a.submitting?'disabled':''}>Register beneficiary</button><button type="button" class="btn" data-assistant-cancel="${esc(a.formId)}" ${a.submitting?'disabled':''}>Cancel</button></div>`+
     `</form><small>Account details are sent directly to the banking server, not to the AI model.</small></section>`;
 };
-const cards=()=>actions.filter(a=>a.status==='PENDING').map(a=>a.uiAction==='ADD_BENEFICIARY'?beneficiaryCard(a):`<section class="assistant-action"><strong>Review before confirming</strong><p>${esc(a.summary)}</p><button type="button" class="btn primary" data-assistant-confirm="${esc(a.intentId)}">${a.action==='INTERNAL_TRANSFER'?'Transfer money':a.action==='PAYMENT_INITIATE'?'Submit pending payment':'Verify beneficiary'}</button><small>This proposal expires after five minutes. Your access is checked again when you confirm.</small></section>`).join('');
+const cards=()=>actions.filter(a=>a.status==='PENDING').map(a=>a.uiAction==='ADD_BENEFICIARY'?beneficiaryCard(a):a.uiAction==='BANKING_WORKFLOW'?`<section class="assistant-action"><strong>${esc(productWorkflowNames[a.workflow]||'Banking form')}</strong><p>${esc(a.summary)}</p><button type="button" class="btn primary" data-assistant-workflow="${esc(a.formId)}" ${a.opening?'disabled':''}>Open secure form</button><small>Choose the exact terms, then review and confirm separately. Your bank access is checked when submitted.</small></section>`:`<section class="assistant-action"><strong>Review before confirming</strong><p>${esc(a.summary)}</p><button type="button" class="btn primary" data-assistant-confirm="${esc(a.intentId)}" ${a.submitting?'disabled':''}>${a.action==='INTERNAL_TRANSFER'?'Transfer money':a.action==='PAYMENT_INITIATE'?'Submit payment request':'Verify beneficiary'}</button><small>This proposal expires after five minutes. Your access is checked again when you confirm.</small></section>`).join('');
 
 export function assistantWidget(){
   syncIdentity();
@@ -65,28 +67,31 @@ async function loadStatus(){
   const status=document.querySelector('#assistant-status-text');const banner=document.querySelector('#assistant-config');
   if(!status||!banner)return;
   const owner=identity;
-  try{const result=await api('/assistant/status');if(!getSession()||identity!==owner)return;configured=!!result.configured;status.textContent=configured?'Ready to help':'Model setup required';banner.hidden=configured;banner.textContent=configured?'':'Chat needs a model provider and API key configured on the backend.';}
-  catch(error){if(identity!==owner)return;configured=false;status.textContent='Chat unavailable';banner.hidden=false;banner.textContent=errorText(error);}
+  try{const result=await api('/assistant/status');if(!ownsSession(owner))return;configured=!!result.configured;status.textContent=configured?'Ready to help':'Model setup required';banner.hidden=configured;banner.textContent=configured?'':'Chat needs a model provider and API key configured on the backend.';}
+  catch(error){if(!ownsSession(owner))return;configured=false;status.textContent='Chat unavailable';banner.hidden=false;banner.textContent=errorText(error);}
   paint();
 }
 export function openAssistant(){syncIdentity();open=true;paint();}
 
 async function sendMessage(form){
+  syncIdentity();
   if(busy||configured!==true)return;
   const input=form.querySelector('textarea');const message=input.value.trim();if(!message)return;
   const owner=identity;
   input.value='';busy=true;messages.push({role:'user',text:message});paint();
   try{
     const response=await api('/assistant/chat',{method:'POST',body:{message,conversationId,locale}});
-    if(identity!==owner)return;
+    if(!ownsSession(owner))return;
     conversationId=response.conversationId;
     messages.push({role:'assistant',text:response.answer||t('I could not produce a response. Please try again.')});
     for(const a of response.pendingActions||[]){
+      if(a.intentId&&actions.some(existing=>existing.intentId===a.intentId))continue;
+      if(a.uiAction==='BANKING_WORKFLOW'&&actions.some(existing=>existing.status==='PENDING'&&existing.workflow===a.workflow))continue;
       if(a.uiAction==='ADD_BENEFICIARY' && actions.some(openForm=>openForm.status==='PENDING' && openForm.uiAction==='ADD_BENEFICIARY' && openForm.displayName?.toLocaleLowerCase()===a.displayName?.toLocaleLowerCase()))continue;
       actions.push({...a,status:'PENDING',form:a.uiAction==='ADD_BENEFICIARY'?{displayName:a.displayName||'',accountToken:'',confirmToken:'',bankCode:''}:undefined});
     }
-  }catch(error){if(identity===owner)messages.push({role:'assistant',text:errorText(error)});}
-  finally{if(identity===owner){busy=false;paint();if(input.isConnected)input.focus();}}
+  }catch(error){if(ownsSession(owner))messages.push({role:'assistant',text:errorText(error)});}
+  finally{if(ownsSession(owner)){busy=false;paint();if(input.isConnected)input.focus();}}
 }
 
 export function bindAssistant(){
@@ -103,17 +108,18 @@ export function bindAssistant(){
     if(action?.form && Object.hasOwn(action.form,event.target.name))action.form[event.target.name]=event.target.value;
   };
   feed.onsubmit=async event=>{
+    syncIdentity();
     const form=event.target.closest('[data-assistant-beneficiary]');if(!form)return;
     event.preventDefault();
-    const action=actions.find(a=>a.formId===form.dataset.assistantBeneficiary && a.status==='PENDING');if(!action)return;
+    const action=actions.find(a=>a.formId===form.dataset.assistantBeneficiary && a.status==='PENDING');if(!action||action.submitting)return;
     const values=new FormData(form),name=String(values.get('displayName')||'').trim(),token=String(values.get('accountToken')||'').trim();
     const confirmToken=String(values.get('confirmToken')||'').trim(),bankCode=String(values.get('bankCode')||'').trim().toUpperCase();
     const error=form.querySelector('.form-error');
     if(token!==confirmToken){error.textContent='The account number or UPI ID entries do not match.';return;}
-    const owner=identity,button=form.querySelector('[type="submit"]');button.disabled=true;error.textContent='';
+    const owner=identity,button=form.querySelector('[type="submit"]');action.submitting=true;action.error='';button.disabled=true;error.textContent='';
     try{
       const result=await api('/beneficiaries',{method:'POST',body:{displayName:name,accountToken:token,bankCode}});
-      if(identity!==owner)return;
+      if(!ownsSession(owner))return;
       action.status='COMPLETED';action.form=null;
       const confirmation=locale==='hi-IN'
         ?`${name} को लाभार्थी ${result.beneficiaryId} के रूप में पंजीकृत किया गया। स्थिति: ${result.status}। भुगतान से पहले स्वतंत्र बैंक अधिकारी सत्यापन आवश्यक है।`
@@ -122,9 +128,20 @@ export function bindAssistant(){
           :`${name} was registered as beneficiary ${result.beneficiaryId}. Status: ${result.status}. An independent bank officer must verify the beneficiary before you can make a payment.`;
       messages.push({role:'assistant',text:confirmation});
       paint();
-    }catch(failure){if(identity===owner){error.textContent=errorText(failure);button.disabled=false;}}
+    }catch(failure){if(ownsSession(owner)){action.error=errorText(failure);error.textContent=action.error;button.disabled=false;}}
+    finally{action.submitting=false;if(ownsSession(owner))paint();}
   };
   feed.onclick=async event=>{
+    syncIdentity();
+    const workflow=event.target.closest('[data-assistant-workflow]');
+    if(workflow){
+      const action=actions.find(a=>a.formId===workflow.dataset.assistantWorkflow&&a.status==='PENDING');if(!action||action.opening)return;
+      const owner=identity;action.opening=true;workflow.disabled=true;
+      try{await openProductWorkflow(action,{isOwner:()=>ownsSession(owner),onComplete:text=>{messages.push({role:'assistant',text});paint();}});}
+      catch(error){if(ownsSession(owner)){messages.push({role:'assistant',text:errorText(error)});paint();}}
+      finally{action.opening=false;if(ownsSession(owner)){workflow.disabled=false;paint();}}
+      return;
+    }
     const file=event.target.closest('[data-assistant-download]');
     if(file){
       event.preventDefault();if(file.disabled)return;
@@ -137,25 +154,28 @@ export function bindAssistant(){
     const suggestion=event.target.closest('[data-assistant-suggestion]');
     if(suggestion){const input=form.querySelector('textarea');input.value=suggestion.dataset.assistantSuggestion;input.focus();return;}
     const cancel=event.target.closest('[data-assistant-cancel]');
-    if(cancel){const action=actions.find(a=>a.formId===cancel.dataset.assistantCancel);if(action){action.status='CANCELLED';action.form=null;paint();}return;}
+    if(cancel){const action=actions.find(a=>a.formId===cancel.dataset.assistantCancel);if(action&&!action.submitting){action.status='CANCELLED';action.form=null;paint();}return;}
     const button=event.target.closest('[data-assistant-confirm]');if(!button||button.disabled)return;
-    const action=actions.find(a=>a.intentId===button.dataset.assistantConfirm);if(!action)return;
+    const action=actions.find(a=>a.intentId===button.dataset.assistantConfirm&&a.status==='PENDING');if(!action||action.submitting)return;
     const owner=identity;
     const financial=['INTERNAL_TRANSFER','PAYMENT_INITIATE'].includes(action.action);
-    const submit=async data=>{button.disabled=true;
+    const submit=async data=>{
+    if(!ownsSession(owner))throw new Error('Your sign-in changed. Open a new assistant conversation.');
+    if(action.status!=='PENDING'||action.submitting)return;
+    action.submitting=true;button.disabled=true;
     try{
       const send=headers=>api(`/assistant/intents/${encodeURIComponent(action.intentId)}/confirm`,{method:'POST',headers});
       const result=financial?await withPaymentPin(data,send):await send({});
-      if(identity!==owner)return;
+      if(!ownsSession(owner))return;
       action.status='COMPLETED';
       const confirmation=locale==='hi-IN'
-        ?result.action==='INTERNAL_TRANSFER'?`आंतरिक स्थानांतरण ${result.resultRef} पोस्ट हो गया। प्राप्तकर्ता खाते में राशि जमा हो गई है।`:result.action==='PAYMENT_INITIATE'?`भुगतान अनुरोध ${result.resultRef} जमा हो गया है और बैंक प्रसंस्करण की प्रतीक्षा में है।`:`लाभार्थी ${result.resultRef} सत्यापित हो गया।`
+        ?result.action==='INTERNAL_TRANSFER'?`आंतरिक स्थानांतरण ${result.resultRef} पोस्ट हो गया। प्राप्तकर्ता खाते में राशि जमा हो गई है।`:result.action==='PAYMENT_INITIATE'?`भुगतान अनुरोध ${result.resultRef} जमा हो गया है। प्रसंस्करण और निपटान की जाँच के लिए इसकी वर्तमान स्थिति पूछें।`:`लाभार्थी ${result.resultRef} सत्यापित हो गया।`
         :locale==='kn-IN'
-          ?result.action==='INTERNAL_TRANSFER'?`ಆಂತರಿಕ ವರ್ಗಾವಣೆ ${result.resultRef} ದಾಖಲಾಗಿದೆ. ಸ್ವೀಕರಿಸುವವರ ಖಾತೆಗೆ ಹಣ ಜಮಾ ಆಗಿದೆ.`:result.action==='PAYMENT_INITIATE'?`ಪಾವತಿ ವಿನಂತಿ ${result.resultRef} ಸಲ್ಲಿಸಲಾಗಿದೆ ಮತ್ತು ಬ್ಯಾಂಕ್ ಪ್ರಕ್ರಿಯೆಗೆ ಕಾಯುತ್ತಿದೆ.`:`ಫಲಾನುಭವಿ ${result.resultRef} ಪರಿಶೀಲಿಸಲಾಗಿದೆ.`
-          :result.action==='INTERNAL_TRANSFER'?`Internal transfer ${result.resultRef} was posted. The recipient account has been credited.`:result.action==='PAYMENT_INITIATE'?`Payment request ${result.resultRef} was submitted and is awaiting bank processing.`:`Beneficiary ${result.resultRef} was verified.`;
+          ?result.action==='INTERNAL_TRANSFER'?`ಆಂತರಿಕ ವರ್ಗಾವಣೆ ${result.resultRef} ದಾಖಲಾಗಿದೆ. ಸ್ವೀಕರಿಸುವವರ ಖಾತೆಗೆ ಹಣ ಜಮಾ ಆಗಿದೆ.`:result.action==='PAYMENT_INITIATE'?`ಪಾವತಿ ವಿನಂತಿ ${result.resultRef} ಸಲ್ಲಿಸಲಾಗಿದೆ. ಪ್ರಕ್ರಿಯೆ ಮತ್ತು ಇತ್ಯರ್ಥವನ್ನು ಪರಿಶೀಲಿಸಲು ಅದರ ಪ್ರಸ್ತುತ ಸ್ಥಿತಿಯನ್ನು ಕೇಳಿ.`:`ಫಲಾನುಭವಿ ${result.resultRef} ಪರಿಶೀಲಿಸಲಾಗಿದೆ.`
+          :result.action==='INTERNAL_TRANSFER'?`Internal transfer ${result.resultRef} was posted. The recipient account has been credited.`:result.action==='PAYMENT_INITIATE'?`Payment request ${result.resultRef} was submitted. Ask for its current status to check processing and settlement.`:`Beneficiary ${result.resultRef} was verified.`;
       messages.push({role:'assistant',text:confirmation});
-    }catch(error){if(identity===owner)messages.push({role:'assistant',text:errorText(error)});throw error;}
-    finally{if(identity===owner)paint();}};
+    }catch(error){if(ownsSession(owner)){if(['INTENT_EXPIRED','INTENT_OWNER'].includes(error.code))action.status='EXPIRED';messages.push({role:'assistant',text:errorText(error)});}throw error;}
+    finally{action.submitting=false;if(ownsSession(owner)){button.disabled=false;paint();}}};
     if(financial&&getSession()?.user?.userType==='CUSTOMER')dialog('Confirm payment or transfer','<p>'+esc(action.summary)+'</p>'+paymentPinField(),submit);
     else try{await submit(new FormData());}catch{/* the safe failure was added to the action history */}
   };

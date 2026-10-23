@@ -51,8 +51,15 @@ public class BankingController {
    item.put("accountId",id);item.put("accountEnding",number.substring(Math.max(0,number.length()-4)));
    item.put("status",a.get("ACCOUNT_STATUS"));item.put("currency",a.get("CURRENCY_CODE"));
    if(actor.permissions().contains("TXN_READ")){
-    access.account("TXN_READ",id);var position=ledger.position(id);
-    item.put("posted",position.posted());item.put("spendable",position.spendable());
+    access.account("TXN_READ",id);
+    try {
+     var position=ledger.position(id);
+     item.put("posted",position.posted());item.put("spendable",position.spendable());
+    } catch(com.moneybags.txn.api.ApiException error) {
+     // New accounts have no ledger position until activation applies their first control.
+     if(!"POSITION_NOT_FOUND".equals(error.code())||!"PENDING_OPEN".equals(a.get("ACCOUNT_STATUS")))throw error;
+     item.put("posted",java.math.BigDecimal.ZERO);item.put("spendable",java.math.BigDecimal.ZERO);
+    }
     item.put("recentTransactions",transactions(id,null,null).stream().limit(5).toList());
    }
    result.add(item);

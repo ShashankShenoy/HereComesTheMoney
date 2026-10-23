@@ -52,12 +52,15 @@ public class AssistantIntentService {
     @Transactional
     public Map<String,Object> draftPayment(long accountId, String beneficiaryId, String rail, BigDecimal amount) {
         customer();
+        if(!simulation)throw new BusinessException(HttpStatus.CONFLICT,"SIMULATION_DISABLED",
+                "External payment simulation is disabled in this deployment. Internal transfers remain available.");
         if (amount==null || amount.signum()<=0 || amount.scale()>2 || amount.precision()>18 ||
                 !Set.of("UPI","IMPS","NEFT","RTGS").contains(rail)) invalid();
         if(simulation && (("RTGS".equals(rail) && amount.compareTo(new BigDecimal("200000"))<0) ||
-                (Set.of("UPI","IMPS").contains(rail) && amount.compareTo(new BigDecimal("100000"))>0)))
+                ("UPI".equals(rail) && amount.compareTo(new BigDecimal("100000"))>0) ||
+                ("IMPS".equals(rail) && amount.compareTo(new BigDecimal("500000"))>0)))
             throw new BusinessException(HttpStatus.BAD_REQUEST,"RAIL_AMOUNT_LIMIT",
-                    "In this demo, RTGS starts at INR 200000 and UPI/IMPS are limited to INR 100000");
+                    "In this demo, RTGS starts at INR 200000; UPI maximum is INR 100000 and IMPS maximum is INR 500000");
         Map<String,Object> account=access.account("PAYMENT_CREATE",accountId);
         Map<String,Object> beneficiary=db.one("SELECT BENEFICIARY_ID,DISPLAY_NAME,BANK_CODE,STATUS FROM MBX_BENEFICIARY WHERE BENEFICIARY_ID=? AND OWNER_USER_ID=? AND STATUS='ACTIVE'",
                 beneficiaryId,CurrentActor.get().userId());
@@ -72,7 +75,7 @@ public class AssistantIntentService {
         audit.audit("ASSISTANT_INTENT_CREATED","ASSISTANT_INTENT",id,"PAYMENT_INITIATE");
         return Map.of("intentId",id,"action","PAYMENT_INITIATE","expiresAt",OffsetDateTime.now(clock).plusMinutes(5),
                 "summary","Submit "+amount.toPlainString()+" INR by "+rail+" from account ending "+last4(account.get("ACCOUNT_NUMBER"))+
-                        " to "+beneficiary.get("DISPLAY_NAME")+" ("+beneficiary.get("BANK_CODE")+"). Payment remains pending bank authorization.");
+                        " to "+beneficiary.get("DISPLAY_NAME")+" ("+beneficiary.get("BANK_CODE")+"). Eligible payments process automatically; payments above the rail approval threshold require independent review.");
     }
 
     @Transactional

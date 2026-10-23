@@ -51,6 +51,39 @@ Starting with `./start-alpha-team.ps1` automatically displays the ALPHA username
 
 ## Use Oracle
 
+### Check assistant workflows without an API key
+
+From this directory, run the frontend checks and isolated backend assistant tests:
+
+~~~powershell
+npm --prefix frontend test
+npm --prefix frontend run check
+mvn -f backend/pom.xml "-Dmaven.repo.local=$env:USERPROFILE/.m2/repository" -pl acceptance-tests -am test "-Dtest=Assistant*Test,OpenAiResponsesClientTest,HttpAssistantLoanClientTest,IntegratedContextTest#assistantMcpEnforcesScopeAndExactConfirmation+assistantInternalTransferCreditsOnlyAfterExactConfirmation+customerMcpTracksPaymentsAndGeneratesScopedStatements" -Dsurefire.failIfNoSpecifiedTests=false
+~~~
+
+Add `-o` to the Maven command to use cached dependencies without downloads. These tests use a simulated model and an isolated in-memory database. They check secure beneficiary registration, independent verification, internal transfer confirmation, external payment drafts and rail limits, follow-up context and customer isolation, statements, loans, and retry behavior. They do not need the ALPHA bundle, VPN, or provider key, and do not modify shared beneficiaries or balances. Live natural-language interpretation still needs a configured model and must be checked separately.
+
+The assistant currently exposes 47 tools. `AssistantCapabilitiesTest` and `AssistantProductsTest` exercise the complete catalogue through authenticated chat and check tool discovery against that list. `HttpAssistantLoanClientTest` verifies the production banking-to-loan boundary with a local stub server. Adding a tool also requires extending the audit.
+
+| Capability | Customer chat | Officer chat |
+| --- | --- | --- |
+| Accounts and balances | Linked accounts, balances and overview | Scoped account list; balances require account-holder proof |
+| Transactions | Recent activity across accounts or a specific account; last 1–100 entries | Scoped account activity; proof required except unrestricted bank-admin transaction review |
+| Beneficiaries | List recipients and open the secure registration form | Masked pending recipient list; verification drafts only where write tools are permitted |
+| Payments | Internal transfer and external payment drafts, separate PIN confirmation, payment status | Not available as officer chat tools |
+| Statements | List statements and requests, check requests, bounded previews, generate/reuse PDF, CSV or HTML and download | Use the dedicated statement workspace |
+| Customer lookup | Own linked accounts only | Search within the officer's scope |
+| Loans | Eligible product offers, applications, offers and acceptance, facilities, balances, schedules and early repayment quotes | Scoped loan inquiries; due/early repayment forms for authorized servicing officers |
+| Credit cards | Products, applications, masked cards, balances, transactions and statements; secure application, activate/freeze/unfreeze/close, simulated purchase, repayment and due billing forms | Scoped masked card inquiries; approvals and permanent blocking use dedicated queues |
+| Fixed deposits | Eligible products, deposit list/detail and secure opening form; opening requires deposit support enabled | Dedicated workspace for maturity operations |
+| KYC, teller and independent credit decisions | Use dedicated workspace screens | Use dedicated workspace screens |
+
+The checker assistant is read-only. Checker decisions stay in the dedicated review queues. All tools retain the signed-in user's permissions and scope. Hindi and Kannada requests select response-language instructions; translation quality requires a live model check. A simulated model verifies the tool execution and confirmation paths, not natural-language interpretation or provider connectivity.
+
+Product forms use a fixed operation allowlist and load current products, accounts, card states and terms directly from the bank. They require a separate review before sending the existing domain command. Card purchases and repayments use the customer's masked payment PIN prompt. Retry keys remain stable after an uncertain response. Loan foreclosure quotes are refreshed before the first submission; domain checks still enforce the exact total on every command. Nothing moves merely because the assistant opened a form.
+
+Loan repayment and prepayment retain the existing `LOAN_SERVICE` permission; ordinary customer roles do not acquire it through chat. The assistant does not approve loans/cards, disburse funds as a checker, permanently block a customer's card, or withdraw fixed deposits early. No database migration or permission grants are needed for these assistant additions. Banking calls the loan service using `moneybags.services.loans-url`; the team launcher supplies the selected loan port.
+
 ### Shared ALPHA database for the team
 
 The repository includes `alpha-team.bundle.json`, encrypted with AES-256-GCM and a separately held team passphrase. It contains the ALPHA JDBC connection, schema password, the installation's CIF/MFA decryption keys, optional assistant provider key, and team demo logins. Private `.env.ps1` and Windows DPAPI files remain ignored; the launcher uses the encrypted team bundle and this Windows user's saved OpenRouter override. **The team passphrase is not in Git.** Obtain it through your team's private channel; do not place it in a commit, issue, or chat transcript.
@@ -325,15 +358,19 @@ UPI and IMPS use separate two-hour demo clearing cycles; NEFT uses 30-minute cyc
 
 ## Supporting banking and administration tabs
 
+### Add demo money
+
+On **Accounts**, choose an account under **Add demo money**, enter an INR amount, select **Review deposit**, then **Confirm add money**. This credits the account immediately and records a balanced, explicitly simulated transaction. No till, vault, cash delivery, or API key is needed. Available to bank staff with posting access to the selected account in the local demo profiles and Oracle demo launcher. Other deployments must explicitly set `DEMO_FUNDING_ENABLED=true`. Pending accounts can receive opening funds; activation remains a separate step. Repeating a request returns the same transaction.
+
 ### Teller cash
 
-1. Admin: **Open a teller till**, branch MUM001. Opening allocates INR **5,000** from the seeded vault.
+1. Open a teller till for your branch using an active teller cash ledger. The branch vault supplies INR **5,000** of opening cash.
 2. Record the till ID. **Post a cash deposit or withdrawal** to MB000000001: DEPOSIT **100**, with a reason.
 3. Post WITHDRAWAL **40**. The customer gains net INR 60; this otherwise untouched till expects INR **5,060**.
 4. Checker: **Independently close a teller till**, using its ID, actual counted cash, and reason.
 5. Check CLOSED status and cash returned to the vault. Use the current expected amount if other cash operations occurred.
 
-An already open till for the same teller/branch/day cannot be opened again. Oracle needs registered vault cash and sufficient funds. These internal cash movements do not alter RBI reserve balances.
+A teller can open only one till per business day, even after closing it. The branch vault must already have sufficient counted cash. See [Operations](docs/OPERATIONS.md) for the cash workflow.
 
 ### Treasury & RBI ledger
 

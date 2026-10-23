@@ -85,6 +85,8 @@ public class LedgerService {
             throw new ApiException(HttpStatus.CONFLICT, "CONTROL_VERSION_GAP", "Expected control version " + (oldVersion + 1));
         if (fences.isEmpty()) {
             db.update("INSERT INTO M05_POSTING_FENCE(BANK_ACCOUNT_ID,CHANGED_BY) VALUES (?,?)", accountId, actor);
+        }
+        if (db.queryForList("SELECT BANK_ACCOUNT_ID FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=?", accountId).isEmpty()) {
             db.update("INSERT INTO M05_ACCOUNT_POSITION(BANK_ACCOUNT_ID) VALUES (?)", accountId);
         }
         db.queryForList("SELECT BANK_ACCOUNT_ID FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=? FOR UPDATE", accountId);
@@ -169,6 +171,56 @@ public class LedgerService {
     /** Books a balanced journal, updates positions, and consumes an optional payment hold atomically. */
     @Transactional
     public JournalView postJournal(JournalRequest request, String actor) {
+        return postJournalInternal(request, actor, false);
+    }
+
+    /** Collects physical opening cash without enabling ordinary posting on a pending account. */
+    @Transactional
+    public JournalView postOpeningCash(JournalRequest request, String actor) {
+        validateJournal(request);
+        if (!"OPENING_FUNDING".equals(request.journalType()) || request.lines().size()!=2 || request.holdId()!=null
+                || request.paymentId()!=null || request.reversalOfJournalId()!=null)
+            throw invalid("OPENING_CASH", "Opening cash requires a dedicated two-line cash receipt");
+        var credits=request.lines().stream().filter(l->l.bankAccountId()!=null).toList();
+        if(credits.size()!=1 || !"CR".equals(credits.get(0).side())
+                || request.lines().stream().anyMatch(l->l.loanFacilityId()!=null))
+            throw invalid("OPENING_CASH", "Opening cash must credit exactly one pending customer account");
+        var cash=request.lines().stream().filter(l->l.bankAccountId()==null).findFirst().orElseThrow();
+        if(!"DR".equals(cash.side()) || db.queryForObject("SELECT COUNT(*) FROM M05_GL_ACCOUNT WHERE GL_ACCOUNT_ID=? AND ACCOUNT_CLASS='ASSET' AND ACTIVE_FLAG='Y' AND CURRENCY_CODE='INR' AND (UPPER(GL_CODE) LIKE '%CASH%' OR UPPER(GL_NAME) LIKE '%CASH%')",Integer.class,cash.glAccountId())!=1)
+            throw invalid("OPENING_CASH", "Opening funding must be backed by collected teller cash");
+        return postPendingFunding(request,actor,credits.get(0).bankAccountId());
+    }
+
+    /** Demo grants use their own expense ledger; they never represent counted cash. */
+    @Transactional
+    public JournalView postDemoOpeningFunding(JournalRequest request,String actor) {
+        if(!demoFundingEnabled)throw invalid("DEMO_FUNDING_DISABLED","Demo money is disabled in this deployment");
+        validateJournal(request);
+        if(!"OPENING_FUNDING".equals(request.journalType())||request.lines().size()!=2||request.holdId()!=null||request.paymentId()!=null||request.reversalOfJournalId()!=null)
+            throw invalid("DEMO_FUNDING","Demo opening funding requires a dedicated two-line journal");
+        var credits=request.lines().stream().filter(l->l.bankAccountId()!=null).toList();
+        if(credits.size()!=1||!"CR".equals(credits.get(0).side())||request.lines().stream().anyMatch(l->l.loanFacilityId()!=null))throw invalid("DEMO_FUNDING","Credit exactly one pending account");
+        var grant=request.lines().stream().filter(l->l.bankAccountId()==null).findFirst().orElseThrow();
+        if(!"DR".equals(grant.side())||db.queryForObject("SELECT COUNT(*) FROM M05_GL_ACCOUNT WHERE GL_ACCOUNT_ID=? AND GL_CODE='DEMO_FUNDING' AND ACCOUNT_CLASS='EXPENSE' AND ACTIVE_FLAG='Y' AND CURRENCY_CODE='INR'",Integer.class,grant.glAccountId())!=1)throw invalid("DEMO_FUNDING","Use the dedicated simulated funding ledger");
+        return postPendingFunding(request,actor,credits.get(0).bankAccountId());
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${moneybags.demo-funding.enabled:false}") private boolean demoFundingEnabled;
+
+    private JournalView postPendingFunding(JournalRequest request,String actor,long accountId) {
+        var rows=db.queryForList("SELECT LIFECYCLE_STATUS,CURRENCY_CODE FROM M04_BANK_ACCOUNT WHERE ACCOUNT_ID=? FOR UPDATE",accountId);
+        if(rows.isEmpty())throw new ApiException(HttpStatus.NOT_FOUND,"ACCOUNT_NOT_FOUND","Account does not exist");
+        JournalView old=existingJournal(request);if(old!=null)return old;
+        if(!"PENDING_OPEN".equals(rows.get(0).get("LIFECYCLE_STATUS")) || !"INR".equals(rows.get(0).get("CURRENCY_CODE")))
+            throw invalid("OPENING_CASH", "Opening cash is only available for pending INR accounts");
+        if(db.queryForObject("SELECT COUNT(*) FROM M04_ACCOUNT_RESTRICTION WHERE ACCOUNT_ID=? AND RESTRICTION_STATUS IN ('ACTIVE','PENDING_APPLY') AND RESTRICTION_TYPE IN ('FREEZE','CREDIT_BLOCK')",Integer.class,accountId)>0)
+            throw invalid("OPENING_CASH", "Account restrictions prevent receiving opening cash");
+        if(db.queryForList("SELECT BANK_ACCOUNT_ID FROM M05_ACCOUNT_POSITION WHERE BANK_ACCOUNT_ID=?",accountId).isEmpty())
+            db.update("INSERT INTO M05_ACCOUNT_POSITION(BANK_ACCOUNT_ID) VALUES (?)",accountId);
+        return postJournalInternal(request,actor,true);
+    }
+
+    private JournalView postJournalInternal(JournalRequest request, String actor, boolean openingCash) {
         validateJournal(request);
         JournalView old = existingJournal(request);
         if (old != null) return old;
@@ -192,7 +244,7 @@ public class LedgerService {
         accountIds.sort(Comparator.naturalOrder());
         Map<Long, PositionView> locked = new HashMap<>();
         for (Long accountId : accountIds) locked.put(accountId, lockedPosition(accountId));
-        for (JournalLine line : request.lines()) if (line.bankAccountId() != null) requireFence(line.bankAccountId(), line.side());
+        for (JournalLine line : request.lines()) if (line.bankAccountId() != null && !openingCash) requireFence(line.bankAccountId(), line.side());
         Map<String, Object> hold = request.holdId() == null ? null : requireHold(request.holdId());
         BigDecimal heldAmount = hold == null ? BigDecimal.ZERO : (BigDecimal) hold.get("AMOUNT");
         long heldAccount = hold == null ? -1 : ((Number) hold.get("BANK_ACCOUNT_ID")).longValue();

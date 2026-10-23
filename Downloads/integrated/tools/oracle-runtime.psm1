@@ -108,7 +108,7 @@ function Start-JavaService {
   param([string]$Module, [int]$Port, [string[]]$ExtraArguments)
   $jar = Join-Path $taskRoot "backend/$Module/target/$Module-1.0.0-exec.jar"
   if (-not (Test-Path -LiteralPath $jar)) { throw "Missing $Module JAR. Run start-alpha-team.ps1 -BuildOnly." }
-  $arguments = @('-Xms32m','-Xmx512m','-Djava.net.preferIPv4Stack=true','-Djava.net.useSystemProxies=true','-jar',('"'+$jar+'"'),"--server.port=$Port",'--server.address=127.0.0.1',"--moneybags.services.identity-url=http://127.0.0.1:$IdentityPort","--moneybags.services.reporting-url=http://127.0.0.1:$ReportingPort","--moneybags.services.payments-url=http://127.0.0.1:$PaymentsPort") + $ExtraArguments
+  $arguments = @('-Xms32m','-Xmx512m','-Djava.net.preferIPv4Stack=true','-Djava.net.useSystemProxies=true','-jar',('"'+$jar+'"'),"--server.port=$Port",'--server.address=127.0.0.1',"--moneybags.services.identity-url=http://127.0.0.1:$IdentityPort","--moneybags.services.reporting-url=http://127.0.0.1:$ReportingPort","--moneybags.services.payments-url=http://127.0.0.1:$PaymentsPort","--moneybags.services.loans-url=http://127.0.0.1:$LoanPort") + $ExtraArguments
   Start-ServiceProcess $Module $javaExecutable $arguments $taskRoot $Port
 }
 try {
@@ -147,7 +147,7 @@ try {
   $env:GATEWAY_PORT = "$GatewayPort"
   $env:BACKEND_URL = "http://127.0.0.1:$GatewayPort"
   $env:PORT = "$FrontendPort"
-  $bankingArguments = @('--spring.profiles.active=oracle-microservices','--spring.sql.init.mode=never')
+  $bankingArguments = @('--spring.profiles.active=oracle-microservices','--spring.sql.init.mode=never','--moneybags.demo-funding.enabled=true')
   $clientArguments = @('--spring.profiles.active=oracle-microservices','--spring.sql.init.mode=never')
   if ($CifKeyFile) {
     $cifArgument='"--moneybags.cif.key-file='+(Resolve-Path -LiteralPath $CifKeyFile).Path+'"'

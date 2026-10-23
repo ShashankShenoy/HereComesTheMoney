@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AssistantChatService {
     public record Reply(String conversationId,String answer,List<Map<String,Object>> pendingActions) {}
     private static final class Conversation {
-        final List<Map<String,String>> turns=new ArrayList<>();
+        final List<List<Object>> turns=new ArrayList<>();
         volatile Instant touched=Instant.now();
     }
     private final Map<String,Conversation> conversations=new ConcurrentHashMap<>();
@@ -55,7 +55,9 @@ public class AssistantChatService {
         String key=actor.userId()+":"+actor.sessionId()+":"+id;
         Conversation conversation=conversations.computeIfAbsent(key,unused->new Conversation());
         synchronized(conversation) {
-            List<Object> input=new ArrayList<>(conversation.turns);
+            List<Object> input=new ArrayList<>();
+            conversation.turns.forEach(input::addAll);
+            int historySize=input.size();
             input.add(Map.of("role","user","content",message.trim()));
             List<Map<String,Object>> pending=new ArrayList<>();
             String answer=null;
@@ -101,9 +103,14 @@ public class AssistantChatService {
                 case "kn-IN" -> "ವಿನಂತಿಯನ್ನು ಪೂರ್ಣಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಇನ್ನಷ್ಟು ಸ್ಪಷ್ಟವಾಗಿ ಕೇಳಿ.";
                 default -> "I couldn't complete that request. Please try a more specific request.";
             };
-            conversation.turns.add(Map.of("role","user","content",message.trim()));
-            conversation.turns.add(Map.of("role","assistant","content",answer));
-            while(conversation.turns.size()>8)conversation.turns.subList(0,2).clear();
+            // Retain tool calls and results together so follow-ups can resolve the
+            // beneficiary/account IDs the assistant already looked up this session.
+            // The final answer is stored once, including the bounded-loop fallback.
+            if(input.size()>historySize && input.get(input.size()-1) instanceof JsonNode item
+                    && "message".equals(item.path("type").asText()))input.remove(input.size()-1);
+            input.add(Map.of("role","assistant","content",answer));
+            conversation.turns.add(List.copyOf(input.subList(historySize,input.size())));
+            while(conversation.turns.size()>4)conversation.turns.remove(0);
             conversation.touched=Instant.now();
             return new Reply(id,answer,List.copyOf(pending));
         }

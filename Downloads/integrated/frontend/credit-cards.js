@@ -7,6 +7,7 @@ let products=[],cards=[],applications=[],selectedId='',renderApp,actorId;
 const can=permission=>getSession()?.user?.permissions?.includes(permission);
 const customer=()=>getSession()?.user?.userType==='CUSTOMER';
 const money=value=>esc(formatAmount(value,'INR'));
+const cardNumber=value=>typeof value==='string'&&/^\d{16}$/.test(value)?value.match(/.{4}/g).join(' '):'Unavailable';
 const button=(label,action,id='',primary=false)=>`<button type="button" class="btn ${primary?'primary':'small'}" data-cc-action="${esc(action)}" data-cc-id="${esc(id)}">${esc(label)}</button>`;
 const panel=(title,body,actions='')=>`<section class="panel"><div class="panel-heading"><h3>${esc(title)}</h3>${actions}</div><div class="panel-body">${body}</div></section>`;
 const productTerms=p=>`<p>${esc(p.DESCRIPTION)}</p><dl class="cc-terms"><div><dt>Credit limit range</dt><dd>${money(p.MINIMUM_LIMIT)} – ${money(p.MAXIMUM_LIMIT)}</dd></div><div><dt>Annual interest</dt><dd class="numeric-value">${esc(formatDecimal(p.ANNUAL_RATE_PCT))}%</dd></div><div><dt>Billing date</dt><dd>Day ${esc(p.BILLING_DAY)} every month</dd></div><div><dt>Payment due</dt><dd>${esc(p.PAYMENT_DUE_DAYS)} days after billing</dd></div><div><dt>Minimum payment</dt><dd>${esc(formatDecimal(p.MIN_PAYMENT_PCT))}% or ${money(p.MIN_PAYMENT_FLOOR)}, capped at the balance</dd></div></dl><div class="notice">${esc(p.INTEREST_POLICY)}</div>`;
@@ -21,14 +22,14 @@ export async function creditCardsScreen(render) {
     if(!cards.some(c=>c.CARD_ID===selectedId))selectedId=cards[0]?.CARD_ID||'';
     const current=cards.find(c=>c.CARD_ID===selectedId);
     const productRows=products.map(p=>[
-        `<strong>${esc(p.PRODUCT_NAME)}</strong><br><small>${esc(p.PRODUCT_CODE)} · Version ${esc(p.VERSION_NO)}</small>`,badge(p.STATUS),money(p.MINIMUM_LIMIT)+' – '+money(p.MAXIMUM_LIMIT),esc(formatDecimal(p.ANNUAL_RATE_PCT))+'%',
+        `<strong>${esc(p.PRODUCT_NAME)}</strong><br><small>${esc(p.PRODUCT_CODE)} · Version ${esc(p.VERSION_NO)}</small>`,customer()&&p.STATUS==='APPROVED'?'<span class="badge green">Available to apply</span>':badge(p.STATUS),money(p.MINIMUM_LIMIT)+' – '+money(p.MAXIMUM_LIMIT),esc(formatDecimal(p.ANNUAL_RATE_PCT))+'%',
         button('View terms','terms',p.PRODUCT_ID)+(p.STATUS==='APPROVED'&&can('CC_APPLY')?button('Apply','apply',p.PRODUCT_ID):'')+
         (p.STATUS==='PENDING'&&can('CC_PRODUCT_APPROVE')&&p.MAKER_ID!==actorId?button('Review','product-decision',p.PRODUCT_ID):'')+
         (p.STATUS==='APPROVED'&&can('CC_PRODUCT_MANAGE')?button('Retire','retire',p.PRODUCT_ID):'')]);
     const appRows=applications.map(a=>[
         esc(a.PRODUCT_NAME),customer()?money(a.REQUESTED_LIMIT):esc(a.CIF_ID),badge(a.STATUS),a.APPROVED_LIMIT?money(a.APPROVED_LIMIT):'—',
         a.STATUS==='PENDING'?(can('CC_APPROVE')&&a.MAKER_ID!==actorId?button('Review application','application-decision',a.APPLICATION_ID):'')+(can('CC_APPLY')?button('Cancel','cancel',a.APPLICATION_ID):''):'—']);
-    const chooser=cards.length?`<div class="cc-card-list">${cards.map(c=>`<button type="button" class="cc-card-choice ${c.CARD_ID===selectedId?'selected':''}" data-cc-action="select" data-cc-id="${esc(c.CARD_ID)}" aria-pressed="${c.CARD_ID===selectedId}"><span>${esc(c.PRODUCT_NAME)}</span><strong>SIM •••• ${esc(c.DISPLAY_ENDING)}</strong><span>${esc(c.STATUS)}${customer()?'':' · '+esc(c.CIF_ID)}</span></button>`).join('')}</div>`:'<div class="empty"><h3>No credit cards yet</h3><p>Choose an approved product below to apply.</p></div>';
+    const chooser=cards.length?`<div class="cc-card-list">${cards.map(c=>`<button type="button" class="cc-card-choice ${c.CARD_ID===selectedId?'selected':''}" data-cc-action="select" data-cc-id="${esc(c.CARD_ID)}" aria-pressed="${c.CARD_ID===selectedId}"><span>${esc(c.PRODUCT_NAME)}</span><strong>SIM •••• ${esc(c.DISPLAY_ENDING)}</strong><span>${esc(c.STATUS)}${customer()?'':' · '+esc(c.CIF_ID)}</span><span>Next statement due: ${esc(formatDate(c.NEXT_STATEMENT_DATE))}</span></button>`).join('')}</div>`:'<div class="empty"><h3>No credit cards yet</h3><p>Choose an available credit card product below to apply.</p></div>';
     let detail='';
     if(current){
         const c=current,id=c.CARD_ID;
@@ -44,7 +45,8 @@ export async function creditCardsScreen(render) {
         }
         if(can('CC_SPEND')&&c.STATUS==='ACTIVE'&&!c.BILLING_REQUIRED)actions.push(button('Simulate purchase','purchase',id,true));
         if(can('CC_REPAY')&&Number(c.PAYOFF_AMOUNT)>0&&c.STATUS!=='CLOSED'&&!c.BILLING_REQUIRED)actions.push(button('Repay','repay',id,true));
-        detail=panel('Card ending '+c.DISPLAY_ENDING,`<p>${badge(c.STATUS)} &nbsp; Next statement: ${esc(formatDate(c.NEXT_STATEMENT_DATE))} &nbsp; Expires: ${esc(formatDate(c.EXPIRY_DATE))}</p>${c.BILLING_REQUIRED?'<div class="notice">Billing is due. Generate each overdue statement in order before making a purchase, repayment or refund. The payoff shown is through the next statement cutoff.</div>':''}<div class="stats">${stats.map(([label,value])=>`<div class="stat"><div class="stat-title">${esc(label)}</div><div class="stat-value amount-value">${money(value)}</div></div>`).join('')}</div><div class="form-actions cc-actions">${actions.join('')}</div>`);
+        const cardDetails=`<dl class="cc-terms">${customer()?`<div><dt>Simulated card number</dt><dd class="cc-card-number" id="cc-card-number-value" aria-live="polite">•••• •••• •••• ${esc(c.DISPLAY_ENDING)}</dd><dd><button type="button" class="btn small" id="cc-card-number-toggle" data-cc-action="toggle-card-number" data-cc-id="${esc(id)}" aria-controls="cc-card-number-value" aria-expanded="false">Show card number</button></dd></div>`:''}<div><dt>Next statement due</dt><dd>${esc(formatDate(c.NEXT_STATEMENT_DATE))}</dd></div><div><dt>Expires</dt><dd>${esc(formatDate(c.EXPIRY_DATE))}</dd></div></dl>`;
+        detail=panel('Card ending '+c.DISPLAY_ENDING,`<p>${badge(c.STATUS)}</p>${cardDetails}${c.BILLING_REQUIRED?'<div class="notice">Billing is due. Generate each overdue statement in order before making a purchase, repayment or refund. The payoff shown is through the next statement cutoff.</div>':''}<div class="stats">${stats.map(([label,value])=>`<div class="stat"><div class="stat-title">${esc(label)}</div><div class="stat-value amount-value">${money(value)}</div></div>`).join('')}</div><div class="form-actions cc-actions">${actions.join('')}</div>`);
     }
     return `<div class="notice">Local card simulation · Purchases post immediately to the bank's simulated merchant settlement account. Card references and displayed digits are synthetic.</div>`+
         panel(customer()?'Your credit cards':'Credit card accounts',chooser,button('Refresh','refresh'))+detail+
@@ -74,6 +76,18 @@ function reviewApplication(a){
 
 async function act(action,id){
     const p=products.find(p=>p.PRODUCT_ID===id),c=cards.find(c=>c.CARD_ID===id),a=applications.find(a=>a.APPLICATION_ID===id);
+    if(action==='toggle-card-number'){
+        if(!customer()||!c||id!==selectedId)return;
+        const toggle=document.getElementById('cc-card-number-toggle'),value=document.getElementById('cc-card-number-value');
+        if(!toggle||!value)return;
+        const reveal=toggle.getAttribute('aria-expanded')!=='true';
+        const number=cardNumber(c.CARD_NUMBER);
+        if(reveal&&number==='Unavailable')return toast('Card number is currently unavailable. Please try again later.',true);
+        value.textContent=reveal?number:'•••• •••• •••• '+c.DISPLAY_ENDING;
+        toggle.textContent=reveal?'Hide card number':'Show card number';
+        toggle.setAttribute('aria-expanded',String(reveal));
+        return;
+    }
     if(action==='refresh')return renderApp();
     if(action==='select'){selectedId=id;return renderApp();}
     if(action==='terms')return dialog(p.PRODUCT_NAME,productTerms(p));

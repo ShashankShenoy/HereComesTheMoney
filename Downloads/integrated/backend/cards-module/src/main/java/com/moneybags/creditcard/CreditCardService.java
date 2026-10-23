@@ -363,6 +363,10 @@ public class CreditCardService {
 
     private Map<String,Object> cardView(Map<String,Object> c) {
         var result=new LinkedHashMap<>(c);var p=product(str(c,"PRODUCT_ID"),false);
+        if(customer()) {
+            result.remove("CARD_REFERENCE");
+            result.put("CARD_NUMBER",SimulatedCardNumber.forCard(str(c,"CARD_ID"),str(c,"DISPLAY_ENDING")));
+        }
         for(String key:List.of("ISSUED_DATE","EXPIRY_DATE","NEXT_STATEMENT_DATE","LAST_ACCRUAL_DATE"))result.put(key,localDate(c.get(key)));
         LocalDate asOf=today().isBefore(localDate(c.get("NEXT_STATEMENT_DATE")))?today():localDate(c.get("NEXT_STATEMENT_DATE"));
         LocalDate accrualFrom=localDate(c.get("LAST_ACCRUAL_DATE"));

@@ -25,7 +25,8 @@ import java.util.UUID;
 public class AssistantTools {
     private static final Set<String> CHECKER_READ_TOOLS=Set.of(
         "list_scoped_accounts","get_account_position","list_recent_transactions",
-        "search_customers","list_pending_beneficiaries");
+        "search_customers","list_pending_beneficiaries","list_loan_facilities","get_loan_details","get_loan_schedule",
+        "list_credit_cards","get_credit_card","list_credit_card_transactions","list_credit_card_statements");
     public record Definition(String name,String description,Map<String,Object> inputSchema,String audience,String permission) {
         public Map<String,Object> mcp() { return Map.of("name",name,"description",description,"inputSchema",inputSchema); }
         public Map<String,Object> model() { return Map.of("type","function","name",name,"description",description,"parameters",inputSchema,"strict",true); }
@@ -36,8 +37,8 @@ public class AssistantTools {
         def("list_my_recent_transactions","Show up to 20 recent transactions across the signed-in customer's linked accounts.","CUSTOMER","TXN_READ"),
         def("list_my_last_transactions","Show the last requested number of transactions across the signed-in customer's linked accounts (1 to 100).","CUSTOMER","TXN_READ",property("limit","integer")),
         def("list_scoped_accounts","List accounts within the signed-in bank officer's authorized scope.","EMPLOYEE","ACCOUNT_READ"),
-        def("get_account_position","Read a permitted account's authoritative balance. Customer self-service uses the signed-in identity; officers need the account-holder access key.","BOTH","TXN_READ",property("accountId","integer")),
-        def("list_recent_transactions","Read 1 to 100 transactions for an accessible account. Customer self-service uses the signed-in identity; officers need the account-holder access key.","BOTH","TXN_READ",property("accountId","integer"),property("limit","integer")),
+        def("get_account_position","Read a permitted account's authoritative balance. Customers use the signed-in identity. Officers need the account-holder access key unless they have a current unrestricted global BANK_ADMIN assignment.","BOTH","TXN_READ",property("accountId","integer")),
+        def("list_recent_transactions","Read 1 to 100 transactions for an accessible account. Customers use their signed-in identity. Officers need the account-holder access key unless they have a current unrestricted BANK_ADMIN assignment.","BOTH","TXN_READ",property("accountId","integer"),property("limit","integer")),
         def("list_my_beneficiaries","List the signed-in customer's payment beneficiaries, including INTERNAL or EXTERNAL transfer type and masked internal account ending.","CUSTOMER","PAYMENT_CREATE"),
         def("open_add_beneficiary_form","Open the secure in-app form to register a new payment beneficiary. Use the recipient name the customer gave. The customer enters the account token and bank IFSC in the form, not in chat. Registration remains pending independent verification.","CUSTOMER","PAYMENT_CREATE",property("displayName","string")),
         def("draft_payment","Prepare a simulated outbound rail payment to an EXTERNAL beneficiary for exact confirmation. This does not credit a Moneybags account; use draft_internal_transfer for an INTERNAL beneficiary.","CUSTOMER","PAYMENT_CREATE",property("accountId","integer"),property("beneficiaryId","string"),property("rail","string"),property("amount","string")),
@@ -61,18 +62,19 @@ public class AssistantTools {
     private final CifService cif;
     private final AssistantIntentService intents;
     private final AssistantCustomerTools customerTools;
+    private final AssistantProductTools productTools;
     public AssistantTools(BankingController banking,BankingOperationsController operations,BankingAccess access,
             CustomerHashService hashes,LedgerService ledger,CifService cif,AssistantIntentService intents,
-            AssistantCustomerTools customerTools) {
+            AssistantCustomerTools customerTools,AssistantProductTools productTools) {
         this.banking=banking;this.operations=operations;this.access=access;this.hashes=hashes;
-        this.ledger=ledger;this.cif=cif;this.intents=intents;this.customerTools=customerTools;
+        this.ledger=ledger;this.cif=cif;this.intents=intents;this.customerTools=customerTools;this.productTools=productTools;
     }
 
     public List<Definition> available() {
         var user=CurrentActor.get();
         if(!"CUSTOMER".equals(user.userType()) && !"EMPLOYEE".equals(user.userType()))return List.of();
         boolean checker=user.roles().contains("BANK_CHECKER")&&!user.roles().contains("BANK_ADMIN");
-        return DEFINITIONS.stream().filter(d->("BOTH".equals(d.audience()) || d.audience().equals(user.userType()))
+        return java.util.stream.Stream.concat(DEFINITIONS.stream(),AssistantProductTools.DEFINITIONS.stream()).filter(d->("BOTH".equals(d.audience()) || d.audience().equals(user.userType()))
                 && user.permissions().contains(d.permission())
                 && (!checker || CHECKER_READ_TOOLS.contains(d.name()))).toList();
     }
@@ -99,12 +101,20 @@ public class AssistantTools {
             case "get_my_statement" -> customerTools.statement(text(args,"statementId",36));
             case "generate_my_statement" -> customerTools.generateStatement(id(args,"accountId"),date(args,"periodStart"),date(args,"periodEnd"),text(args,"format",8));
             case "search_customers" -> customers(text(args,"query",120));
-            case "list_pending_beneficiaries" -> operations.pending();
+            case "list_pending_beneficiaries" -> operations.pending().stream().map(row->{
+                var view=new LinkedHashMap<String,Object>(row);
+                String token=String.valueOf(view.remove("ACCOUNT_TOKEN"));
+                view.put("ACCOUNT_ENDING",token.substring(Math.max(0,token.length()-4)));
+                return view;
+            }).toList();
             case "draft_beneficiary_verification" -> intents.draftBeneficiaryVerification(text(args,"beneficiaryId",36));
-            default -> throw new BusinessException(HttpStatus.BAD_REQUEST,"UNKNOWN_TOOL","Unknown tool");
+            default -> productTools.invoke(name,args);
         }; }
         catch(com.moneybags.statements.ApiException e) {
             throw new BusinessException(e.status,e.code,e.getMessage());
+        }
+        catch(com.moneybags.txn.api.ApiException e) {
+            throw new BusinessException(e.status(),e.code(),e.getMessage());
         }
     }
     private List<Map<String,Object>> accounts() {
@@ -144,7 +154,7 @@ public class AssistantTools {
     }
     private Object transactions(long accountId,int limit,String hash) {
         access.account("TXN_READ",accountId);
-        hashes.require(accountId,hash);
+        if(!access.bankAdminTransactionRead())hashes.require(accountId,hash);
         return banking.transactions(accountId,null,hash).stream().limit(limit).toList();
     }
     private Object customers(String query) {
@@ -169,11 +179,11 @@ public class AssistantTools {
         args.fieldNames().forEachRemaining(key->{if(!fields.containsKey(key))invalid("Unexpected tool argument");});
         for(String key:fields.keySet())if(!args.hasNonNull(key))invalid("Missing tool argument: "+key);
     }
-    private static long id(JsonNode args,String key) {
+    static long id(JsonNode args,String key) {
         JsonNode value=args.get(key);if(!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue()<=0)invalid("Invalid "+key);
         return value.longValue();
     }
-    private static int limit(JsonNode args) {
+    static int limit(JsonNode args) {
         JsonNode value=args.get("limit");if(!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue()<1 || value.intValue()>100)invalid("Limit must be 1 to 100");
         return value.intValue();
     }
@@ -182,7 +192,7 @@ public class AssistantTools {
         try { if(!value.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}"))throw new IllegalArgumentException();return LocalDate.parse(value); }
         catch(java.time.DateTimeException | IllegalArgumentException e) { invalid("Invalid "+key+"; use YYYY-MM-DD");return null; }
     }
-    private static String text(JsonNode args,String key,int max) {
+    static String text(JsonNode args,String key,int max) {
         JsonNode value=args.get(key);if(!value.isTextual() || value.asText().isBlank() || value.asText().length()>max)invalid("Invalid "+key);
         return value.asText().trim();
     }
@@ -192,10 +202,25 @@ public class AssistantTools {
         return new BigDecimal(value);
     }
     private static void invalid(String message) { throw new BusinessException(HttpStatus.BAD_REQUEST,"INVALID_TOOL_ARGUMENT",message); }
-    private static Map<String,Object> property(String name,String type) { return Map.of("name",name,"type",type); }
-    @SafeVarargs private static Definition def(String name,String description,String audience,String permission,Map<String,Object>... properties) {
+    static Map<String,Object> property(String name,String type) { return Map.of("name",name,"type",type); }
+    @SafeVarargs static Definition def(String name,String description,String audience,String permission,Map<String,Object>... properties) {
         Map<String,Object> fields=new LinkedHashMap<>();List<String> required=new ArrayList<>();
-        for(var p:properties) {String key=(String)p.get("name");required.add(key);fields.put(key,Map.of("type",p.get("type")));}
+        for(var p:properties) {
+            String key=(String)p.get("name");required.add(key);
+            var field=new LinkedHashMap<String,Object>();field.put("type",p.get("type"));
+            switch(key) {
+                case "limit" -> {field.put("minimum",1);field.put("maximum",100);}
+                case "accountId","paymentId","applicationId","facilityId","depositId" -> field.put("minimum",1);
+                case "rail" -> field.put("enum",List.of("UPI","IMPS","NEFT","RTGS"));
+                case "format" -> field.put("enum",List.of("PDF","CSV","HTML"));
+                case "amount" -> field.put("pattern","[0-9]{1,16}(\\.[0-9]{1,2})?");
+                case "periodStart","periodEnd" -> field.put("pattern","[0-9]{4}-[0-9]{2}-[0-9]{2}");
+                case "displayName" -> {field.put("minLength",1);field.put("maxLength",100);}
+                case "query" -> {field.put("minLength",1);field.put("maxLength",120);}
+                default -> {field.put("minLength",1);field.put("maxLength",36);}
+            }
+            fields.put(key,field);
+        }
         return new Definition(name,description,Map.of("type","object","properties",fields,"required",required,"additionalProperties",false),audience,permission);
     }
 }
